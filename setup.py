@@ -9,8 +9,6 @@ from setuptools import find_packages, setup
 
 import morango
 
-with open('README.rst') as readme_file:
-    readme = readme_file.read()
 
 req_file = os.path.join(os.path.dirname(os.path.realpath(__file__)), "requirements.txt")
 reqs = parse_requirements(req_file, session=False)
