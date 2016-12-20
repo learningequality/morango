@@ -32,9 +32,42 @@ class SyncableModel(UUIDModelMixin):
 
     class Meta:
         abstract = True
+
+    def save(self, set_dirty_bit=True, *args, **kwargs):
+
+        if set_dirty_bit:
+            self._dirty_bit = True
+        super(SyncableModel, self).save(*args, **kwargs)
+
+    def serialize(self, fields=None, exclude=None, *args, **kwargs):
         """Should return a Python dict """
-        raise NotImplemented("You must define a 'serialize' method on models that inherit from SyncableModel.")
-    
+        # NOTE: code adapted from https://github.com/django/django/blob/master/django/forms/models.py#L75
+        opts = self._meta
+        data = {}
+        for f in opts.concrete_fields:
+            if not getattr(f, 'editable', False):
+                continue
+            if fields and f.name not in fields:
+                continue
+            if exclude and f.name in exclude:
+                continue
+            data[f.attname] = f.value_from_object(self)
+        data['model'] = self._morango_model_name
+        return data
+
+    @classmethod
+    def deserialize(cls, json_model):
+        kwargs = {}
+        dict_model = json.loads(json_model)
+        for f in cls._meta.concrete_fields:
+            if f.attname in dict_model:
+                kwargs[f.attname] = dict_model[f.attname]
+        return cls(**kwargs).save()
+
+    @classmethod
+    def merge_conflict(cls, current, incoming):
+        return incoming
+
     def get_shard_indices(self, *args, **kwargs):
         """Should return a dictionary with any relevant shard index keys included, along with their values."""
         raise NotImplemented("You must define a 'get_shard_indices' method on models that inherit from SyncableModel.")
