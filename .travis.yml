@@ -30,7 +30,7 @@ before_install:
 script:
   - tox -e $TOX_ENV
 
-after_sucess:
+after_success:
   - codecov
 
 notifications:
