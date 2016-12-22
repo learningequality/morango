@@ -104,15 +104,16 @@ class UUIDModelMixin(models.Model):
         super(UUIDModelMixin, self).save(*args, **kwargs)
 
 
-class DatabaseIDModel(models.Model):
+class DatabaseIDModel(UUIDModelMixin):
     """
     Model to be used for tracking database ids.
     """
 
-    id = UUIDField(default=uuid.uuid4().hex)
+    uuid_input_fields = "RANDOM"
+
     current = models.BooleanField(default=True)
     date_generated = models.DateTimeField(default=timezone.now)
-    initial_instance_id = UUIDField(blank=True)
+    initial_instance_id = models.CharField(max_length=32, blank=True)
 
 
 class InstanceIDModel(UUIDModelMixin):
@@ -123,7 +124,7 @@ class InstanceIDModel(UUIDModelMixin):
     hostname = models.TextField()
     sysversion = models.TextField()
     macaddress = models.CharField(max_length=20, blank=True)
-    database_id = models.ForeignKey(DatabaseIDModel)
+    database = models.ForeignKey(DatabaseIDModel)
     counter = models.IntegerField(default=0)
     current = models.BooleanField(default=True)
 
@@ -136,6 +137,7 @@ class InstanceIDModel(UUIDModelMixin):
             "platform": platform.platform(),
             "hostname": platform.node(),
             "sysversion": sys.version,
+            "database": DatabaseIDModel.objects.get(current=True),
         }
 
         # try to get the MAC address, but exclude it if it was a fake (random) address
