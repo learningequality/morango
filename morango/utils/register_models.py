@@ -9,13 +9,14 @@ from django.apps import apps
 from django.db import models
 from django.utils import six
 from morango.models import AbstractStoreModel, AbstractDatabaseMaxCounter, SyncableModel
+from morango.utils.uuids import UUIDField
 
 from .controller import _profiles
 
 Profile = namedtuple('Profile', 'partitions buffer store database_max_counter')
 
 
-def register_morango_profile(profile="", partitions=(), module=""):
+def register_morango_profile(profile, partitions, module):
     """
     Creates the morango data structures: ``DatabaseMaxCounter``, ``DataTransferBuffer``, ``StoreModel``, and
     ``BaseSyncableModel`` on a per-profile/app basis. The data structures become associated with the app
@@ -63,6 +64,8 @@ def register_morango_profile(profile="", partitions=(), module=""):
         until they are sent to another morango instance.
         """
 
+        transfer_session_id = UUIDField()
+
         class Meta:
             app_label = label
 
@@ -80,7 +83,6 @@ def register_morango_profile(profile="", partitions=(), module=""):
         """
 
         _morango_profile = profile
-        _morango_partitions = partitions
         _fields_not_to_serialize = ()
 
         class Meta:

@@ -1,8 +1,7 @@
-import json
-
 from django.db import models
 from django.db.models import Max, Q
 from django.utils import six
+from django.utils.encoding import python_2_unicode_compatible
 
 from .utils.uuids import UUIDModelMixin, UUIDField
 
@@ -12,12 +11,12 @@ from .utils.uuids import UUIDModelMixin, UUIDField
 ###################################################################################################
 class SyncableModelQuerySet(models.query.QuerySet):
 
-    def update(self, dirty_bit_signal=True, **kwargs):
-        if dirty_bit_signal is None:
+    def update(self, update_dirty_bit_to=True, **kwargs):
+        if update_dirty_bit_to is None:
             pass  # don't do anything with the dirty bit
-        elif dirty_bit_signal:
+        elif update_dirty_bit_to:
             kwargs.update({'_dirty_bit': True})
-        elif not dirty_bit_signal:
+        elif not update_dirty_bit_to:
             kwargs.update({'_dirty_bit': False})
         super(SyncableModelQuerySet, self).update(**kwargs)
 
@@ -42,12 +41,12 @@ class SyncableModel(UUIDModelMixin):
     class Meta:
         abstract = True
 
-    def save(self, dirty_bit_signal=True, *args, **kwargs):
-        if dirty_bit_signal is None:
+    def save(self, update_dirty_bit_to=True, *args, **kwargs):
+        if update_dirty_bit_to is None:
             pass  # don't do anything with the dirty bit
-        elif dirty_bit_signal:
+        elif update_dirty_bit_to:
             self._dirty_bit = True
-        elif not dirty_bit_signal:
+        elif not update_dirty_bit_to:
             self._dirty_bit = False
         super(SyncableModel, self).save(*args, **kwargs)
 
@@ -76,7 +75,7 @@ class SyncableModel(UUIDModelMixin):
         return incoming
 
     def get_partition_names(self, *args, **kwargs):
-        """Should return a dictionary with any relevant shard index keys included, along with their values."""
+        """Should return a dictionary with any relevant partition keys included, along with their values."""
         raise NotImplemented("You must define a 'get_partition_names' method on models that inherit from SyncableModel.")
 
 
@@ -102,27 +101,27 @@ class AbstractStoreModel(models.Model):
         abstract = True
 
 
+@python_2_unicode_compatible
 class AbstractDatabaseMaxCounter(models.Model):
 
-    instance_id = models.UUIDField()
+    instance_id = UUIDField()
     max_counter = models.IntegerField()
-    transfer_session_id = UUIDField()
-    kind = models.BooleanField()
 
     class Meta:
         abstract = True
 
     @classmethod
-    def filter_max_counters(cls, query):
-        query = json.loads(query)
-        filters = []
-        for key, value in six.iteritems(query):
-            filters.append(Q(**{key: value}) | Q(**{key: "*"}))
+    def get_max_counters_for_filter(cls, filter):
+        queries = []
+        for key, value in six.iteritems(filter):
+            queries.append(Q(**{key: value}) | Q(**{key: "*"}))
 
-            query = reduce(lambda x, y: x & y, filters)
-            rows = cls.objects.filter(query)
-            return rows.values('instance_id').annotate(max_counter=Max('max_counter'))
+        filter = reduce(lambda x, y: x & y, queries)
+        rows = cls.objects.filter(filter)
+        return rows.values('instance_id').annotate(max_counter=Max('max_counter'))
 
+    def __str__(self):
+        return '"{}"@"{}"'.format(self.instance_id, self.max_counter)
 
 ###################################################################################################
 # CERTIFICATES: Data to manage authorization and the chain-of-trust certificate system

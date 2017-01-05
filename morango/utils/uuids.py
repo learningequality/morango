@@ -3,7 +3,7 @@ import platform
 import sys
 import uuid
 
-from django.db import models
+from django.db import models, transaction
 from django.conf import settings
 from django.utils import timezone
 
@@ -110,9 +110,12 @@ class DatabaseManager(models.Manager):
 
     def create(self, **kwargs):
 
-        # set current flag to false for all database_id models
-        DatabaseIDModel.objects.update(current=False)
-        super(DatabaseManager, self).create(**kwargs)
+        # do within transaction so we always have a current database ID
+        with transaction.atomic():
+            # set current flag to false for all database_id models
+            DatabaseIDModel.objects.update(current=False)
+
+            return super(DatabaseManager, self).create(**kwargs)
 
 
 class DatabaseIDModel(UUIDModelMixin):
@@ -130,10 +133,13 @@ class DatabaseIDModel(UUIDModelMixin):
 
     def save(self, *args, **kwargs):
 
-        if not self.id:
-            DatabaseIDModel.objects.update(current=False)
+        # do within transaction so we always have a current database ID
+        with transaction.atomic():
+            # set current flag to false for all database_id models
+            if not self.id and self.current:
+                DatabaseIDModel.objects.update(current=False)
 
-        super(DatabaseIDModel, self).save(*args, **kwargs)
+            super(DatabaseIDModel, self).save(*args, **kwargs)
 
 
 class InstanceIDModel(UUIDModelMixin):
@@ -147,7 +153,7 @@ class InstanceIDModel(UUIDModelMixin):
     database = models.ForeignKey(DatabaseIDModel)
     counter = models.IntegerField(default=0)
     current = models.BooleanField(default=True)
-    db_path = models.CharField(max_length=100)
+    db_path = models.CharField(max_length=1000)
 
     @staticmethod
     def get_or_create_current_instance():

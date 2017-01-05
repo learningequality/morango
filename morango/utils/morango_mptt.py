@@ -11,11 +11,9 @@ class MorangoMPTTTreeManager(managers.TreeManager):
     def get_queryset(self):
         return MorangoTreeQuerySet(self.model, using=self._db)
 
-    @managers.delegate_manager
     def _mptt_update(self, qs=None, **items):
-        if qs is None:
-            qs = self
-        return qs.update(dirty_bit_signal=None, **self._translate_lookups(**items))
+        items['update_dirty_bit_to'] = None
+        return super(MorangoMPTTTreeManager, self)._mptt_update(qs, **items)
 
 
 class MorangoMPTTModel(models.MPTTModel):
