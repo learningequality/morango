@@ -1,7 +1,1 @@
-pip==8.1.2
-bumpversion==0.5.3
-wheel==0.29.0
-watchdog==0.8.3
-django==1.9.7
-six
-django-mptt==0.8.6
+django>=1.9.7

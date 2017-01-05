@@ -1,8 +1,10 @@
+import os
 import platform
 import sys
 import uuid
 
 from django.db import models
+from django.conf import settings
 from django.utils import timezone
 
 from . import NAMESPACE_MORANGO
@@ -104,6 +106,15 @@ class UUIDModelMixin(models.Model):
         super(UUIDModelMixin, self).save(*args, **kwargs)
 
 
+class DatabaseManager(models.Manager):
+
+    def create(self, **kwargs):
+
+        # set current flag to false for all database_id models
+        DatabaseIDModel.objects.update(current=False)
+        super(DatabaseManager, self).create(**kwargs)
+
+
 class DatabaseIDModel(UUIDModelMixin):
     """
     Model to be used for tracking database ids.
@@ -111,14 +122,23 @@ class DatabaseIDModel(UUIDModelMixin):
 
     uuid_input_fields = "RANDOM"
 
+    objects = DatabaseManager()
+
     current = models.BooleanField(default=True)
     date_generated = models.DateTimeField(default=timezone.now)
     initial_instance_id = models.CharField(max_length=32, blank=True)
 
+    def save(self, *args, **kwargs):
+
+        if not self.id:
+            DatabaseIDModel.objects.update(current=False)
+
+        super(DatabaseIDModel, self).save(*args, **kwargs)
+
 
 class InstanceIDModel(UUIDModelMixin):
 
-    uuid_input_fields = ("platform", "hostname", "sysversion", "macaddress")
+    uuid_input_fields = ("platform", "hostname", "sysversion", "macaddress", "database_id", "db_path")
 
     platform = models.TextField()
     hostname = models.TextField()
@@ -127,6 +147,7 @@ class InstanceIDModel(UUIDModelMixin):
     database = models.ForeignKey(DatabaseIDModel)
     counter = models.IntegerField(default=0)
     current = models.BooleanField(default=True)
+    db_path = models.CharField(max_length=100)
 
     @staticmethod
     def get_or_create_current_instance():
@@ -138,6 +159,7 @@ class InstanceIDModel(UUIDModelMixin):
             "hostname": platform.node(),
             "sysversion": sys.version,
             "database": DatabaseIDModel.objects.get(current=True),
+            "db_path": os.path.abspath(settings.DATABASES['default']['NAME']),
         }
 
         # try to get the MAC address, but exclude it if it was a fake (random) address

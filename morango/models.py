@@ -1,6 +1,8 @@
 import json
 
 from django.db import models
+from django.db.models import Max, Q
+from django.utils import six
 
 from .utils.uuids import UUIDModelMixin, UUIDField
 
@@ -10,10 +12,20 @@ from .utils.uuids import UUIDModelMixin, UUIDField
 ###################################################################################################
 class SyncableModelQuerySet(models.query.QuerySet):
 
-    def update(self, **kwargs):
-        kwargs.update({'_dirty_bit': True})
+    def update(self, dirty_bit_signal=True, **kwargs):
+        if dirty_bit_signal is None:
+            pass  # don't do anything with the dirty bit
+        elif dirty_bit_signal:
+            kwargs.update({'_dirty_bit': True})
+        elif not dirty_bit_signal:
+            kwargs.update({'_dirty_bit': False})
         super(SyncableModelQuerySet, self).update(**kwargs)
-    update.queryset_only = True  # Unsure whether django will not place this on manager class by default
+
+
+class SyncableModelManager(models.Manager):
+
+    def get_queryset(self):
+        return SyncableModelQuerySet(self.model, using=self._db)
 
 
 class SyncableModel(UUIDModelMixin):
@@ -21,67 +33,51 @@ class SyncableModel(UUIDModelMixin):
     Base model class for syncing. Other models inherit from this class if they want to make
     their data syncable across devices.
     """
-    _morango_partitions = {}
 
     # morango specific field used for tracking model changes
     _dirty_bit = models.BooleanField(default=True)
 
-    objects = SyncableModelQuerySet.as_manager()
-    # special reference to syncable manager in case 'objects' is overridden in subclasses
-    syncable_objects = SyncableModelQuerySet.as_manager()
+    objects = SyncableModelManager()
 
     class Meta:
         abstract = True
 
-    def save(self, set_dirty_bit=True, *args, **kwargs):
-
-        if set_dirty_bit:
+    def save(self, dirty_bit_signal=True, *args, **kwargs):
+        if dirty_bit_signal is None:
+            pass  # don't do anything with the dirty bit
+        elif dirty_bit_signal:
             self._dirty_bit = True
+        elif not dirty_bit_signal:
+            self._dirty_bit = False
         super(SyncableModel, self).save(*args, **kwargs)
 
-    def serialize(self, fields=None, exclude=None, *args, **kwargs):
+    def serialize(self):
         """Should return a Python dict """
         # NOTE: code adapted from https://github.com/django/django/blob/master/django/forms/models.py#L75
         opts = self._meta
         data = {}
+
         for f in opts.concrete_fields:
-            if not getattr(f, 'editable', False):
-                continue
-            if fields and f.name not in fields:
-                continue
-            if exclude and f.name in exclude:
+            if f.attname in self._fields_not_to_serialize:
                 continue
             data[f.attname] = f.value_from_object(self)
-        data['model'] = self._morango_model_name
         return data
 
     @classmethod
-    def deserialize(cls, json_model):
+    def deserialize(cls, dict_model):
         kwargs = {}
-        dict_model = json.loads(json_model)
         for f in cls._meta.concrete_fields:
             if f.attname in dict_model:
                 kwargs[f.attname] = dict_model[f.attname]
-        return cls(**kwargs).save()
+        return cls(**kwargs)
 
     @classmethod
     def merge_conflict(cls, current, incoming):
         return incoming
 
-    def get_shard_indices(self, *args, **kwargs):
+    def get_partition_names(self, *args, **kwargs):
         """Should return a dictionary with any relevant shard index keys included, along with their values."""
-        raise NotImplemented("You must define a 'get_shard_indices' method on models that inherit from SyncableModel.")
-
-
-class DatabaseMaxCounter(models.Model):
-    """
-    `DatabaseMaxCounter` is used to keep track of what data an instance already has
-    from other instances for a particular filter.
-    """
-
-    instance_id = models.UUIDField()
-    max_counter = models.IntegerField()
-    filter = models.TextField()
+        raise NotImplemented("You must define a 'get_partition_names' method on models that inherit from SyncableModel.")
 
 
 class AbstractStoreModel(models.Model):
@@ -100,9 +96,32 @@ class AbstractStoreModel(models.Model):
     last_saved_instance = models.UUIDField()
     last_saved_counter = models.IntegerField()
     last_saved_counter_per_instance = models.TextField(default="{}")  # RMC
+    model_name = models.CharField(max_length=40)
 
     class Meta:
         abstract = True
+
+
+class AbstractDatabaseMaxCounter(models.Model):
+
+    instance_id = models.UUIDField()
+    max_counter = models.IntegerField()
+    transfer_session_id = UUIDField()
+    kind = models.BooleanField()
+
+    class Meta:
+        abstract = True
+
+    @classmethod
+    def filter_max_counters(cls, query):
+        query = json.loads(query)
+        filters = []
+        for key, value in six.iteritems(query):
+            filters.append(Q(**{key: value}) | Q(**{key: "*"}))
+
+            query = reduce(lambda x, y: x & y, filters)
+            rows = cls.objects.filter(query)
+            return rows.values('instance_id').annotate(max_counter=Max('max_counter'))
 
 
 ###################################################################################################
