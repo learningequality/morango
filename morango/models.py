@@ -1,76 +1,127 @@
 from django.db import models
+from django.db.models import Max, Q
+from django.utils import six
+from django.utils.encoding import python_2_unicode_compatible
 
-from .utils.uuids import UUIDModelMixin
-from .settings import INDEX_FIELDS
-
-
-###################################################################################################
-# METADATA: Additional data to keep track of the state of the system (sessions, counters, etc)
-###################################################################################################
-
+from .utils.uuids import UUIDModelMixin, UUIDField
 
 
 ###################################################################################################
 # APP MODELS: Abstract models from which app models should inherit in order to make them syncable
 ###################################################################################################
+class SyncableModelQuerySet(models.query.QuerySet):
+
+    def update(self, update_dirty_bit_to=True, **kwargs):
+        if update_dirty_bit_to is None:
+            pass  # don't do anything with the dirty bit
+        elif update_dirty_bit_to:
+            kwargs.update({'_dirty_bit': True})
+        elif not update_dirty_bit_to:
+            kwargs.update({'_dirty_bit': False})
+        super(SyncableModelQuerySet, self).update(**kwargs)
 
 
-class SyncableModel(models.Model):
-    
-    def serialize(self, *args, **kwargs):
-        """Should return a Python dict """
-        raise NotImplemented("You must define a 'serialize' method on models that inherit from SyncableModel.")
-    
-    def get_shard_indices(self, *args, **kwargs):
-        """Should return a dictionary with any relevant shard index keys included, along with their values."""
-        raise NotImplemented("You must define a 'get_shard_indices' method on models that inherit from SyncableModel.")
-    
+class SyncableModelManager(models.Manager):
+
+    def get_queryset(self):
+        return SyncableModelQuerySet(self.model, using=self._db)
+
+
+class SyncableModel(UUIDModelMixin):
+    """
+    Base model class for syncing. Other models inherit from this class if they want to make
+    their data syncable across devices.
+    """
+
+    # morango specific field used for tracking model changes
+    _dirty_bit = models.BooleanField(default=True)
+
+    objects = SyncableModelManager()
+
     class Meta:
         abstract = True
-        
-        
 
-###################################################################################################
-# STORE: Where serialized data is persisted, along with metadata about counters and history
-###################################################################################################
+    def save(self, update_dirty_bit_to=True, *args, **kwargs):
+        if update_dirty_bit_to is None:
+            pass  # don't do anything with the dirty bit
+        elif update_dirty_bit_to:
+            self._dirty_bit = True
+        elif not update_dirty_bit_to:
+            self._dirty_bit = False
+        super(SyncableModel, self).save(*args, **kwargs)
 
-class MorangoIndexedModelMeta(models.base.ModelBase):
-    """Metaclass for adding Morango "shard" index fields and associated indices."""
-    
-    def __new__(mcls, name, bases, namespace):
-        
-        # For each of the index fields, add a char (UUID) field to the serialized model
-        for field in INDEX_FIELDS:
-            namespace[field] = models.CharField(max_length=32, blank=True)
+    def serialize(self):
+        """Should return a Python dict """
+        # NOTE: code adapted from https://github.com/django/django/blob/master/django/forms/models.py#L75
+        opts = self._meta
+        data = {}
 
-        # Create the model class itself
-        cls = super(MorangoIndexedModelMeta, mcls).__new__(mcls, name, bases, namespace)
-        
-        # Add a joint index on the index fields to facilitate querying
-        # TODO(jamalex): performance checks to see whether this is the best indexing approach
-        cls._meta.index_together.append(INDEX_FIELDS)
-        
-        return cls
+        for f in opts.concrete_fields:
+            if f.attname in self._fields_not_to_serialize:
+                continue
+            data[f.attname] = f.value_from_object(self)
+        return data
 
-class SerializedModel(models.Model, UUIDModelMixin):
+    @classmethod
+    def deserialize(cls, dict_model):
+        kwargs = {}
+        for f in cls._meta.concrete_fields:
+            if f.attname in dict_model:
+                kwargs[f.attname] = dict_model[f.attname]
+        return cls(**kwargs)
 
-    __metaclass__ = MorangoIndexedModelMeta
+    @classmethod
+    def merge_conflict(cls, current, incoming):
+        return incoming
 
+    def get_partition_names(self, *args, **kwargs):
+        """Should return a dictionary with any relevant partition keys included, along with their values."""
+        raise NotImplemented("You must define a 'get_partition_names' method on models that inherit from SyncableModel.")
+
+
+class AbstractStoreModel(models.Model):
+    """
+    Base model for storing serialized data.
+
+    This model is an abstract model, and is inherited by ``StoreModel`` and
+    ``DataTransferBuffer``.
+    """
+
+    id = UUIDField(max_length=32, primary_key=True)
     serialized = models.TextField(blank=True)
     deleted = models.BooleanField(default=False)
     version = models.CharField(max_length=40)
     history = models.TextField(blank=True)
+    last_saved_instance = models.UUIDField()
+    last_saved_counter = models.IntegerField()
+    last_saved_counter_per_instance = models.TextField(default="{}")  # RMC
+    model_name = models.CharField(max_length=40)
+
+    class Meta:
+        abstract = True
 
 
-###################################################################################################
-# BUFFERS: Where records are copied in preparation for transfer, and stored when first received
-###################################################################################################
+@python_2_unicode_compatible
+class AbstractDatabaseMaxCounter(models.Model):
 
-# *all fields from store model, plus:
-# transfer_session_id
-# seq_num
-# (and an auto-pk)
+    instance_id = UUIDField()
+    max_counter = models.IntegerField()
 
+    class Meta:
+        abstract = True
+
+    @classmethod
+    def get_max_counters_for_filter(cls, filter):
+        queries = []
+        for key, value in six.iteritems(filter):
+            queries.append(Q(**{key: value}) | Q(**{key: "*"}))
+
+        filter = reduce(lambda x, y: x & y, queries)
+        rows = cls.objects.filter(filter)
+        return rows.values('instance_id').annotate(max_counter=Max('max_counter'))
+
+    def __str__(self):
+        return '"{}"@"{}"'.format(self.instance_id, self.max_counter)
 
 ###################################################################################################
 # CERTIFICATES: Data to manage authorization and the chain-of-trust certificate system
@@ -78,8 +129,7 @@ class SerializedModel(models.Model, UUIDModelMixin):
 
 
 class CertificateModel(models.Model):
-    signature = models.CharField(max_length=64, primary_key=True) # long enough to hold SHA256 sigs
+    signature = models.CharField(max_length=64, primary_key=True)  # long enough to hold SHA256 sigs
     issuer = models.ForeignKey("CertificateModel")
-    
+
     certificate = models.TextField()
-    
