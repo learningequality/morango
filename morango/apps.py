@@ -24,11 +24,8 @@ class MorangoConfig(AppConfig):
             if not DatabaseIDModel.objects.all():
                 DatabaseIDModel.objects.create()
             InstanceIDModel.get_or_create_current_instance()
-        except OperationalError as e:
-            if 'no such table' in e.message:
-                logging.info("Morango models have not been migrated: {}".format(e.message))
-            else:
-                logging.error("OperationalError on application load: {}".format(e.args))
+        except OperationalError:
+            pass
 
         # add models to be synced by profile
         add_syncing_models()

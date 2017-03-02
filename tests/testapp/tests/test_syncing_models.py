@@ -1,6 +1,7 @@
 from django.test import TestCase
 from facility_profile.models import MyUser
-from morango.models import SyncableModelManager, SyncableModelQuerySet
+from morango.query import SyncableModelQuerySet
+from morango.manager import SyncableModelManager
 
 
 class SyncingModelsTestCase(TestCase):
@@ -22,6 +23,12 @@ class SyncingModelsTestCase(TestCase):
         self.assertFalse(MyUser.objects.first()._dirty_bit)
         MyUser.objects.update(update_dirty_bit_to=True)
         self.assertTrue(MyUser.objects.first()._dirty_bit)
+        MyUser.objects.update(update_dirty_bit_to=False)
+        self.assertFalse(MyUser.objects.first()._dirty_bit)
+        MyUser.objects.update()
+        self.assertTrue(MyUser.objects.first()._dirty_bit)
+        MyUser.objects.update(update_dirty_bit_to=None)
+        self.assertTrue(MyUser.objects.first()._dirty_bit)
 
     def test_syncable_qs_update(self):
         self.assertTrue(MyUser.objects.first()._dirty_bit)
@@ -30,6 +37,12 @@ class SyncingModelsTestCase(TestCase):
         MyUser.objects.all().update(update_dirty_bit_to=None)
         self.assertFalse(MyUser.objects.first()._dirty_bit)
         MyUser.objects.all().update(update_dirty_bit_to=True)
+        self.assertTrue(MyUser.objects.first()._dirty_bit)
+        MyUser.objects.all().update(update_dirty_bit_to=False)
+        self.assertFalse(MyUser.objects.first()._dirty_bit)
+        MyUser.objects.all().update()
+        self.assertTrue(MyUser.objects.first()._dirty_bit)
+        MyUser.objects.all().update(update_dirty_bit_to=None)
         self.assertTrue(MyUser.objects.first()._dirty_bit)
 
     def test_syncable_save(self):
@@ -40,4 +53,10 @@ class SyncingModelsTestCase(TestCase):
         user.save(update_dirty_bit_to=None)
         self.assertFalse(MyUser.objects.first()._dirty_bit)
         user.save(update_dirty_bit_to=True)
+        self.assertTrue(MyUser.objects.first()._dirty_bit)
+        user.save(update_dirty_bit_to=False)
+        self.assertFalse(MyUser.objects.first()._dirty_bit)
+        user.save()
+        self.assertTrue(MyUser.objects.first()._dirty_bit)
+        user.save(update_dirty_bit_to=None)
         self.assertTrue(MyUser.objects.first()._dirty_bit)
