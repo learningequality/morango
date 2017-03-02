@@ -1,12 +1,13 @@
-from mptt import managers, models, querysets
-from morango.models import SyncableModelQuerySet
+from morango.manager import SyncableModelManager
+from morango.query import SyncableModelQuerySet
+from mptt import querysets, managers, models
 
 
 class MorangoTreeQuerySet(querysets.TreeQuerySet, SyncableModelQuerySet):
     pass
 
 
-class MorangoMPTTTreeManager(managers.TreeManager):
+class MorangoMPTTTreeManager(managers.TreeManager, SyncableModelManager):
 
     def get_queryset(self):
         return MorangoTreeQuerySet(self.model, using=self._db)
@@ -18,9 +19,11 @@ class MorangoMPTTTreeManager(managers.TreeManager):
 
 class MorangoMPTTModel(models.MPTTModel):
     """
-    Any model that inherits from ``SyncableModel`` that wants to inherit from ``MPTTModel`` should instead inherit
+    Any model that inherits from ``SyncableModel`` that also wants to inherit from ``MPTTModel`` should instead inherit
     from ``MorangoMPTTModel``, which modifies some behavior to make it safe for the syncing system.
     """
+    _internal_mptt_fields_not_to_serialize = ('lft', 'rght', 'tree_id', 'parent_id', 'level')
+
     objects = MorangoMPTTTreeManager()
 
     class Meta:
