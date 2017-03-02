@@ -18,8 +18,8 @@ class MorangoMPTTTreeManager(managers.TreeManager):
 
 class MorangoMPTTModel(models.MPTTModel):
     """
-    Any model that inherits from SyncableModel that wants to inherit from MPTTModel should instead inherit
-    from MorangoMPTTModel, which modifies some behavior to make it safe for the syncing system.
+    Any model that inherits from ``SyncableModel`` that wants to inherit from ``MPTTModel`` should instead inherit
+    from ``MorangoMPTTModel``, which modifies some behavior to make it safe for the syncing system.
     """
     objects = MorangoMPTTTreeManager()
 

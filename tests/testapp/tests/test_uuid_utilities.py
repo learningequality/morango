@@ -1,7 +1,8 @@
 import mock
 
 from django.test import TestCase
-from morango.utils.uuids import DatabaseIDModel, InstanceIDModel, UUIDModelMixin
+from facility_profile.models import Facility
+from morango.utils.uuids import DatabaseIDModel, InstanceIDModel
 
 
 class MorangoUUIDUtilsTestCase(TestCase):
@@ -25,9 +26,7 @@ class MorangoUUIDUtilsTestCase(TestCase):
         self.assertEqual(IDModel.macaddress, '')  # assert that macaddress was not added
 
     def test_uuid_model_mixin(self):
-        # create random object to inherit from UUIDModelMixin
-        childClass = type('ChildClass', (UUIDModelMixin,), {'__module__': 'morango', 'dummy': 1})
-        child = childClass()
+        child = Facility.objects.create(name='bob')
 
         child.uuid_input_fields = 'RANDOM'
         with mock.patch('uuid.uuid4', return_value='random'):
@@ -41,6 +40,5 @@ class MorangoUUIDUtilsTestCase(TestCase):
         with mock.patch('uuid.uuid4', return_value='random'):
             self.assertEqual(child.calculate_uuid(), 'random')
 
-        child.uuid_input_fields = ('dummy',)
-        with mock.patch('uuid.uuid5', return_value='DEADBEEF'):
-            self.assertEqual(child.calculate_uuid(), 'DEADBEEF')
+        child.uuid_input_fields = ('name',)
+        self.assertEqual(child.calculate_uuid().hex, '40ce9a3fded95d7198f200c78e559353')
