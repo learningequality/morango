@@ -8,12 +8,10 @@ from collections import namedtuple
 from django.apps import apps
 from django.db import models
 from django.utils import six
-from morango.models import AbstractStoreModel, AbstractDatabaseMaxCounter, SyncableModel
-from morango.utils.uuids import UUIDField
 
 from .controller import _profiles
 
-Profile = namedtuple('Profile', 'partitions buffer store database_max_counter')
+Profile = namedtuple('Profile', 'partitions buffer store database_max_counter record_max_counters rmc_buffer')
 
 
 def register_morango_profile(profile, partitions, module):
@@ -28,6 +26,9 @@ def register_morango_profile(profile, partitions, module):
     :return: ``SyncableModel`` class where other models inherit from
     :rtype: class inheriting from ``morango.models.SyncableModel``
     """
+
+    # import here to prevent circular imports
+    from morango.models import AbstractStore, AbstractDatabaseMaxCounter, AbstractRecordMaxCounter, TransferSession, SyncableModel
 
     label = apps.get_containing_app_config(module).label
 
@@ -50,29 +51,34 @@ def register_morango_profile(profile, partitions, module):
             return cls
 
     class DatabaseMaxCounter(six.with_metaclass(MorangoIndexedModelMeta, AbstractDatabaseMaxCounter)):
-        """
-        `DatabaseMaxCounter` is used to keep track of what data this database already has across all
-        instances for a particular filter.
-        """
 
         class Meta:
             app_label = label
 
-    class DataTransferBuffer(six.with_metaclass(MorangoIndexedModelMeta, AbstractStoreModel)):
-        """
-        ``DataTransferBuffer`` is where records from the internal store are kept temporarily,
-        until they are sent to another morango instance.
-        """
+    class DataTransferBuffer(six.with_metaclass(MorangoIndexedModelMeta, AbstractStore)):
 
-        transfer_session_id = UUIDField()
+        incoming_buffer = models.BooleanField()
+        transfer_session = models.ForeignKey(TransferSession, related_name='{}_buffer'.format(profile))
 
         class Meta:
             app_label = label
 
-    class StoreModel(six.with_metaclass(MorangoIndexedModelMeta, AbstractStoreModel)):
-        """
-        ``StoreModel`` is where serialized data is persisted, along with metadata about counters and history.
-        """
+    class StoreModel(six.with_metaclass(MorangoIndexedModelMeta, AbstractStore)):
+
+        class Meta:
+            app_label = label
+
+    class RecordMaxCounter(AbstractRecordMaxCounter):
+
+        store_model = models.ForeignKey(StoreModel)
+
+        class Meta:
+            app_label = label
+
+    class RecordMaxCounterBuffer(RecordMaxCounter):
+
+        incoming_buffer = models.BooleanField()
+        transfer_session = models.ForeignKey(TransferSession, related_name='{}_rmc_buffer'.format(profile))
 
         class Meta:
             app_label = label
@@ -91,5 +97,7 @@ def register_morango_profile(profile, partitions, module):
     _profiles[profile] = Profile(partitions=partitions,
                                  buffer=DataTransferBuffer,
                                  store=StoreModel,
-                                 database_max_counter=DatabaseMaxCounter)
+                                 database_max_counter=DatabaseMaxCounter,
+                                 record_max_counters=RecordMaxCounter,
+                                 rmc_buffer=RecordMaxCounterBuffer)
     return BaseSyncableModel
