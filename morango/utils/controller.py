@@ -30,7 +30,7 @@ class MorangoProfileController(object):
             for app_model in klass_model.objects.filter(_morango_dirty_bit=True):
                 try:
                     # set new serialized data on this store model
-                    store_model = self._StoreModel.objects.get(id=app_model.id)
+                    store_model = Store.objects.get(id=app_model.id)
                     store_model.serialized = DjangoJSONEncoder().encode(app_model.serialize())
 
                     # create or update instance and counter on the record max counter for this store model
@@ -44,15 +44,15 @@ class MorangoProfileController(object):
                     # update fields for this store model
                     store_model.save(update_fields=['serialized', 'last_saved_instance', 'last_saved_counter'])
 
-                except self._StoreModel.DoesNotExist:
+                except Store.DoesNotExist:
                     kwargs = {
                         'id': app_model.id,
                         'serialized': DjangoJSONEncoder().encode(app_model.serialize()),
                         'last_saved_instance': current_id.id,
                         'last_saved_counter': current_id.counter,
                         'model_name': app_model.morango_model_name,
-                        'profile': app_model._morango_profile,
-                        'partitions': app_model.get_partition_names()
+                        'profile': app_model.morango_profile,
+                        'partitions': app_model.get_partition()
                     }
                     # create store model and record max counter for the app model
                     store_model = Store.objects.create(**kwargs)
@@ -70,7 +70,7 @@ class MorangoProfileController(object):
         syncable_dict = _profile_models[self.profile]
         # iterate through classes which are in foreign key dependency order
         for model_name, klass_model in iteritems(syncable_dict):
-            for store_model in self._StoreModel.objects.filter(model_name=model_name):
+            for store_model in Store.objects.filter(model_name=model_name):
                 concrete_store_model = klass_model.deserialize(json.loads(store_model.serialized))
                 concrete_store_model.save(update_dirty_bit_to=False)
 

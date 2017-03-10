@@ -15,6 +15,7 @@ class MorangoConfig(AppConfig):
 
     def ready(self):
         from morango.models import DatabaseIDModel, InstanceIDModel
+        from .signals import add_to_deleted_models  # noqa: F401
 
         # NOTE: Warning: https://docs.djangoproject.com/en/1.10/ref/applications/#django.apps.AppConfig.ready
         # its recommended not to execute queries in this method, but we are producing the same result after the first call, so its OK
