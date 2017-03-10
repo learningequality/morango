@@ -16,7 +16,7 @@ class SyncableModelQuerySet(models.query.QuerySet):
         if update_dirty_bit_to is None:
             pass  # don't do anything with the dirty bit
         elif update_dirty_bit_to:
-            kwargs.update({'_dirty_bit': True})
+            kwargs.update({'_morango_dirty_bit': True})
         elif not update_dirty_bit_to:
-            kwargs.update({'_dirty_bit': False})
+            kwargs.update({'_morango_dirty_bit': False})
         super(SyncableModelQuerySet, self).update(**kwargs)
