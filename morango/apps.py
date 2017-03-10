@@ -4,7 +4,7 @@ import logging as logger
 
 from django.apps import AppConfig
 from django.db.utils import OperationalError
-from morango.utils.syncing_utils import add_syncing_models
+from morango.utils.register_models import add_syncable_models
 
 logging = logger.getLogger(__name__)
 
@@ -24,8 +24,9 @@ class MorangoConfig(AppConfig):
             if not DatabaseIDModel.objects.all():
                 DatabaseIDModel.objects.create()
             InstanceIDModel.get_or_create_current_instance()
+        # we catch this error in case the database has not been migrated, b/c we can't query it until its been created
         except OperationalError:
             pass
 
         # add models to be synced by profile
-        add_syncing_models()
+        add_syncable_models()
