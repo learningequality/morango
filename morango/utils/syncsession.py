@@ -1,9 +1,8 @@
 import uuid
 
 from django.db import connection, transaction
-from django.forms.models import model_to_dict
 from django.utils.six import iteritems
-from morango.models import DataTransferBuffer, RecordMaxCounter, RecordMaxCounterBuffer, Store, SyncSession
+from morango.models import Buffer, RecordMaxCounter, RecordMaxCounterBuffer, Store, SyncSession
 
 
 def _join_with_logical_operator(lst, operator):
@@ -36,8 +35,7 @@ class SyncController(object):
         self.profile = profile
         self.session_id = uuid.uuid4()
         self.transfer_session_id = None
-        self.symmetric_key = 'xxx'
-        self.sync_session = SyncSession(host=host, id=self.session_id, symmetric_key=self.symmetric_key)
+        self.sync_session = SyncSession(host=host, id=self.session_id)
 
     def initiate_push_request(self, sync_filter, chunksize):
         pass
@@ -49,7 +47,7 @@ class SyncController(object):
         pass
 
     @transaction.atomic
-    def _queue_into_buffer(self, fsics):
+    def _queue_into_buffer(self, fsics, profile):
         """
         Takes a chunk of data from the store to be put into the buffer to be sent to another morango instance.
         """
@@ -58,15 +56,18 @@ class SyncController(object):
         for instance, counter in iteritems(fsics):
             where_statements += ['(last_saved_instance == {0} AND last_saved_counter > {1})'.format(instance, counter)]
         condition = _join_with_logical_operator(where_statements, 'OR')
+        # filter by profile
+        condition = _join_with_logical_operator([condition, 'profile = {}'.format(profile)], 'AND')
+
         # execute raw sql to take all records that match condition, to be put into buffer for transfer
         with connection.cursor() as cursor:
             queue_buffer = '''INSERT INTO {outgoing}
                             (serialized, deleted, last_saved_instance, last_saved_counter,
-                             model_name, profile, partitions, transfer_session_id, incoming_buffer)
+                             model_name, profile, partition, transfer_session_id, incoming_buffer)
                             SELECT serialized, deleted, last_saved_instance, last_saved_counter,
-                            model_name, profile, partitions, {transfer_session_id}, {incoming_buffer}
+                            model_name, profile, partition, {transfer_session_id}, {incoming_buffer}
                             FROM {store}
-                            [WHERE {condition}]'''.format(outgoing=DataTransferBuffer._meta.db_table,
+                            [WHERE {condition}]'''.format(outgoing=Buffer._meta.db_table,
                                                           transfer_session_id=self.transfer_session_id,
                                                           condition=condition,
                                                           store=Store._meta.db_table,
@@ -84,7 +85,7 @@ class SyncController(object):
                                            incoming_buffer=False,
                                            transfer_session_id=self.transfer_session_id,
                                            record_max_counter=RecordMaxCounter._meta.db_table,
-                                           outgoing_buffer=DataTransferBuffer._meta.db_table)
+                                           outgoing_buffer=Buffer._meta.db_table)
             cursor.execute(queue_rmc_buffer)
 
     @transaction.atomic
@@ -92,20 +93,4 @@ class SyncController(object):
         """
         Takes data from the buffers and merges into the store and record max counters.
         """
-        incoming_data = DataTransferBuffer.objects.filter(transfer_session_id=self.transfer_session_id)
-        for incoming_row in incoming_data:
-            incoming_dict = model_to_dict(incoming_row)
-
-            # remove buffer related attributes
-            del incoming_dict['transfer_session_id']
-
-            # attempt to integrate data based on record max counters
-            try:
-                if 'forward_ff':  # update with incoming row
-                    pass
-                elif 'merge_conflict':  # in this case, we just overwrite with one of the incoming records
-                    pass
-                else:  # do nothing (can not update)
-                    pass
-            except self._StoreModel.DoesNotExist:
-                self._StoreModel.objects.create(**incoming_dict)
+        pass

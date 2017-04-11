@@ -27,3 +27,10 @@ class PostDeleteSignalsTestCase(TestCase):
         deleted_id = facility.id
         facility.delete()
         self.assertTrue(DeletedModels.objects.filter(id=deleted_id))
+
+    def test_cascading_delete(self):
+        facility = Facility.objects.first()
+        child = FacilityModelFactory(parent=facility)
+        deleted_child_id = child.id
+        facility.delete()
+        self.assertTrue(DeletedModels.objects.filter(id=deleted_child_id))

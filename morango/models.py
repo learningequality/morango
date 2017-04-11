@@ -109,8 +109,6 @@ class SyncSession(models.Model):
     # JSON of broad scope/(R and/or W) permissions
     local_scope = models.TextField()
     remote_scope = models.TextField()
-    # encryption key to encrypt data sent between the 2 morango instances
-    symmetric_key = models.CharField(max_length=64)
     host = models.CharField(max_length=255)
 
 
@@ -124,7 +122,7 @@ class TransferSession(models.Model):
     # partition/filter to know what subset of data is to be synced
     filter = models.TextField()
     # is session pushing or pulling data
-    direction = models.CharField(max_length=40)
+    incoming = models.BooleanField()
     # is this session actively pushing or pulling data?
     active = models.BooleanField(default=True)
     chunksize = models.IntegerField(default=500)
@@ -149,7 +147,7 @@ class AbstractStore(models.Model):
     ``AbstractStore`` is a base model for storing serialized data.
 
     This model is an abstract model, and is inherited by both ``Store`` and
-    ``DataTransferBuffer``.
+    ``Buffer``.
     """
 
     serialized = models.TextField(blank=True)
@@ -160,8 +158,8 @@ class AbstractStore(models.Model):
     # morango_model_name of model
     model_name = models.CharField(max_length=40)
     profile = models.CharField(max_length=40)
-    # colon seperated key-value pairs specifying which segment of data they are part of
-    partitions = models.TextField()
+    # colon-separated partition values that specify which segment of data this record belongs to
+    partition = models.TextField()
 
     class Meta:
         abstract = True
@@ -176,14 +174,14 @@ class Store(AbstractStore):
     id = UUIDField(primary_key=True)
 
 
-class DataTransferBuffer(AbstractStore):
+class Buffer(AbstractStore):
     """
-    ``DataTransferBuffer`` is where records from the internal store are kept temporarily,
-    until they are sent or recieved by another morango instance.
+    ``Buffer`` is where records from the internal store are kept temporarily,
+    until they are sent or received by another morango instance.
     """
 
     transfer_session = models.ForeignKey(TransferSession)
-    store_model_id = UUIDField()
+    model_uuid = UUIDField()
 
 
 class AbstractCounter(models.Model):
@@ -193,7 +191,7 @@ class AbstractCounter(models.Model):
 
     # the UUID of the morango instance that was last synced for this model or filter
     instance_id = UUIDField()
-    # the counter of the morango instance at the time of sync
+    # the counter of the morango instance at the time of serialization
     counter = models.IntegerField()
 
     class Meta:
@@ -204,7 +202,7 @@ class DatabaseMaxCounter(AbstractCounter):
     """
     ``DatabaseMaxCounter`` is used to keep track of what data this database already has across all
     instances for a particular filter. Whenever 2 morango instances sync with each other we keep track
-    of those filters, as well as the instance, counter pairs used at the time of sync.
+    of those filters, as well as the maximum counter we received for each instance during the sync session.
     """
 
     filter = models.TextField()
@@ -212,11 +210,15 @@ class DatabaseMaxCounter(AbstractCounter):
 
 class RecordMaxCounter(AbstractCounter):
     """
-    ``RecordMaxCounter`` saves a combination of the instance ID and a counter position that is assigned to a
-    serialized record. This is used to determine fast-forwards and merge conflicts during the sync process.
+    ``RecordMaxCounter`` keeps track of the maximum counter each serialized record has been saved at,
+     for each instance that has modified it. This is used to determine fast-forwards and merge conflicts
+     during the sync process.
     """
 
     store_model = models.ForeignKey(Store)
+
+    class Meta:
+        unique_together = ('store_model', 'instance_id')
 
 
 class RecordMaxCounterBuffer(AbstractCounter):
@@ -226,7 +228,7 @@ class RecordMaxCounterBuffer(AbstractCounter):
     """
 
     transfer_session = models.ForeignKey(TransferSession)
-    store_model_id = UUIDField()
+    model_uuid = UUIDField()
 
 
 class SyncableModel(UUIDModelMixin):
