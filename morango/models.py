@@ -5,6 +5,7 @@ from django.utils.encoding import python_2_unicode_compatible
 
 from .utils.uuids import UUIDModelMixin, UUIDField
 
+from .certificates import *
 
 ###################################################################################################
 # APP MODELS: Abstract models from which app models should inherit in order to make them syncable
