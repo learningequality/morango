@@ -7,4 +7,3 @@ mock
 pytest
 pytest-cov
 pytest-django
-django-mptt

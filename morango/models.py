@@ -9,10 +9,10 @@ from django.db.models import Max, Q
 from django.utils import six, timezone
 from django.utils.encoding import python_2_unicode_compatible
 
-from .manager import SyncableModelManager
-from .utils.uuids import UUIDModelMixin, UUIDField
-
 from .certificates import *
+from .manager import SyncableModelManager
+from .utils.uuids import UUIDField, UUIDModelMixin
+
 
 class DatabaseManager(models.Manager):
     """
@@ -94,7 +94,7 @@ class InstanceIDModel(UUIDModelMixin):
         with transaction.atomic():
             obj, created = InstanceIDModel.objects.get_or_create(**kwargs)
             if created:
-                InstanceIDModel.objects.exclude(id=obj.id.hex).update(current=False)
+                InstanceIDModel.objects.exclude(id=obj.id).update(current=False)
                 return obj, created
 
         return obj, created
