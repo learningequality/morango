@@ -7,6 +7,7 @@ from django.conf import settings
 from django.db import models, transaction
 from django.utils import timezone
 
+from .certificates import *
 from .manager import SyncableModelManager
 from .utils.uuids import UUIDField, UUIDModelMixin
 
@@ -91,7 +92,7 @@ class InstanceIDModel(UUIDModelMixin):
         with transaction.atomic():
             obj, created = InstanceIDModel.objects.get_or_create(**kwargs)
             if created:
-                InstanceIDModel.objects.exclude(id=obj.id.hex).update(current=False)
+                InstanceIDModel.objects.exclude(id=obj.id).update(current=False)
 
         return obj, created
 

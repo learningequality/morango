@@ -1,4 +1,5 @@
 import mock
+import uuid
 
 from django.test import TestCase
 from facility_profile.models import Facility
@@ -14,19 +15,19 @@ class UUIDModelMixinTestCase(TestCase):
         child = Facility.objects.create(name='bob')
 
         child.uuid_input_fields = 'RANDOM'
-        with mock.patch('uuid.uuid4', return_value='random'):
-            self.assertEqual(child.calculate_uuid(), 'random')
+        with mock.patch('uuid.uuid4', return_value=uuid.UUID('12345678123456781234567812345678')):
+            self.assertEqual(child.calculate_uuid(), '12345678123456781234567812345678')
 
         child.uuid_input_fields = []
         with self.assertRaises(AssertionError):
             child.calculate_uuid()
 
         child.uuid_input_fields = ()
-        with mock.patch('uuid.uuid4', return_value='random'):
-            self.assertEqual(child.calculate_uuid(), 'random')
+        with mock.patch('uuid.uuid4', return_value=uuid.UUID('12345678123456781234567812345678')):
+            self.assertEqual(child.calculate_uuid(), '12345678123456781234567812345678')
 
         child.uuid_input_fields = ('name',)
-        self.assertEqual(child.calculate_uuid().hex, '40ce9a3fded95d7198f200c78e559353')
+        self.assertEqual(child.calculate_uuid(), '40ce9a3fded95d7198f200c78e559353')
 
     def test_save_with_id(self):
         ID = '11111111111111111111111111111111'
@@ -66,7 +67,7 @@ class InstanceIDModelTestCase(TestCase):
                 (IDModel, _) = InstanceIDModel.get_or_create_current_instance()
         self.assertEqual(InstanceIDModel.objects.count(), 2)
         self.assertEqual(IDModel.macaddress, '')  # assert that macaddress was not added
-        self.assertEqual(IDModel.id.hex, InstanceIDModel.objects.get(current=True).id)
+        self.assertEqual(IDModel.id, InstanceIDModel.objects.get(current=True).id)
 
     def test_only_one_current_instance_ID(self):
         with mock.patch('platform.platform', return_value='platform'):

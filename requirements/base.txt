@@ -1,1 +1,4 @@
 django==1.9
+django-mptt>=0.8.0
+rsa==3.4.2
+M2Crypto==0.26.0
