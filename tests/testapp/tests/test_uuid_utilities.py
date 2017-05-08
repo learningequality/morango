@@ -1,4 +1,5 @@
 import mock
+import uuid
 
 from django.test import TestCase
 from facility_profile.models import Facility
@@ -14,16 +15,16 @@ class UUIDModelMixinTestCase(TestCase):
         child = Facility.objects.create(name='bob')
 
         child.uuid_input_fields = 'RANDOM'
-        with mock.patch('uuid.uuid4', return_value='random'):
-            self.assertEqual(child.calculate_uuid(), 'random')
+        with mock.patch('uuid.uuid4', return_value=uuid.UUID('12345678123456781234567812345678')):
+            self.assertEqual(child.calculate_uuid(), '12345678123456781234567812345678')
 
         child.uuid_input_fields = []
         with self.assertRaises(AssertionError):
             child.calculate_uuid()
 
         child.uuid_input_fields = ()
-        with mock.patch('uuid.uuid4', return_value='random'):
-            self.assertEqual(child.calculate_uuid(), 'random')
+        with mock.patch('uuid.uuid4', return_value=uuid.UUID('12345678123456781234567812345678')):
+            self.assertEqual(child.calculate_uuid(), '12345678123456781234567812345678')
 
         child.uuid_input_fields = ('name',)
         self.assertEqual(child.calculate_uuid(), '40ce9a3fded95d7198f200c78e559353')

@@ -9,8 +9,6 @@ class SerializationTestCase(TestCase):
     def setUp(self):
         self.bob = Facility.objects.create(name="bob")
         self.student = Facility.objects.create(name="student")
-        self.bob.id = self.bob.id
-        self.student.id = self.student.id
         self.bob_dict = self.bob.serialize()
         self.student_dict = self.student.serialize()
 

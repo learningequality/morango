@@ -73,7 +73,7 @@ class UUIDModelMixin(models.Model):
 
         # if the UUID has been set to be random, return a random UUID
         if self.uuid_input_fields == "RANDOM":
-            return uuid.uuid4()
+            return uuid.uuid4().hex
 
         # if we got this far, uuid_input_fields should be a tuple
         assert isinstance(self.uuid_input_fields, tuple), "'uuid_input_fields' must either be a tuple or the string 'RANDOM'"
@@ -88,7 +88,7 @@ class UUIDModelMixin(models.Model):
 
         # if all the values were falsey, just return a random UUID, to avoid collisions
         if not hashable_input:
-            return uuid.uuid4()
+            return uuid.uuid4().hex
 
         # compute the UUID as a function of the input values
         return uuid.uuid5(NAMESPACE_MORANGO, hashable_input).hex
