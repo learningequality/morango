@@ -25,6 +25,12 @@ class MorangoMPTTModelTestCase(TestCase):
         self.assertFalse(Facility.objects.first()._dirty_bit)
         Facility.objects.update(update_dirty_bit_to=True)
         self.assertTrue(Facility.objects.first()._dirty_bit)
+        Facility.objects.update(update_dirty_bit_to=False)
+        self.assertFalse(Facility.objects.first()._dirty_bit)
+        Facility.objects.update()
+        self.assertTrue(Facility.objects.first()._dirty_bit)
+        Facility.objects.update(update_dirty_bit_to=None)
+        self.assertTrue(Facility.objects.first()._dirty_bit)
 
     def test_mptt_qs_update(self):
         self.assertTrue(Facility.objects.first()._dirty_bit)
@@ -33,6 +39,12 @@ class MorangoMPTTModelTestCase(TestCase):
         Facility.objects.all().update(update_dirty_bit_to=None)
         self.assertFalse(Facility.objects.first()._dirty_bit)
         Facility.objects.all().update(update_dirty_bit_to=True)
+        self.assertTrue(Facility.objects.first()._dirty_bit)
+        Facility.objects.all().update(update_dirty_bit_to=False)
+        self.assertFalse(Facility.objects.first()._dirty_bit)
+        Facility.objects.all().update()
+        self.assertTrue(Facility.objects.first()._dirty_bit)
+        Facility.objects.all().update(update_dirty_bit_to=None)
         self.assertTrue(Facility.objects.first()._dirty_bit)
 
     def test_mptt_save(self):
@@ -43,6 +55,12 @@ class MorangoMPTTModelTestCase(TestCase):
         fac.save(update_dirty_bit_to=None)
         self.assertFalse(Facility.objects.first()._dirty_bit)
         fac.save(update_dirty_bit_to=True)
+        self.assertTrue(Facility.objects.first()._dirty_bit)
+        fac.save(update_dirty_bit_to=False)
+        self.assertFalse(Facility.objects.first()._dirty_bit)
+        fac.save()
+        self.assertTrue(Facility.objects.first()._dirty_bit)
+        fac.save(update_dirty_bit_to=None)
         self.assertTrue(Facility.objects.first()._dirty_bit)
 
     def test_new_mptt_update(self):

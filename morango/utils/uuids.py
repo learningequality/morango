@@ -1,11 +1,6 @@
-import os
-import platform
-import sys
 import uuid
 
-from django.db import models, transaction
-from django.conf import settings
-from django.utils import timezone
+from django.db import models
 
 from . import NAMESPACE_MORANGO
 
@@ -52,7 +47,8 @@ class UUIDField(models.CharField):
 
 
 class UUIDModelMixin(models.Model):
-    """Mixin for Django models that makes the primary key "id" into a UUID, which is calculated
+    """
+    Mixin for Django models that makes the primary key "id" into a UUID, which is calculated
     as a function of jointly unique parameters on the model, to ensure consistency across instances.
     """
 
@@ -103,73 +99,3 @@ class UUIDModelMixin(models.Model):
             self.id = self.calculate_uuid()
 
         super(UUIDModelMixin, self).save(*args, **kwargs)
-
-
-class DatabaseManager(models.Manager):
-
-    def create(self, **kwargs):
-
-        # do within transaction so we always have a current database ID
-        with transaction.atomic():
-            # set current flag to false for all database_id models
-            DatabaseIDModel.objects.update(current=False)
-
-            return super(DatabaseManager, self).create(**kwargs)
-
-
-class DatabaseIDModel(UUIDModelMixin):
-    """
-    Model to be used for tracking database ids.
-    """
-
-    uuid_input_fields = "RANDOM"
-
-    objects = DatabaseManager()
-
-    current = models.BooleanField(default=True)
-    date_generated = models.DateTimeField(default=timezone.now)
-    initial_instance_id = models.CharField(max_length=32, blank=True)
-
-    def save(self, *args, **kwargs):
-
-        # do within transaction so we always have a current database ID
-        with transaction.atomic():
-            # set current flag to false for all database_id models
-            if not self.id and self.current:
-                DatabaseIDModel.objects.update(current=False)
-
-            super(DatabaseIDModel, self).save(*args, **kwargs)
-
-
-class InstanceIDModel(UUIDModelMixin):
-
-    uuid_input_fields = ("platform", "hostname", "sysversion", "macaddress", "database_id", "db_path")
-
-    platform = models.TextField()
-    hostname = models.TextField()
-    sysversion = models.TextField()
-    macaddress = models.CharField(max_length=20, blank=True)
-    database = models.ForeignKey(DatabaseIDModel)
-    counter = models.IntegerField(default=0)
-    current = models.BooleanField(default=True)
-    db_path = models.CharField(max_length=1000)
-
-    @staticmethod
-    def get_or_create_current_instance():
-        """Get the instance model corresponding to the current system, or create a new
-        one if the system is new or its properties have changed (e.g. OS from upgrade)."""
-
-        kwargs = {
-            "platform": platform.platform(),
-            "hostname": platform.node(),
-            "sysversion": sys.version,
-            "database": DatabaseIDModel.objects.get(current=True),
-            "db_path": os.path.abspath(settings.DATABASES['default']['NAME']),
-        }
-
-        # try to get the MAC address, but exclude it if it was a fake (random) address
-        mac = uuid.getnode()
-        if (mac >> 40) % 2 == 0:  # 8th bit (of 48 bits, from left) is 1 if MAC is fake
-            kwargs["macaddress"] = mac
-
-        return InstanceIDModel.objects.get_or_create(**kwargs)
