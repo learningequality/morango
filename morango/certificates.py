@@ -1,22 +1,21 @@
 import base64
 import json
 import uuid
+
 import mptt
 import mptt.models
-
 from django.db import models
 
+from .crypto import Key, PrivateKeyField, PublicKeyField
 from .utils.uuids import UUIDModelMixin
 
-from .crypto import Key, PublicKeyField, PrivateKeyField
-        
 
 class Certificate(mptt.models.MPTTModel, UUIDModelMixin):
 
     uuid_input_fields = ("public_key",)
 
     parent = models.ForeignKey("Certificate", blank=True, null=True)
-    
+
     # the Morango profile with which this certificate is associated
     profile = models.CharField(max_length=20)
 
@@ -27,7 +26,7 @@ class Certificate(mptt.models.MPTTModel, UUIDModelMixin):
 
     # track the certificate's public key so we can verify any certificates it signs
     public_key = PublicKeyField()
-    
+
     # the JSON-serialized copy of all the fields above
     serialized = models.TextField()
 
@@ -89,7 +88,7 @@ class Certificate(mptt.models.MPTTModel, UUIDModelMixin):
 
 
 class ScopeDefinition(models.Model):
-    
+
     # the Morango profile with which this scope is associated
     profile = models.CharField(max_length=20)
 
@@ -98,17 +97,17 @@ class ScopeDefinition(models.Model):
 
     # the identifier used to specify this scope within a certificate
     scope_id = models.CharField(primary_key=True, max_length=20)
-    
+
     # human-readable description
     # (can include string template refs to scope params e.g. "Allows syncing data for user ${username}")
     description = models.TextField()
-    
+
     # scope definition templates, in the form of a newline-delimited list of colon-delimited partition strings
     # (can include string template refs to scope params e.g. "122211:singleuser:${useruuid}")
     read_scope_def = models.TextField()
     write_scope_def = models.TextField()
     read_write_scope_def = models.TextField()
-    
+
     # the JSON-serialized copy of all the fields above
     serialized = models.TextField()
 
@@ -161,9 +160,8 @@ class Scope(object):
 
 
 class TrustedKey(UUIDModelMixin):
-    
+
     public_key = PublicKeyField()
     notes = models.TextField(blank=True)
 
     revoked = models.BooleanField(default=False)
-

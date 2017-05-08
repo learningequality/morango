@@ -9,8 +9,6 @@ class SerializationTestCase(TestCase):
     def setUp(self):
         self.bob = Facility.objects.create(name="bob")
         self.student = Facility.objects.create(name="student")
-        self.bob.id = self.bob.id.hex
-        self.student.id = self.student.id.hex
         self.bob_dict = self.bob.serialize()
         self.student_dict = self.student.serialize()
 
@@ -22,8 +20,10 @@ class SerializationTestCase(TestCase):
         class_model = _profiles_for_syncing_models['facilitydata'][self.bob.morango_model_name]
         self.bob_copy = class_model.deserialize(self.bob_dict)
         for f in Facility._meta.concrete_fields:
-            if isinstance(f, models.DateTimeField) or f.attname in class_model._internal_mptt_fields_not_to_serialize or f.attname in class_model._internal_fields_not_to_serialize:
-                continue
+            if isinstance(f, models.DateTimeField) or \
+                    f.attname in class_model._internal_mptt_fields_not_to_serialize or \
+                    f.attname in class_model._internal_fields_not_to_serialize:
+                        continue
             self.assertEqual(getattr(self.bob, f.attname), getattr(self.bob_copy, f.attname))
 
     def test_serializing_different_models(self):
