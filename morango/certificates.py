@@ -128,7 +128,7 @@ class Scope(object):
 
     def __init__(self, definition, params):
         # inflate the scope definition by filling in the template values from the params
-        rw_scope = self._fill_in_scope_def(definition.read_scope_def, params)
+        rw_scope = self._fill_in_scope_def(definition.read_write_scope_def, params)
         self.read_scope = rw_scope + self._fill_in_scope_def(definition.read_scope_def, params)
         self.write_scope = rw_scope + self._fill_in_scope_def(definition.write_scope_def, params)
 
