@@ -5,21 +5,25 @@ import uuid
 from django.contrib.auth.models import AbstractBaseUser
 from django.db import models
 from django.utils import timezone
+from morango.models import SyncableModel
 from morango.query import SyncableModelQuerySet
 from morango.utils.morango_mptt import MorangoMPTTModel
-from morango.utils.register_models import register_morango_profile
 from morango.utils.uuids import UUIDField
 from mptt.models import TreeForeignKey
 
 
-FacilityDataSyncableModel = register_morango_profile(profile="facilitydata", partitions=("facility", "user"), module=__package__)
+class FacilityDataSyncableModel(SyncableModel):
+    morango_profile = 'facilitydata'
 
+    class Meta:
+        abstract = True
 
 class BaseQuerySet(SyncableModelQuerySet):
     pass
 
 
 class Facility(MorangoMPTTModel, FacilityDataSyncableModel):
+
     # Morango syncing settings
     morango_model_name = "facility"
     uuid_input_fields = ("name",)
@@ -28,7 +32,7 @@ class Facility(MorangoMPTTModel, FacilityDataSyncableModel):
     now_date = models.DateTimeField(default=timezone.now)
     parent = TreeForeignKey('self', null=True, blank=True, related_name='children', db_index=True)
 
-    def get_partition_names(self, *args, **kwargs):
+    def get_partition(self, *args, **kwargs):
         return {}
 
 
@@ -43,7 +47,7 @@ class MyUser(AbstractBaseUser, FacilityDataSyncableModel):
 
     objects = BaseQuerySet.as_manager()
 
-    def get_partition_names(self, *args, **kwargs):
+    def get_partition(self, *args, **kwargs):
         return {}
 
 
@@ -55,7 +59,7 @@ class Log(FacilityDataSyncableModel):
     user = models.ForeignKey(MyUser)
     content_id = UUIDField(db_index=True, default=uuid.uuid4)
 
-    def get_partition_names(self, *args, **kwargs):
+    def get_partition(self, *args, **kwargs):
         pass
 
 
@@ -71,7 +75,7 @@ class ProxyParent(MorangoMPTTModel):
         if self._KIND:
             self.kind = self._KIND
 
-    def get_partition_names(self, *args, **kwargs):
+    def get_partition(self, *args, **kwargs):
         return {}
 
 
@@ -89,5 +93,5 @@ class ProxyModel(ProxyParent):
     class Meta:
         proxy = True
 
-    def get_partition_names(self, *args, **kwargs):
+    def get_partition(self, *args, **kwargs):
         return {}

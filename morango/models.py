@@ -5,12 +5,10 @@ import uuid
 
 from django.conf import settings
 from django.db import models, transaction
-from django.db.models import Max, Q
-from django.utils import six, timezone
-from django.utils.encoding import python_2_unicode_compatible
+from django.utils import timezone
 
 from .manager import SyncableModelManager
-from .utils.uuids import UUIDModelMixin, UUIDField
+from .utils.uuids import UUIDField, UUIDModelMixin
 
 
 class DatabaseManager(models.Manager):
@@ -94,7 +92,6 @@ class InstanceIDModel(UUIDModelMixin):
             obj, created = InstanceIDModel.objects.get_or_create(**kwargs)
             if created:
                 InstanceIDModel.objects.exclude(id=obj.id.hex).update(current=False)
-                return obj, created
 
         return obj, created
 
@@ -106,10 +103,13 @@ class SyncSession(models.Model):
     """
 
     id = models.UUIDField(primary_key=True)
+    # we track when the session started and the last time there was activity for this session
     start_timestamp = models.DateTimeField(default=timezone.now)
     last_activity_timestamp = models.DateTimeField(blank=True)
-    scope_setting = models.TextField(default='{}')
-    current_transfer = models.UUIDField(max_length=32, blank=True)
+    # JSON of broad scope/(R and/or W) permissions
+    local_scope = models.TextField()
+    remote_scope = models.TextField()
+    host = models.CharField(max_length=255)
 
 
 class TransferSession(models.Model):
@@ -119,9 +119,17 @@ class TransferSession(models.Model):
     """
 
     id = models.UUIDField(primary_key=True)
-    filters = models.TextField(default='{}')
-    records_left = models.IntegerField()
-    push_request = models.BooleanField()
+    # partition/filter to know what subset of data is to be synced
+    filter = models.TextField()
+    # is session pushing or pulling data
+    incoming = models.BooleanField()
+    # is this session actively pushing or pulling data?
+    active = models.BooleanField(default=True)
+    chunksize = models.IntegerField(default=500)
+    # we track how many records are left to be synced in this session
+    records_remaining = models.IntegerField()
+    records_total = models.IntegerField()
+    sync_session = models.ForeignKey(SyncSession)
 
 
 class DeletedModels(models.Model):
@@ -138,70 +146,89 @@ class AbstractStore(models.Model):
     """
     ``AbstractStore`` is a base model for storing serialized data.
 
-    This model is an abstract model, and is inherited by both ``StoreModel`` and
-    ``DataTransferBuffer``.
+    This model is an abstract model, and is inherited by both ``Store`` and
+    ``Buffer``.
+    """
+
+    serialized = models.TextField(blank=True)
+    deleted = models.BooleanField(default=False)
+    # morango UUID instance and counter at time of serialization
+    last_saved_instance = models.UUIDField()
+    last_saved_counter = models.IntegerField()
+    # morango_model_name of model
+    model_name = models.CharField(max_length=40)
+    profile = models.CharField(max_length=40)
+    # colon-separated partition values that specify which segment of data this record belongs to
+    partition = models.TextField()
+
+    class Meta:
+        abstract = True
+
+
+class Store(AbstractStore):
+    """
+    ``Store`` is the concrete model where serialized data is persisted, along with
+    metadata about counters and history.
     """
 
     id = UUIDField(primary_key=True)
-    serialized = models.TextField(blank=True)
-    deleted = models.BooleanField(default=False)
-    version = models.CharField(max_length=40)
-    history = models.TextField(blank=True)
-    last_saved_instance = models.UUIDField()
-    last_saved_counter = models.IntegerField()
-    record_max_counters = models.TextField(default="{}")
-    model_name = models.CharField(max_length=40)
-
-    class Meta:
-        abstract = True
 
 
-@python_2_unicode_compatible
-class AbstractDatabaseMaxCounter(models.Model):
+class Buffer(AbstractStore):
     """
-    ``DatabaseMaxCounter`` is used to keep track of what data this database already has across all
-    instances for a particular filter. Whenever 2 morango instances sync with each other we keep track
-    of those filters, as well as the instance, counter pairs used at the time of sync.
+    ``Buffer`` is where records from the internal store are kept temporarily,
+    until they are sent or received by another morango instance.
     """
 
+    transfer_session = models.ForeignKey(TransferSession)
+    model_uuid = UUIDField()
+
+
+class AbstractCounter(models.Model):
+    """
+    Abstract class which shares fields across multiple counter models.
+    """
+
+    # the UUID of the morango instance that was last synced for this model or filter
     instance_id = UUIDField()
-    max_counter = models.IntegerField()
-
-    class Meta:
-        abstract = True
-
-    @classmethod
-    def get_max_counters_for_filter(cls, filter):
-        """
-        Gets the highest instance, counter pairs for a filter and all supersets of that filter.
-
-        :param filter: A dictionary specifying the key-value pairs to be filtered against.
-        :return: A list of dictionaries specifying instance, counter pairs.
-        :rtype: list
-        """
-        queries = []
-        for key, value in six.iteritems(filter):
-            queries.append(Q(**{key: value}) | Q(**{key: "*"}))
-
-        filter = reduce(lambda x, y: x & y, queries)
-        rows = cls.objects.filter(filter)
-        return rows.values('instance_id').annotate(max_counter=Max('max_counter'))
-
-    def __str__(self):
-        return '"{}"@"{}"'.format(self.instance_id, self.max_counter)
-
-
-class AbstractRecordMaxCounter(models.Model):
-    """
-    ``RecordMaxCounter`` saves a combination of the instance ID and a counter position that is assigned to a
-    serialized record. This is used to determine fast-forwards and merge conflicts during the sync process.
-    """
-
-    instance_id = UUIDField()
+    # the counter of the morango instance at the time of serialization
     counter = models.IntegerField()
 
     class Meta:
         abstract = True
+
+
+class DatabaseMaxCounter(AbstractCounter):
+    """
+    ``DatabaseMaxCounter`` is used to keep track of what data this database already has across all
+    instances for a particular filter. Whenever 2 morango instances sync with each other we keep track
+    of those filters, as well as the maximum counter we received for each instance during the sync session.
+    """
+
+    filter = models.TextField()
+
+
+class RecordMaxCounter(AbstractCounter):
+    """
+    ``RecordMaxCounter`` keeps track of the maximum counter each serialized record has been saved at,
+     for each instance that has modified it. This is used to determine fast-forwards and merge conflicts
+     during the sync process.
+    """
+
+    store_model = models.ForeignKey(Store)
+
+    class Meta:
+        unique_together = ('store_model', 'instance_id')
+
+
+class RecordMaxCounterBuffer(AbstractCounter):
+    """
+    ``RecordMaxCounterBuffer`` is where combinations of instance ID and counters (from ``RecordMaxCounter``) are stored temporarily,
+    until they are sent or recieved by another morango instance.
+    """
+
+    transfer_session = models.ForeignKey(TransferSession)
+    model_uuid = UUIDField()
 
 
 class SyncableModel(UUIDModelMixin):
@@ -210,10 +237,13 @@ class SyncableModel(UUIDModelMixin):
     their data syncable across devices.
     """
 
-    _internal_fields_not_to_serialize = ('_dirty_bit',)
+    _morango_internal_fields_not_to_serialize = ('_morango_dirty_bit',)
+    morango_fields_not_to_serialize = ()
 
     # morango specific field used for tracking model changes
-    _dirty_bit = models.BooleanField(default=True)
+    _morango_dirty_bit = models.BooleanField(default=True)
+    # morango specific field used to store random uuid or unique together fields
+    _morango_source_id = models.CharField(max_length=96)
 
     objects = SyncableModelManager()
 
@@ -224,9 +254,9 @@ class SyncableModel(UUIDModelMixin):
         if update_dirty_bit_to is None:
             pass  # don't do anything with the dirty bit
         elif update_dirty_bit_to:
-            self._dirty_bit = True
+            self._morango_dirty_bit = True
         elif not update_dirty_bit_to:
-            self._dirty_bit = False
+            self._morango_dirty_bit = False
         super(SyncableModel, self).save(*args, **kwargs)
 
     def serialize(self):
@@ -236,9 +266,9 @@ class SyncableModel(UUIDModelMixin):
         data = {}
 
         for f in opts.concrete_fields:
-            if f.attname in self._fields_not_to_serialize:
+            if f.attname in self.morango_fields_not_to_serialize:
                 continue
-            if f.attname in self._internal_fields_not_to_serialize:
+            if f.attname in self._morango_internal_fields_not_to_serialize:
                 continue
             # case if model is morango mptt
             if f.attname in getattr(self, '_internal_mptt_fields_not_to_serialize', '_internal_fields_not_to_serialize'):
@@ -259,7 +289,7 @@ class SyncableModel(UUIDModelMixin):
     def merge_conflict(cls, current, incoming):
         return incoming
 
-    def get_partitions(self, *args, **kwargs):
+    def get_partition(self, *args, **kwargs):
         """Should return a dictionary with any relevant partition keys included, along with their values."""
         raise NotImplemented("You must define a 'get_partition_names' method on models that inherit from SyncableModel.")
 
