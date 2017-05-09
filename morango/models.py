@@ -1,4 +1,3 @@
-import hashlib
 import os
 import platform
 import sys
@@ -10,11 +9,7 @@ from django.utils import timezone
 
 from .certificates import *
 from .manager import SyncableModelManager
-from .utils.uuids import UUIDField, UUIDModelMixin
-
-
-def sha2_uuid(*args):
-    return hashlib.sha256("::".join(args)).hexdigest()[:32]
+from .utils.uuids import UUIDField, UUIDModelMixin, sha2_uuid
 
 
 class DatabaseManager(models.Manager):
@@ -179,7 +174,7 @@ class Store(AbstractStore):
     metadata about counters and history.
     """
 
-    id = UUIDField(max_length=32, primary_key=True)
+    id = UUIDField(primary_key=True)
 
 
 class Buffer(AbstractStore):
@@ -246,7 +241,7 @@ class SyncableModel(UUIDModelMixin):
     """
 
     # constant value to insert into partition strings in place of current model's ID, as needed (to avoid circularity)
-    ID_PLACEHOLDER = "<id>"
+    ID_PLACEHOLDER = "${id}"
 
     _morango_internal_fields_not_to_serialize = ('_morango_dirty_bit',)
     morango_fields_not_to_serialize = ()
@@ -257,7 +252,7 @@ class SyncableModel(UUIDModelMixin):
     # morango specific field used to store random uuid or unique together fields
     _morango_source_id = models.CharField(max_length=96)
     # morango specific field used to store the partition on the model
-    _morango_partition = models.TextField()
+    _morango_partition = models.CharField(max_length=128)
 
     objects = SyncableModelManager()
 
@@ -304,7 +299,7 @@ class SyncableModel(UUIDModelMixin):
         return incoming
 
     def calculate_source_id(self):
-        """Should return a string that uniquely defines the model or `None` for a random uuid."""
+        """Should return a string that uniquely defines the model instance or `None` for a random uuid."""
         raise NotImplemented("You must define a 'calculate_source_id' method on models that inherit from SyncableModel.")
 
     def calculate_partition(self):
