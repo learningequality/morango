@@ -1,8 +1,13 @@
+import hashlib
 import uuid
 
 from django.db import models
 
 from . import NAMESPACE_MORANGO
+
+
+def sha2_uuid(*args):
+    return hashlib.sha256("::".join(args)).hexdigest()[:32]
 
 
 class UUIDField(models.CharField):

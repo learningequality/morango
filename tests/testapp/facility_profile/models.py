@@ -32,9 +32,11 @@ class Facility(MorangoMPTTModel, FacilityDataSyncableModel):
     now_date = models.DateTimeField(default=timezone.now)
     parent = TreeForeignKey('self', null=True, blank=True, related_name='children', db_index=True)
 
-    def get_partition(self, *args, **kwargs):
-        return {}
+    def calculate_source_id(self, *args, **kwargs):
+        return ''
 
+    def calculate_partition(self, *args, **kwargs):
+        return ''
 
 class MyUser(AbstractBaseUser, FacilityDataSyncableModel):
     # Morango syncing settings
@@ -47,8 +49,11 @@ class MyUser(AbstractBaseUser, FacilityDataSyncableModel):
 
     objects = BaseQuerySet.as_manager()
 
-    def get_partition(self, *args, **kwargs):
-        return {}
+    def calculate_source_id(self, *args, **kwargs):
+        return ''
+
+    def calculate_partition(self, *args, **kwargs):
+        return ''
 
 
 class Log(FacilityDataSyncableModel):
@@ -59,9 +64,11 @@ class Log(FacilityDataSyncableModel):
     user = models.ForeignKey(MyUser)
     content_id = UUIDField(db_index=True, default=uuid.uuid4)
 
-    def get_partition(self, *args, **kwargs):
-        pass
+    def calculate_source_id(self, *args, **kwargs):
+        return ''
 
+    def calculate_partition(self, *args, **kwargs):
+        return ''
 
 class ProxyParent(MorangoMPTTModel):
 
@@ -75,9 +82,11 @@ class ProxyParent(MorangoMPTTModel):
         if self._KIND:
             self.kind = self._KIND
 
-    def get_partition(self, *args, **kwargs):
-        return {}
+    def calculate_source_id(self, *args, **kwargs):
+        return ''
 
+    def calculate_partition(self, *args, **kwargs):
+        return ''
 
 class ProxyManager(models.Manager):
     pass
@@ -93,5 +102,8 @@ class ProxyModel(ProxyParent):
     class Meta:
         proxy = True
 
-    def get_partition(self, *args, **kwargs):
-        return {}
+    def calculate_source_id(self, *args, **kwargs):
+        return ''
+
+    def calculate_partition(self, *args, **kwargs):
+        return ''
