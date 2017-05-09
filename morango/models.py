@@ -1,3 +1,4 @@
+import hashlib
 import os
 import platform
 import sys
@@ -10,6 +11,10 @@ from django.utils import timezone
 from .certificates import *
 from .manager import SyncableModelManager
 from .utils.uuids import UUIDField, UUIDModelMixin
+
+
+def sha2_uuid(*args):
+    return hashlib.sha256("::".join(args)).hexdigest()[:32]
 
 
 class DatabaseManager(models.Manager):
@@ -154,13 +159,15 @@ class AbstractStore(models.Model):
     serialized = models.TextField(blank=True)
     deleted = models.BooleanField(default=False)
     # morango UUID instance and counter at time of serialization
-    last_saved_instance = models.UUIDField()
+    last_saved_instance = UUIDField()
     last_saved_counter = models.IntegerField()
     # morango_model_name of model
     model_name = models.CharField(max_length=40)
     profile = models.CharField(max_length=40)
     # colon-separated partition values that specify which segment of data this record belongs to
     partition = models.TextField()
+    # conflicting data that needs a merge conflict resolution
+    conflicting_serialized_data = models.TextField(blank=True)
 
     class Meta:
         abstract = True
@@ -172,7 +179,7 @@ class Store(AbstractStore):
     metadata about counters and history.
     """
 
-    id = UUIDField(primary_key=True)
+    id = UUIDField(max_length=32, primary_key=True)
 
 
 class Buffer(AbstractStore):
@@ -238,13 +245,19 @@ class SyncableModel(UUIDModelMixin):
     their data syncable across devices.
     """
 
+    # constant value to insert into partition strings in place of current model's ID, as needed (to avoid circularity)
+    ID_PLACEHOLDER = "<id>"
+
     _morango_internal_fields_not_to_serialize = ('_morango_dirty_bit',)
     morango_fields_not_to_serialize = ()
+    morango_profile = None
 
     # morango specific field used for tracking model changes
     _morango_dirty_bit = models.BooleanField(default=True)
     # morango specific field used to store random uuid or unique together fields
     _morango_source_id = models.CharField(max_length=96)
+    # morango specific field used to store the partition on the model
+    _morango_partition = models.TextField()
 
     objects = SyncableModelManager()
 
@@ -290,18 +303,23 @@ class SyncableModel(UUIDModelMixin):
     def merge_conflict(cls, current, incoming):
         return incoming
 
-    def get_partition(self, *args, **kwargs):
-        """Should return a dictionary with any relevant partition keys included, along with their values."""
-        raise NotImplemented("You must define a 'get_partition_names' method on models that inherit from SyncableModel.")
+    def calculate_source_id(self):
+        """Should return a string that uniquely defines the model or `None` for a random uuid."""
+        raise NotImplemented("You must define a 'calculate_source_id' method on models that inherit from SyncableModel.")
 
+    def calculate_partition(self):
+        """Should return a string specifying this model instance's partition, using `self.ID_PLACEHOLDER` in place of its own ID, if needed."""
+        raise NotImplemented("You must define a 'calculate_partition' method on models that inherit from SyncableModel.")
 
-###################################################################################################
-# CERTIFICATES: Data to manage authorization and the chain-of-trust certificate system
-###################################################################################################
+    @staticmethod
+    def compute_namespaced_id(partition_value, source_id_value):
+        return sha2_uuid(partition_value, source_id_value)
 
+    def calculate_uuid(self):
+        self._morango_source_id = self.calculate_source_id()
+        if self._morango_source_id is None:
+            self._morango_source_id = uuid.uuid4().hex
 
-class CertificateModel(models.Model):
-    signature = models.CharField(max_length=64, primary_key=True)  # long enough to hold SHA256 sigs
-    issuer = models.ForeignKey("CertificateModel")
-
-    certificate = models.TextField()
+        namespaced_id = self.compute_namespaced_id(self.calculate_partition(), self._morango_source_id)
+        self._morango_partition = self.calculate_partition().replace(self.ID_PLACEHOLDER, namespaced_id)
+        return namespaced_id
