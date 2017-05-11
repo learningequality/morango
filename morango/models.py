@@ -248,11 +248,11 @@ class SyncableModel(UUIDModelMixin):
     morango_profile = None
 
     # morango specific field used for tracking model changes
-    _morango_dirty_bit = models.BooleanField(default=True)
+    _morango_dirty_bit = models.BooleanField(default=True, editable=False)
     # morango specific field used to store random uuid or unique together fields
-    _morango_source_id = models.CharField(max_length=96)
+    _morango_source_id = models.CharField(max_length=96, editable=False)
     # morango specific field used to store the partition on the model
-    _morango_partition = models.CharField(max_length=128)
+    _morango_partition = models.CharField(max_length=128, editable=False)
 
     objects = SyncableModelManager()
 

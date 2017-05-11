@@ -61,7 +61,7 @@ class UUIDModelMixin(models.Model):
     uuid_input_fields = None
 
     # field to hold the model's UUID primary key
-    id = UUIDField(max_length=32, primary_key=True)
+    id = UUIDField(max_length=32, primary_key=True, editable=False)
 
     class Meta:
         abstract = True
