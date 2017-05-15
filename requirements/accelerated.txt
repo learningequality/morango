@@ -1,0 +1,2 @@
+-r base.txt
+M2Crypto==0.26.0
