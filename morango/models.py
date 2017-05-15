@@ -307,7 +307,7 @@ class SyncableModel(UUIDModelMixin):
         raise NotImplemented("You must define a 'calculate_partition' method on models that inherit from SyncableModel.")
 
     @staticmethod
-    def compute_namespaced_id(partition_value, source_id_value):
+    def compute_namespaced_id(partition_value, source_id_value, model_name):
         return sha2_uuid(partition_value, source_id_value)
 
     def calculate_uuid(self):
@@ -315,6 +315,6 @@ class SyncableModel(UUIDModelMixin):
         if self._morango_source_id is None:
             self._morango_source_id = uuid.uuid4().hex
 
-        namespaced_id = self.compute_namespaced_id(self.calculate_partition(), self._morango_source_id)
+        namespaced_id = self.compute_namespaced_id(self.calculate_partition(), self._morango_source_id, self.morango_model_name)
         self._morango_partition = self.calculate_partition().replace(self.ID_PLACEHOLDER, namespaced_id)
         return namespaced_id
