@@ -7,7 +7,7 @@ from . import NAMESPACE_MORANGO
 
 
 def sha2_uuid(*args):
-    return hashlib.sha256("::".join(args)).hexdigest()[:32]
+    return hashlib.sha256("::".join(args).encode('utf-8')).hexdigest()[:32]
 
 
 class UUIDField(models.CharField):
@@ -50,6 +50,21 @@ class UUIDField(models.CharField):
             return value.hex
         return value
 
+    def get_default(self):
+        """
+        Returns the default value for this field.
+        """
+        if self.has_default():
+            if callable(self.default):
+                default = self.default()
+                if isinstance(default, uuid.UUID):
+                    return default.hex
+                return default
+            if isinstance(self.default, uuid.UUID):
+                return self.default.hex
+            return self.default
+        return None
+
 
 class UUIDModelMixin(models.Model):
     """
@@ -61,7 +76,7 @@ class UUIDModelMixin(models.Model):
     uuid_input_fields = None
 
     # field to hold the model's UUID primary key
-    id = UUIDField(max_length=32, primary_key=True)
+    id = UUIDField(max_length=32, primary_key=True, editable=False)
 
     class Meta:
         abstract = True
