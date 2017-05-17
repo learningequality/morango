@@ -308,7 +308,7 @@ class SyncableModel(UUIDModelMixin):
 
     @staticmethod
     def compute_namespaced_id(partition_value, source_id_value, model_name):
-        return sha2_uuid(partition_value, source_id_value)
+        return sha2_uuid(partition_value, source_id_value, model_name)
 
     def calculate_uuid(self):
         self._morango_source_id = self.calculate_source_id()
