@@ -3,8 +3,6 @@ import uuid
 
 from django.db import models
 
-from . import NAMESPACE_MORANGO
-
 
 def sha2_uuid(*args):
     return hashlib.sha256("::".join(args).encode('utf-8')).hexdigest()[:32]
@@ -111,7 +109,7 @@ class UUIDModelMixin(models.Model):
             return uuid.uuid4().hex
 
         # compute the UUID as a function of the input values
-        return uuid.uuid5(NAMESPACE_MORANGO, hashable_input).hex
+        return sha2_uuid(hashable_input)
 
     def save(self, *args, **kwargs):
 

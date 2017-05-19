@@ -7,12 +7,11 @@ import mptt.models
 from django.db import models
 
 from .crypto import Key, PrivateKeyField, PublicKeyField
-from .utils.uuids import UUIDModelMixin
-
+from .utils.uuids import UUIDModelMixin, UUIDField
 
 class Certificate(mptt.models.MPTTModel, UUIDModelMixin):
 
-    uuid_input_fields = ("public_key",)
+    uuid_input_fields = ("public_key", "profile")
 
     parent = models.ForeignKey("Certificate", blank=True, null=True)
 
@@ -35,6 +34,38 @@ class Certificate(mptt.models.MPTTModel, UUIDModelMixin):
 
     # when we own a certificate, we'll have the private key for it (otherwise not)
     private_key = PrivateKeyField(blank=True, null=True)
+
+    @classmethod
+    def generate_root_certificate(cls, scope_def_id, **extra_scope_params):
+
+        # create a certificate model instance
+        cert = cls()
+
+        # set the scope definition foreign key, and read some values off of the scope definition model
+        cert.scope_definition_id = scope_def_id
+        cert.scope_version = cert.scope_definition.scope_version
+        cert.profile = cert.scope_definition.profile
+        primary_scope_param_key = cert.scope_definition.primary_scope_param_key
+        assert primary_scope_param_key, "Root cert can only be created for ScopeDefinition with primary_scope_param_key"
+
+        # generate a key and extract the public key component
+        cert.private_key = Key()
+        cert.public_key = Key(public_key_string=cert.private_key.get_public_key_string())
+
+        # calculate the certificate's ID on the basis of the profile and public key
+        cert.id = cert.calculate_uuid()
+
+        # set the scope params to include the primary partition value and any additional params
+        scope_params = {primary_scope_param_key: cert.id}
+        scope_params.update(extra_scope_params)
+        cert.scope_params = json.dumps(scope_params)
+
+        # self-sign the certificate
+        cert.sign_certificate(cert)
+
+        # save and return the certificate
+        cert.save()
+        return cert
 
     def serialize(self):
         data = {
@@ -63,7 +94,12 @@ class Certificate(mptt.models.MPTTModel, UUIDModelMixin):
         )
         return model
 
-    def verify_cert_signature(self, self_signed=False):
+    def sign_certificate(self, cert_to_sign):
+        if not cert_to_sign.serialized:
+            cert_to_sign.serialized = cert_to_sign.serialize()
+        cert_to_sign.signature = self.sign(cert_to_sign.serialized)
+
+    def check_cert_signature(self, self_signed=False):
         signer = self if self_signed else self.parent
         return signer.verify(self.serialized, self.signature)
 
@@ -75,10 +111,18 @@ class Certificate(mptt.models.MPTTModel, UUIDModelMixin):
         return self.public_key.verify(value, signature)
 
     def save(self, *args, **kwargs):
+
+        # if there's no public key, we need to get it from the private key
         if not self.public_key:
+            # if there's also no private key, we first need to generate a new key
+            if not self.private_key:
+                self.private_key = Key()
             self.public_key = Key(public_key_string=self.private_key.get_public_key_string())
+
+        # make sure we store the serialized version
         if not self.serialized:
             self.serialized = self.serialize()
+
         super(Certificate, self).save(*args, **kwargs)
 
     def has_subset_scope_of(self, othercert):
@@ -89,21 +133,25 @@ class Certificate(mptt.models.MPTTModel, UUIDModelMixin):
 
 class ScopeDefinition(models.Model):
 
+    # the identifier used to specify this scope within a certificate
+    id = models.CharField(primary_key=True, max_length=20)
+
     # the Morango profile with which this scope is associated
     profile = models.CharField(max_length=20)
 
     # version number is incremented whenever scope definition is updated
     version = models.IntegerField()
 
-    # the identifier used to specify this scope within a certificate
-    scope_id = models.CharField(primary_key=True, max_length=20)
+    # the scope_param key that the primary partition value will be inserted into when generating a root cert
+    # (if this is not set, then this scope definition cannot be used to generate a root cert)
+    primary_scope_param_key = models.CharField(max_length=20, blank=True)
 
     # human-readable description
     # (can include string template refs to scope params e.g. "Allows syncing data for user ${username}")
     description = models.TextField()
 
     # scope definition templates, in the form of a newline-delimited list of colon-delimited partition strings
-    # (can include string template refs to scope params e.g. "122211:singleuser:${useruuid}")
+    # (can include string template refs to scope params e.g. "122211:singleuser:${user_id}")
     read_scope_def = models.TextField()
     write_scope_def = models.TextField()
     read_write_scope_def = models.TextField()
