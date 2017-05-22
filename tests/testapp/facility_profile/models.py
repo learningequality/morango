@@ -26,14 +26,13 @@ class Facility(MorangoMPTTModel, FacilityDataSyncableModel):
 
     # Morango syncing settings
     morango_model_name = "facility"
-    uuid_input_fields = ("name",)
 
     name = models.CharField(max_length=100)
     now_date = models.DateTimeField(default=timezone.now)
     parent = TreeForeignKey('self', null=True, blank=True, related_name='children', db_index=True)
 
     def calculate_source_id(self, *args, **kwargs):
-        return ''
+        return self.name
 
     def calculate_partition(self, *args, **kwargs):
         return ''
@@ -50,13 +49,13 @@ class MyUser(AbstractBaseUser, FacilityDataSyncableModel):
     objects = BaseQuerySet.as_manager()
 
     def calculate_source_id(self, *args, **kwargs):
-        return ''
+        return self.username
 
     def calculate_partition(self, *args, **kwargs):
         return ''
 
 
-class Log(FacilityDataSyncableModel):
+class SummaryLog(FacilityDataSyncableModel):
     # Morango syncing settings
     morango_model_name = "contentsummarylog"
     uuid_input_fields = ("user_id", "content_id")
@@ -65,10 +64,25 @@ class Log(FacilityDataSyncableModel):
     content_id = UUIDField(db_index=True, default=uuid.uuid4)
 
     def calculate_source_id(self, *args, **kwargs):
-        return ''
+        return '{}:{}'.format(self.user.id, self.content_id)
 
     def calculate_partition(self, *args, **kwargs):
         return ''
+
+
+class InteractionLog(FacilityDataSyncableModel):
+    # Morango syncing settings
+    morango_model_name = "contentinteractionlog"
+
+    user = models.ForeignKey(MyUser)
+    content_id = UUIDField(db_index=True, default=uuid.uuid4)
+
+    def calculate_source_id(self, *args, **kwargs):
+        return None
+
+    def calculate_partition(self, *args, **kwargs):
+        return ''
+
 
 class ProxyParent(MorangoMPTTModel):
 

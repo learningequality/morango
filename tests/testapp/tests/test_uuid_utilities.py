@@ -2,9 +2,9 @@ import mock
 import uuid
 
 from django.test import TestCase
-from facility_profile.models import Facility
+from facility_profile.models import Facility, InteractionLog
 from morango.models import DatabaseIDModel, InstanceIDModel
-
+from morango.utils.uuids import sha2_uuid
 
 class UUIDModelMixinTestCase(TestCase):
 
@@ -12,22 +12,10 @@ class UUIDModelMixinTestCase(TestCase):
         self.fac = Facility(name='bob')
 
     def test_calculate_uuid(self):
-        child = Facility.objects.create(name='bob')
-
-        child.uuid_input_fields = 'RANDOM'
+        log_with_random_id = InteractionLog()
         with mock.patch('uuid.uuid4', return_value=uuid.UUID('12345678123456781234567812345678')):
-            self.assertEqual(child.calculate_uuid(), '12345678123456781234567812345678')
-
-        child.uuid_input_fields = []
-        with self.assertRaises(AssertionError):
-            child.calculate_uuid()
-
-        child.uuid_input_fields = ()
-        with mock.patch('uuid.uuid4', return_value=uuid.UUID('12345678123456781234567812345678')):
-            self.assertEqual(child.calculate_uuid(), '12345678123456781234567812345678')
-
-        child.uuid_input_fields = ('name',)
-        self.assertEqual(child.calculate_uuid(), '40ce9a3fded95d7198f200c78e559353')
+            target_uuid = sha2_uuid("", "12345678123456781234567812345678", log_with_random_id.morango_model_name)
+            self.assertEqual(log_with_random_id.calculate_uuid(), target_uuid)
 
     def test_save_with_id(self):
         ID = '11111111111111111111111111111111'
