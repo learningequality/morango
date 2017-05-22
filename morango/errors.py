@@ -24,3 +24,27 @@ class InvalidMPTTManager(MorangoError):
 
 class InvalidMPTTQuerySet(MorangoError):
     pass
+
+
+class MorangoCertificateError(MorangoError):
+    pass
+
+
+class CertificateScopeNotSubset(MorangoCertificateError):
+    pass
+
+
+class CertificateSignatureInvalid(MorangoCertificateError):
+    pass
+
+
+class CertificateIDInvalid(MorangoCertificateError):
+    pass
+
+
+class CertificateProfileInvalid(MorangoCertificateError):
+    pass
+
+
+class CertificateRootScopeInvalid(MorangoCertificateError):
+    pass

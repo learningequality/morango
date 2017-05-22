@@ -55,7 +55,7 @@ class MorangoProfileController(object):
                             'last_saved_counter': current_id.counter,
                             'model_name': app_model.morango_model_name,
                             'profile': app_model.morango_profile,
-                            'partition': app_model.get_partition()
+                            'partition': app_model._morango_partition,
                         }
                         # create store model and record max counter for the app model
                         store_model = Store.objects.create(**kwargs)
