@@ -87,6 +87,8 @@ class InstanceIDModel(UUIDModelMixin):
         mac = uuid.getnode()
         if (mac >> 40) % 2 == 0:  # 8th bit (of 48 bits, from left) is 1 if MAC is fake
             kwargs["macaddress"] = mac
+        else:
+            kwargs["macaddress"] = ""
 
         # do within transaction so we only ever have 1 current instance ID
         with transaction.atomic():
