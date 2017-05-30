@@ -42,24 +42,18 @@ class BaseKey(object):
         if not self._private_key:
             raise Exception("Key object does not have a private key defined, and thus cannot be used to sign.")
 
-        try:
-            message = message.encode("utf-8", "replace")
-        except UnicodeDecodeError:
-            pass
+        message = self.ensure_bytes(message)
 
         signature = self._sign(message)
 
-        return base64.encodestring(signature).replace("\n", "")
+        return base64.encodestring(signature).decode().replace("\n", "")
 
     def verify(self, message, signature):
 
         # assume we're dealing with a base64 encoded signature
         signature = base64.decodestring(signature.encode())
 
-        try:
-            message = message.encode("utf-8", "replace")
-        except UnicodeDecodeError:
-            pass
+        message = self.ensure_bytes(message)
 
         # ensure we have a public key we can use use to verify
         if not self._public_key:
@@ -93,20 +87,18 @@ class BaseKey(object):
 
     def set_public_key_string(self, public_key_string):
 
-        # convert from unicode, as this can throw off the key parsing
-        public_key_string = str(public_key_string)
-
         # remove the PEM header/footer
         public_key_string = self._remove_pem_headers(public_key_string)
+
+        # public_key_string = self.ensure_bytes(public_key_string)
 
         self._set_public_key_string(public_key_string)
 
     def set_private_key_string(self, private_key_string):
 
-        # convert from unicode, as this can throw off the key parsing
-        private_key_string = str(private_key_string)
-
         private_key_string = self._add_pem_headers(private_key_string, "RSA PRIVATE KEY")
+
+        # private_key_string = self.ensure_bytes(private_key_string)
 
         self._set_private_key_string(private_key_string)
 
@@ -121,6 +113,12 @@ class BaseKey(object):
             "header_string": header_string,
         }
         return "-----BEGIN %(header_string)s-----\n%(key)s\n-----END %(header_string)s-----" % context
+
+    def ensure_bytes(self, message):
+        try:
+            return message.encode("utf-8", "replace")
+        except (UnicodeDecodeError, TypeError, AttributeError):
+            return message
 
     def __str__(self):
         return self.get_public_key_string()
@@ -210,11 +208,10 @@ class M2CryptoKey(BaseKey):
         # add the appropriate PEM header/footer
         public_key_string = self._add_pem_headers(public_key_string, "PUBLIC KEY")
 
-        self._public_key = M2RSA.load_pub_key_bio(M2BIO.MemoryBuffer(public_key_string))
+        self._public_key = M2RSA.load_pub_key_bio(M2BIO.MemoryBuffer(self.ensure_bytes(public_key_string)))
 
     def _set_private_key_string(self, private_key_string):
-
-        self._private_key = M2RSA.load_key_string(private_key_string)
+        self._private_key = M2RSA.load_key_string(self.ensure_bytes(private_key_string))
         self._public_key = M2RSA.RSA_pub(self._private_key.rsa)
 
 
@@ -264,14 +261,14 @@ class CryptographyKey(BaseKey):
         public_key_string = self._add_pem_headers(public_key_string, "PUBLIC KEY")
 
         self._public_key = crypto_serialization.load_pem_public_key(
-            public_key_string,
+            self.ensure_bytes(public_key_string),
             backend=crypto_backend,
         )
 
     def _set_private_key_string(self, private_key_string):
 
         self._private_key = crypto_serialization.load_pem_private_key(
-            private_key_string,
+            self.ensure_bytes(private_key_string),
             password=None,
             backend=crypto_backend,
         )
