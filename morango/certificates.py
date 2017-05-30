@@ -47,7 +47,7 @@ class Certificate(mptt.models.MPTTModel, UUIDModelMixin):
     def private_key(self, value):
         self._private_key = value
         if value and not self.public_key:
-            self.public_key = Key(public_key_string=self.private_key.get_public_key_string())
+            self.public_key = value
 
     @classmethod
     def generate_root_certificate(cls, scope_def_id, **extra_scope_params):
