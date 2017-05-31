@@ -7,5 +7,3 @@ mock
 pytest
 pytest-cov
 pytest-django
-M2Crypto
-cryptography
