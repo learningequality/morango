@@ -302,11 +302,11 @@ class SyncableModel(UUIDModelMixin):
 
     def calculate_source_id(self):
         """Should return a string that uniquely defines the model instance or `None` for a random uuid."""
-        raise NotImplemented("You must define a 'calculate_source_id' method on models that inherit from SyncableModel.")
+        raise NotImplementedError("You must define a 'calculate_source_id' method on models that inherit from SyncableModel.")
 
     def calculate_partition(self):
         """Should return a string specifying this model instance's partition, using `self.ID_PLACEHOLDER` in place of its own ID, if needed."""
-        raise NotImplemented("You must define a 'calculate_partition' method on models that inherit from SyncableModel.")
+        raise NotImplementedError("You must define a 'calculate_partition' method on models that inherit from SyncableModel.")
 
     @staticmethod
     def compute_namespaced_id(partition_value, source_id_value, model_name):
