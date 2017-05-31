@@ -20,7 +20,14 @@ try:
 except:
     CRYPTOGRAPHY_EXISTS = False
 
+if sys.version_info[0] < 3:
+    from base64 import encodestring as b64encode, decodestring as b64decode
+else:
+    from base64 import encodebytes as b64encode, decodebytes as b64decode
+
+
 PKCS8_HEADER = "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8A"
+
 
 
 class BaseKey(object):
@@ -46,12 +53,12 @@ class BaseKey(object):
 
         signature = self._sign(message)
 
-        return base64.encodestring(signature).decode().replace("\n", "")
+        return b64encode(signature).decode().replace("\n", "")
 
     def verify(self, message, signature):
 
         # assume we're dealing with a base64 encoded signature
-        signature = base64.decodestring(signature.encode())
+        signature = b64decode(signature.encode())
 
         message = self.ensure_bytes(message)
 
@@ -66,7 +73,7 @@ class BaseKey(object):
         if not self._public_key:
             raise Exception("Key object does not have a public key defined.")
 
-        pem_string = self._get_public_key_string()
+        pem_string = self.ensure_unicode(self._get_public_key_string())
 
         # remove the headers and footer (to save space, but mostly because the text in them varies)
         pem_string = self._remove_pem_headers(pem_string)
@@ -83,22 +90,20 @@ class BaseKey(object):
     def get_private_key_string(self):
         if not self._private_key:
             raise Exception("Key object does not have a private key defined.")
-        return self._get_private_key_string()
+        return self.ensure_unicode(self._get_private_key_string())
 
     def set_public_key_string(self, public_key_string):
 
         # remove the PEM header/footer
         public_key_string = self._remove_pem_headers(public_key_string)
 
-        # public_key_string = self.ensure_bytes(public_key_string)
-
         self._set_public_key_string(public_key_string)
 
     def set_private_key_string(self, private_key_string):
 
-        private_key_string = self._add_pem_headers(private_key_string, "RSA PRIVATE KEY")
+        private_key_string = self.ensure_unicode(private_key_string)
 
-        # private_key_string = self.ensure_bytes(private_key_string)
+        private_key_string = self._add_pem_headers(private_key_string, "RSA PRIVATE KEY")
 
         self._set_private_key_string(private_key_string)
 
@@ -117,6 +122,12 @@ class BaseKey(object):
     def ensure_bytes(self, message):
         try:
             return message.encode("utf-8", "replace")
+        except (UnicodeDecodeError, TypeError, AttributeError):
+            return message
+
+    def ensure_unicode(self, message):
+        try:
+            return message.decode("utf-8", "replace")
         except (UnicodeDecodeError, TypeError, AttributeError):
             return message
 
