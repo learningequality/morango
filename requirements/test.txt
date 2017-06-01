@@ -8,4 +8,4 @@ pytest
 pytest-cov
 pytest-django
 M2Crypto
-#cryptography  # add this back in once we can figure out why it breaks tests on Travis
+cryptography
