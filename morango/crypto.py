@@ -268,6 +268,10 @@ class CryptographyKey(BaseKey):
         if not public_key_string.startswith(PKCS8_HEADER):
             public_key_string = PKCS8_HEADER + public_key_string
 
+        # break up the base64 key string into lines of max length 64, to please cryptography
+        public_key_string = public_key_string.replace("\n", "")
+        public_key_string = "\n".join(re.findall(".{1,64}", public_key_string))
+
         # add the appropriate PEM header/footer
         public_key_string = self._add_pem_headers(public_key_string, "PUBLIC KEY")
 
@@ -340,4 +344,3 @@ class PrivateKeyField(RSAKeyBaseField):
         if not value:
             return None
         return value.get_private_key_string()
-
