@@ -87,6 +87,8 @@ class InstanceIDModel(UUIDModelMixin):
         mac = uuid.getnode()
         if (mac >> 40) % 2 == 0:  # 8th bit (of 48 bits, from left) is 1 if MAC is fake
             kwargs["macaddress"] = mac
+        else:
+            kwargs["macaddress"] = ""
 
         # do within transaction so we only ever have 1 current instance ID
         with transaction.atomic():
@@ -300,11 +302,11 @@ class SyncableModel(UUIDModelMixin):
 
     def calculate_source_id(self):
         """Should return a string that uniquely defines the model instance or `None` for a random uuid."""
-        raise NotImplemented("You must define a 'calculate_source_id' method on models that inherit from SyncableModel.")
+        raise NotImplementedError("You must define a 'calculate_source_id' method on models that inherit from SyncableModel.")
 
     def calculate_partition(self):
         """Should return a string specifying this model instance's partition, using `self.ID_PLACEHOLDER` in place of its own ID, if needed."""
-        raise NotImplemented("You must define a 'calculate_partition' method on models that inherit from SyncableModel.")
+        raise NotImplementedError("You must define a 'calculate_partition' method on models that inherit from SyncableModel.")
 
     @staticmethod
     def compute_namespaced_id(partition_value, source_id_value, model_name):
