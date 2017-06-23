@@ -1,4 +1,6 @@
-import base64, hashlib, sys, re
+import hashlib
+import re
+import sys
 import rsa as PYRSA
 
 from django.db import models
@@ -27,7 +29,6 @@ else:
 
 
 PKCS8_HEADER = "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8A"
-
 
 
 class BaseKey(object):
@@ -258,7 +259,7 @@ class CryptographyKey(BaseKey):
     def _get_private_key_string(self):
         return self._private_key.private_bytes(
             encoding=crypto_serialization.Encoding.PEM,
-            format=crypto_serialization.PrivateFormat.PKCS8,
+            format=crypto_serialization.PrivateFormat.TraditionalOpenSSL,
             encryption_algorithm=crypto_serialization.NoEncryption(),
         )
 
