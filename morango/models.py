@@ -59,7 +59,7 @@ class InstanceIDModel(UUIDModelMixin):
     as well as its counter with all the records that were serialized at the time.
     """
 
-    uuid_input_fields = ("platform", "hostname", "sysversion", "macaddress", "database_id", "db_path")
+    uuid_input_fields = ("platform", "hostname", "sysversion", "macaddress", "database_id", "db_path", "system_id")
 
     platform = models.TextField()
     hostname = models.TextField()
@@ -69,18 +69,26 @@ class InstanceIDModel(UUIDModelMixin):
     counter = models.IntegerField(default=0)
     current = models.BooleanField(default=True)
     db_path = models.CharField(max_length=1000)
+    system_id = models.CharField(max_length=100, blank=True)
 
     @staticmethod
     def get_or_create_current_instance():
         """Get the instance model corresponding to the current system, or create a new
         one if the system is new or its properties have changed (e.g. OS from upgrade)."""
 
+        # on Android, platform.platform() barfs, so we handle that safely here
+        try:
+            plat = platform.platform()
+        except:
+            plat = "Unknown (Android?)"
+
         kwargs = {
-            "platform": platform.platform(),
+            "platform": plat,
             "hostname": platform.node(),
             "sysversion": sys.version,
             "database": DatabaseIDModel.objects.get(current=True),
             "db_path": os.path.abspath(settings.DATABASES['default']['NAME']),
+            "system_id": os.environ.get("MORANGO_SYSTEM_ID", ""),
         }
 
         # try to get the MAC address, but exclude it if it was a fake (random) address
