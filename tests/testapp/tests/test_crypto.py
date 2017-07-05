@@ -1,21 +1,35 @@
 # coding=utf-8
-from django.test import TestCase
 import unittest
 
 from morango import crypto
 
 
-@unittest.skipIf(not crypto.M2CRYPTO_EXISTS, "Skipping M2Crypto tests as it does not appear to be installed.")
-class TestM2Crypto(unittest.TestCase):
+class CrossKeySigVerificationMixin(object):
 
-    def setUp(self):
-        self.key = crypto.M2CryptoKey()
+    def setupKeys(self, base_key):
+        self.key = base_key
         self.pykey = crypto.PythonRSAKey(
             private_key_string=self.key.get_private_key_string(),
-            public_key_string=self.key.get_public_key_string()
         )
+        if crypto.M2CRYPTO_EXISTS:
+            self.m2cryptokey = crypto.M2CryptoKey(
+                private_key_string=self.key.get_private_key_string(),
+                public_key_string=self.key.get_public_key_string()
+            )
+        if crypto.CRYPTOGRAPHY_EXISTS:
+            self.cryptokey = crypto.CryptographyKey(
+                private_key_string=self.key.get_private_key_string(),
+                public_key_string=self.key.get_public_key_string()
+            )
         self.message_actual = "Hello world! Please leave a message after the tone."
         self.message_fake = "Hello world! Please leave a message after the tone..."
+
+
+@unittest.skipIf(not crypto.M2CRYPTO_EXISTS, "Skipping M2Crypto tests as it does not appear to be installed.")
+class TestM2CryptoWithPyRSA(CrossKeySigVerificationMixin, unittest.TestCase):
+
+    def setUp(self):
+        self.setupKeys(crypto.M2CryptoKey())
 
     def test_pyrsa_sig_verification_with_m2crypto(self):
         # make sure something signed with a pyrsa key can be verified by m2crypto
@@ -36,6 +50,61 @@ class TestM2Crypto(unittest.TestCase):
         sig = self.key.sign(self.message_actual)
         self.assertTrue(pubkey.verify(self.message_actual, sig))
         self.assertFalse(pubkey.verify(self.message_fake, sig))
+
+    def test_pubkey_verification_pyrsa(self):
+        pubkey = crypto.PythonRSAKey(public_key_string=self.pykey.get_public_key_string())
+        sig = self.pykey.sign(self.message_actual)
+        self.assertTrue(pubkey.verify(self.message_actual, sig))
+        self.assertFalse(pubkey.verify(self.message_fake, sig))
+
+
+@unittest.skipIf(not crypto.CRYPTOGRAPHY_EXISTS, "Skipping python-cryptography test as it does not appear to be installed.")
+class TestCryptoWithPyRSA(CrossKeySigVerificationMixin, unittest.TestCase):
+
+    def setUp(self):
+        self.setupKeys(crypto.CryptographyKey())
+
+    def test_pyrsa_sig_verification_with_crypto(self):
+        # make sure something signed with a pyrsa key can be verified by m2crypto
+        sig = self.pykey.sign(self.message_actual)
+        self.assertTrue(self.key.verify(self.message_actual, sig))
+        # make sure it doesn't verify for a different message
+        self.assertFalse(self.key.verify(self.message_fake, sig))
+
+    def test_crypto_sig_verification_with_pyrsa(self):
+        # make sure something signed with an m2crypto key can be verified by pyrsa
+        sig = self.key.sign(self.message_actual)
+        self.assertTrue(self.pykey.verify(self.message_actual, sig))
+        # make sure it doesn't verify for a different message
+        self.assertFalse(self.pykey.verify(self.message_fake, sig))
+
+    def test_pubkey_verification_crypto(self):
+        pubkey = crypto.CryptographyKey(public_key_string=self.key.get_public_key_string())
+        sig = self.key.sign(self.message_actual)
+        self.assertTrue(pubkey.verify(self.message_actual, sig))
+        self.assertFalse(pubkey.verify(self.message_fake, sig))
+
+
+@unittest.skipIf(not crypto.CRYPTOGRAPHY_EXISTS, "Skipping python-cryptography test as it does not appear to be installed.")
+@unittest.skipIf(not crypto.M2CRYPTO_EXISTS, "Skipping M2Crypto tests as it does not appear to be installed.")
+class TestCryptoWithM2Crypto(CrossKeySigVerificationMixin, unittest.TestCase):
+
+    def setUp(self):
+        self.setupKeys(crypto.CryptographyKey())
+
+    def test_m2crypto_sig_verification_with_crypto(self):
+        # make sure something signed with a pyrsa key can be verified by m2crypto
+        sig = self.m2cryptokey.sign(self.message_actual)
+        self.assertTrue(self.key.verify(self.message_actual, sig))
+        # make sure it doesn't verify for a different message
+        self.assertFalse(self.key.verify(self.message_fake, sig))
+
+    def test_crypto_sig_verification_with_m2crypto(self):
+        # make sure something signed with an m2crypto key can be verified by pyrsa
+        sig = self.key.sign(self.message_actual)
+        self.assertTrue(self.m2cryptokey.verify(self.message_actual, sig))
+        # make sure it doesn't verify for a different message
+        self.assertFalse(self.m2cryptokey.verify(self.message_fake, sig))
 
 
 class ExistingKeyParsingMixin(object):
@@ -155,4 +224,3 @@ class TestStringEncodingVariationsWithPythonCryptography(unittest.TestCase, Stri
 
     def setUp(self):
         self.key = crypto.CryptographyKey(private_key_string=self.priv_key_string)
-
