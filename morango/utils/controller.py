@@ -34,7 +34,9 @@ class MorangoProfileController(object):
                     try:
                         # set new serialized data on this store model
                         store_model = Store.objects.get(id=app_model.id)
-                        store_model.serialized = DjangoJSONEncoder().encode(app_model.serialize())
+                        ser_dict = json.loads(store_model.serialized)
+                        ser_dict.update(app_model.serialize())
+                        store_model.serialized = DjangoJSONEncoder().encode(ser_dict)
 
                         # create or update instance and counter on the record max counter for this store model
                         defaults.update({'store_model_id': store_model.id})
@@ -58,8 +60,8 @@ class MorangoProfileController(object):
                             'partition': app_model._morango_partition,
                         }
                         # create store model and record max counter for the app model
-                        store_model = Store.objects.create(**kwargs)
-                        defaults.update({'store_model_id': store_model.id})
+                        Store.objects.create(**kwargs)
+                        defaults.update({'store_model_id': app_model.id})
                         RecordMaxCounter(**defaults).save()
 
                     # set dirty bit to false for this model
