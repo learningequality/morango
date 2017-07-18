@@ -75,7 +75,7 @@ class MorangoProfileController(object):
         syncable_dict = _profile_models[self.profile]
         # iterate through classes which are in foreign key dependency order
         for model_name, klass_model in iteritems(syncable_dict):
-            for store_model in Store.objects.filter(model_name=model_name):
+            for store_model in Store.objects.filter(model_name=model_name, deleted=False, dirty_bit=True):
                 concrete_store_model = klass_model.deserialize(json.loads(store_model.serialized))
                 concrete_store_model.save(update_dirty_bit_to=False)
 

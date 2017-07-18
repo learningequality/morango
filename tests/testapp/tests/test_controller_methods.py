@@ -9,6 +9,15 @@ from facility_profile.models import Facility, MyUser
 from morango.models import DatabaseIDModel, InstanceIDModel, RecordMaxCounter, Store
 
 
+def serialized_facility_factory(identifier):
+    serialized = {'name': "Facility {}".format(identifier),
+                  'id': identifier,
+                  '_morango_source_id': uuid.uuid4().hex,
+                  '_morango_partition': "",
+                  '_morango_dirty_bit': False}
+    return json.dumps(serialized)
+
+
 class FacilityModelFactory(factory.DjangoModelFactory):
 
     class Meta:
@@ -16,6 +25,16 @@ class FacilityModelFactory(factory.DjangoModelFactory):
 
     name = factory.Sequence(lambda n: "Fac %d" % n)
 
+class StoreModelFacilityFactory(factory.DjangoModelFactory):
+
+    class Meta:
+        model = Store
+
+    model_name = "facility"
+    profile = "facilitydata"
+    last_saved_instance = uuid.uuid4().hex
+    last_saved_counter = 1
+    dirty_bit = True
 
 class SerializeIntoStoreTestCase(TestCase):
 
@@ -155,3 +174,57 @@ class RecordMaxCounterUpdatesDuringSerialization(TestCase):
         self.assertNotEqual(new_id.id, self.current_id.id)
         self.assertEqual(new_store_record.last_saved_instance, new_rmc.instance_id)
         self.assertEqual(new_store_record.last_saved_counter, new_rmc.counter)
+
+
+class DeserializationFromStoreIntoAppTestCase(TestCase):
+
+    def setUp(self):
+        DatabaseIDModel.objects.create()
+        (self.current_id, _) = InstanceIDModel.get_or_create_current_instance()
+        self.range = 10
+        self.mc = MorangoProfileController('facilitydata')
+        for i in range(self.range):
+            self.ident = uuid.uuid4().hex
+            StoreModelFacilityFactory(pk=self.ident, serialized=serialized_facility_factory(self.ident))
+
+    def test_dirty_store_records_are_deserialized(self):
+        self.assertFalse(Facility.objects.all())
+        self.mc._store_to_app()
+        self.assertEqual(len(Facility.objects.all()), self.range)
+
+    def test_clean_store_records_do_not_get_deserialized(self):
+        self.assertFalse(Facility.objects.all())
+        Store.objects.update(dirty_bit=False)
+        self.mc._store_to_app()
+        self.assertFalse(Facility.objects.all())
+
+    def test_deleted_models_do_not_get_deserialized(self):
+        Store.objects.update_or_create(defaults={'deleted': True}, id=self.ident)
+        self.mc._store_to_app()
+        with self.assertRaises(Facility.DoesNotExist):
+            Facility.objects.get(id=self.ident)
+
+    def test_update_app_with_newer_data_from_store(self):
+        name = 'test'
+        FacilityModelFactory(id=self.ident, name=name)
+        fac = Facility.objects.get(id=self.ident)
+        self.assertEqual(fac.name, name)
+
+        self.mc._store_to_app()
+        fac = Facility.objects.get(id=self.ident)
+        self.assertNotEqual(fac.name, name)
+
+    def test_handle_extra_field_deserialization(self):
+        # modify a store record by adding extra serialized field
+        store_model = Store.objects.get(id=self.ident)
+        serialized = json.loads(store_model.serialized)
+        serialized.update({'wacky': True})
+        store_model.serialized = json.dumps(serialized)
+        store_model.save()
+
+        # deserialize records
+        self.mc._store_to_app()
+
+        # by this point no errors should have occured but we check list of fields anyways
+        fac = Facility.objects.get(id=self.ident)
+        self.assertNotIn('wacky', fac.__dict__)
