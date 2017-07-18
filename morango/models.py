@@ -185,6 +185,8 @@ class Store(AbstractStore):
     """
 
     id = UUIDField(primary_key=True)
+    # used to know which store records to deserialize into app layer
+    dirty_bit = models.BooleanField(default=False)
 
 
 class Buffer(AbstractStore):
