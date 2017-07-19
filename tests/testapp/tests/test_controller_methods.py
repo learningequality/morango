@@ -6,7 +6,7 @@ import uuid
 from django.test import TestCase
 from morango.utils.controller import MorangoProfileController
 from facility_profile.models import Facility, MyUser
-from morango.models import DatabaseIDModel, InstanceIDModel, RecordMaxCounter, Store
+from morango.models import DatabaseIDModel, DeletedModels, InstanceIDModel, RecordMaxCounter, Store
 
 
 def serialized_facility_factory(identifier):
@@ -124,6 +124,17 @@ class SerializeIntoStoreTestCase(TestCase):
         self.mc._serialize_into_store()
         serialized = json.loads(Store.objects.first().serialized)
         self.assertIn('height', serialized)
+
+    def test_store_updates_deleted_flag(self):
+        fac = FacilityModelFactory()
+        fac_id = fac.id
+        self.mc._serialize_into_store()
+        self.assertFalse(Store.objects.get(pk=fac_id).deleted)
+        fac.delete()
+        self.assertTrue(DeletedModels.objects.all())
+        self.mc._serialize_into_store()
+        self.assertFalse(DeletedModels.objects.all())
+        self.assertTrue(Store.objects.get(pk=fac_id).deleted)
 
 
 class RecordMaxCounterUpdatesDuringSerialization(TestCase):

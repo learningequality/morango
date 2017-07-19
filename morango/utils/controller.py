@@ -4,7 +4,7 @@ from django.core.serializers.json import DjangoJSONEncoder
 from django.db import transaction
 from django.db.models import F
 from django.utils.six import iteritems
-from morango.models import InstanceIDModel, RecordMaxCounter, Store
+from morango.models import DeletedModels, InstanceIDModel, RecordMaxCounter, Store
 
 from .register_models import _profile_models
 
@@ -66,6 +66,11 @@ class MorangoProfileController(object):
 
                     # set dirty bit to false for this model
                     app_model.save(update_dirty_bit_to=False, update_fields=['_morango_dirty_bit'])
+
+            # update deleted flags based on DeletedModels
+            deleted_ids = DeletedModels.objects.values_list('id', flat=True)
+            Store.objects.filter(id__in=deleted_ids).update(deleted=True)
+            DeletedModels.objects.all().delete()
 
     @transaction.atomic
     def _store_to_app(self):

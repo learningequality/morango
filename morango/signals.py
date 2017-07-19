@@ -7,8 +7,8 @@ from .models import DeletedModels, SyncableModel
 @receiver(post_delete)
 def add_to_deleted_models(sender, instance=None, *args, **kwargs):
     """
-    Whenever a model is deleted, we record its ID in a separate model for tracking purposes. We will mark
-    the model as deleted later on in the store.
+    Whenever a model is deleted, we record its ID in a separate model for tracking purposes. During serialization, we will mark
+    the model as deleted in the store.
     """
     if issubclass(sender, SyncableModel):
         DeletedModels.objects.update_or_create(defaults={'id': instance.id, 'profile': instance.morango_profile},
