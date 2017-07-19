@@ -239,3 +239,16 @@ class DeserializationFromStoreIntoAppTestCase(TestCase):
         # by this point no errors should have occured but we check list of fields anyways
         fac = Facility.objects.get(id=self.ident)
         self.assertNotIn('wacky', fac.__dict__)
+
+    def test_broken_foreign_key_deserialization(self):
+        # add fake foreign key
+        store_model = Store.objects.get(id=self.ident)
+        serialized = json.loads(store_model.serialized)
+        serialized.update({'parent_id': '4d53c8e72b8bea87a393910ff0dcb212'})
+        store_model.serialized = json.dumps(serialized)
+        store_model.save()
+
+        # deserialize records
+        self.mc._store_to_app()
+
+        self.assertTrue(DeletedModels.objects.filter(id=store_model.id))

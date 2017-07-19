@@ -1,5 +1,6 @@
 import json
 
+from django.core.exceptions import ObjectDoesNotExist
 from django.core.serializers.json import DjangoJSONEncoder
 from django.db import transaction
 from django.db.models import F
@@ -82,7 +83,11 @@ class MorangoProfileController(object):
         for model_name, klass_model in iteritems(syncable_dict):
             for store_model in Store.objects.filter(model_name=model_name, deleted=False, dirty_bit=True):
                 concrete_store_model = klass_model.deserialize(json.loads(store_model.serialized))
-                concrete_store_model.save(update_dirty_bit_to=False)
+                try:
+                    concrete_store_model.save(update_dirty_bit_to=False)
+                except ObjectDoesNotExist:
+                    DeletedModels.objects.update_or_create(defaults={'id': concrete_store_model.id, 'profile': concrete_store_model.morango_profile},
+                                                           id=concrete_store_model.id)
 
     def open_network_sync_connection(host, scope):
         pass
