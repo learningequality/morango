@@ -129,7 +129,7 @@ class Certificate(mptt.models.MPTTModel, UUIDModelMixin):
                 raise CertificateSignatureInvalid()
             # check that the certificate scopes all start with the primary partition value
             scope = self.get_scope()
-            for item in scope.read_scope + scope.write_scope:
+            for item in scope.read_filter + scope.write_filter:
                 if not item.startswith(self.id):
                     raise CertificateRootScopeInvalid("Scope entry {} does not start with primary partition {}".format(item, self.id))
         else:  # non-root child certificate
@@ -173,11 +173,11 @@ class ScopeDefinition(models.Model):
     # (can include string template refs to scope params e.g. "Allows syncing data for user ${username}")
     description = models.TextField()
 
-    # scope definition templates, in the form of a newline-delimited list of colon-delimited partition strings
+    # filter templates, in the form of a newline-delimited list of colon-delimited partition strings
     # (can include string template refs to scope params e.g. "122211:singleuser:${user_id}")
-    read_scope_def = models.TextField()
-    write_scope_def = models.TextField()
-    read_write_scope_def = models.TextField()
+    read_filter_template = models.TextField()
+    write_filter_template = models.TextField()
+    read_write_filter_template = models.TextField()
 
     @classmethod
     def retrieve_by_id(cls, scope_def_id):
@@ -197,13 +197,13 @@ class Scope(object):
         # ensure params has been deserialized
         if isinstance(params, six.string_types):
             params = json.loads(params)
-        # inflate the scope definition by filling in the template values from the params
-        rw_scope = self._fill_in_scope_def(definition.read_write_scope_def, params)
-        self.read_scope = rw_scope + self._fill_in_scope_def(definition.read_scope_def, params)
-        self.write_scope = rw_scope + self._fill_in_scope_def(definition.write_scope_def, params)
+        # inflate the scope definition by filling in the filter templates from the params
+        rw_filter = self._fill_in_filter_template(definition.read_write_filter_template, params)
+        self.read_filter = rw_filter + self._fill_in_filter_template(definition.read_filter_template, params)
+        self.write_filter = rw_filter + self._fill_in_filter_template(definition.write_filter_template, params)
 
-    def _fill_in_scope_def(self, scope_def, params):
-        return tuple(string.Template(scope_def).safe_substitute(params).split())
+    def _fill_in_filter_template(self, template, params):
+        return tuple(string.Template(template).safe_substitute(params).split())
 
     def _verify_subset_for_field(self, scope, fieldname):
         s1 = getattr(self, fieldname)
@@ -219,8 +219,8 @@ class Scope(object):
                 )
 
     def verify_subset_of(self, scope):
-        self._verify_subset_for_field(scope, "read_scope")
-        self._verify_subset_for_field(scope, "write_scope")
+        self._verify_subset_for_field(scope, "read_filter")
+        self._verify_subset_for_field(scope, "write_filter")
 
     def is_subset_of(self, scope):
         try:
