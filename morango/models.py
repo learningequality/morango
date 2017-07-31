@@ -123,13 +123,10 @@ class SyncSession(models.Model):
     local_certificate = models.ForeignKey(Certificate, blank=True, null=True, related_name="syncsessions_local")
     remote_certificate = models.ForeignKey(Certificate, blank=True, null=True, related_name="syncsessions_remote")
 
-
-class NetworkSyncSession(SyncSession):
-    host = models.CharField(max_length=1000)
-
-
-class DiskSyncSession(SyncSession):
-    path = models.CharField(max_length=1000)
+    # information about the connection over which this sync session is happening
+    connection_kind = models.CharField(max_length=10, choices=[(u"network", u"Network"), (u"disk", u"Disk")])
+    connection_path = models.CharField(max_length=1000)  # file path if kind=disk, and base URL if kind=network
+    connection_params = models.TextField(default=u"{}")
 
 
 class TransferSession(models.Model):
