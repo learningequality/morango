@@ -33,8 +33,13 @@ class MorangoProfileController(object):
             for (_, klass_model) in iteritems(syncable_dict):
                 for app_model in klass_model.objects.filter(_morango_dirty_bit=True):
                     try:
-                        # set new serialized data on this store model
                         store_model = Store.objects.get(id=app_model.id)
+
+                        # if store record dirty and app record dirty, append store serialized to conflicting data
+                        if store_model.dirty_bit:
+                            store_model.conflicting_serialized_data = store_model.serialized + "\n" + store_model.conflicting_serialized_data
+
+                        # set new serialized data on this store model
                         ser_dict = json.loads(store_model.serialized)
                         ser_dict.update(app_model.serialize())
                         store_model.serialized = DjangoJSONEncoder().encode(ser_dict)
@@ -73,24 +78,27 @@ class MorangoProfileController(object):
             Store.objects.filter(id__in=deleted_ids).update(deleted=True)
             DeletedModels.objects.all().delete()
 
-    @transaction.atomic
-    def store_to_app(self):
+    def deserialize_from_store(self):
         """
         Takes data from the store and integrates into the application.
         """
-        syncable_dict = _profile_models[self.profile]
-        # iterate through classes which are in foreign key dependency order
-        for model_name, klass_model in iteritems(syncable_dict):
-            for store_model in Store.objects.filter(model_name=model_name, dirty_bit=True):
-                if store_model.deleted:
-                    klass_model.objects.filter(id=store_model.id).delete()
-                else:
-                    app_model = klass_model.deserialize(json.loads(store_model.serialized))
-                    try:
-                        app_model.save(update_dirty_bit_to=False)
-                    # when deserializing, we catch this exception in case we have a reference to a missing object (foreign key) not in the app layer
-                    except ObjectDoesNotExist:
-                        DeletedModels.objects.update_or_create(defaults={'id': app_model.id, 'profile': app_model.morango_profile},
-                                                               id=app_model.id)
-                store_model.dirty_bit = False
-                store_model.save(update_fields=['dirty_bit'])
+
+        self.serialize_into_store()
+
+        with transaction.atomic():
+            syncable_dict = _profile_models[self.profile]
+            # iterate through classes which are in foreign key dependency order
+            for model_name, klass_model in iteritems(syncable_dict):
+                for store_model in Store.objects.filter(model_name=model_name, profile=self.profile, dirty_bit=True):
+                    if store_model.deleted:
+                        klass_model.objects.filter(id=store_model.id).delete()
+                    else:
+                        app_model = klass_model.deserialize(json.loads(store_model.serialized))
+                        try:
+                            app_model.save(update_dirty_bit_to=False)
+                        # when deserializing, we catch this exception in case we have a reference to a missing object (foreign key) not in the app layer
+                        except ObjectDoesNotExist:
+                            app_model._update_deleted_models()
+
+            # clear dirty bit for all store models for this profile
+            Store.objects.filter(profile=self.profile, dirty_bit=True).update(dirty_bit=False)

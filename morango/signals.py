@@ -11,5 +11,4 @@ def add_to_deleted_models(sender, instance=None, *args, **kwargs):
     the model as deleted in the store.
     """
     if issubclass(sender, SyncableModel):
-        DeletedModels.objects.update_or_create(defaults={'id': instance.id, 'profile': instance.morango_profile},
-                                               id=instance.id)
+        instance._update_deleted_models()

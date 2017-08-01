@@ -203,27 +203,27 @@ class DeserializationFromStoreIntoAppTestCase(TestCase):
 
     def test_dirty_store_records_are_deserialized(self):
         self.assertFalse(Facility.objects.all().exists())
-        self.mc.store_to_app()
+        self.mc.deserialize_from_store()
         self.assertEqual(len(Facility.objects.all()), self.range)
 
     def test_clean_store_records_do_not_get_deserialized(self):
         self.assertFalse(Facility.objects.exists())
         Store.objects.update(dirty_bit=False)
-        self.mc.store_to_app()
+        self.mc.deserialize_from_store()
         self.assertFalse(Facility.objects.exists())
 
     def test_deleted_models_do_not_get_deserialized(self):
         Store.objects.update_or_create(defaults={'deleted': True}, id=self.ident)
-        self.mc.store_to_app()
+        self.mc.deserialize_from_store()
         self.assertFalse(Facility.objects.filter(id=self.ident).exists())
 
     def test_deleted_models_deletes_them_in_app(self):
         # put models in app layer
-        self.mc.store_to_app()
+        self.mc.deserialize_from_store()
 
         # deleted flag on store should delete model in app layer
         Store.objects.update_or_create(defaults={'deleted': True, 'dirty_bit': True}, id=self.ident)
-        self.mc.store_to_app()
+        self.mc.deserialize_from_store()
         self.assertFalse(Facility.objects.filter(id=self.ident).exists())
 
     def test_update_app_with_newer_data_from_store(self):
@@ -232,7 +232,7 @@ class DeserializationFromStoreIntoAppTestCase(TestCase):
         fac = Facility.objects.get(id=self.ident)
         self.assertEqual(fac.name, name)
 
-        self.mc.store_to_app()
+        self.mc.deserialize_from_store()
         fac = Facility.objects.get(id=self.ident)
         self.assertNotEqual(fac.name, name)
 
@@ -245,7 +245,7 @@ class DeserializationFromStoreIntoAppTestCase(TestCase):
         store_model.save()
 
         # deserialize records
-        self.mc.store_to_app()
+        self.mc.deserialize_from_store()
 
         # by this point no errors should have occurred but we check list of fields anyways
         fac = Facility.objects.get(id=self.ident)
@@ -260,18 +260,18 @@ class DeserializationFromStoreIntoAppTestCase(TestCase):
         store_model.save()
 
         # deserialize records
-        self.mc.store_to_app()
+        self.mc.deserialize_from_store()
 
         self.assertTrue(DeletedModels.objects.filter(id=store_model.id).exists())
 
     def test_store_dirty_bit_resets(self):
         self.assertTrue(Store.objects.filter(dirty_bit=True))
-        self.mc.store_to_app()
+        self.mc.deserialize_from_store()
         self.assertFalse(Store.objects.filter(dirty_bit=True))
 
     def test_record_with_dirty_bit_off_doesnt_deserialize(self):
         st = Store.objects.first()
         st.dirty_bit = False
         st.save()
-        self.mc.store_to_app()
+        self.mc.deserialize_from_store()
         self.assertFalse(Facility.objects.filter(id=st.id).exists())

@@ -271,6 +271,10 @@ class SyncableModel(UUIDModelMixin):
     class Meta:
         abstract = True
 
+    def _update_deleted_models(self):
+        DeletedModels.objects.update_or_create(defaults={'id': self.id, 'profile': self.morango_profile},
+                                               id=self.id)
+
     def save(self, update_dirty_bit_to=True, *args, **kwargs):
         if update_dirty_bit_to is None:
             pass  # don't do anything with the dirty bit
