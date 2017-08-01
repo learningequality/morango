@@ -7,7 +7,7 @@ from django.db.models import F
 from django.utils.six import iteritems
 from morango.models import DeletedModels, InstanceIDModel, RecordMaxCounter, Store
 
-from .register_models import _profile_models
+from morango.utils.register_models import _profile_models
 
 
 class MorangoProfileController(object):
@@ -16,7 +16,7 @@ class MorangoProfileController(object):
         assert profile, "profile needs to be defined."
         self.profile = profile
 
-    def _serialize_into_store(self):
+    def serialize_into_store(self):
         """
         Takes data from app layer and serializes the models into the store.
         """
@@ -69,28 +69,28 @@ class MorangoProfileController(object):
                     app_model.save(update_dirty_bit_to=False, update_fields=['_morango_dirty_bit'])
 
             # update deleted flags based on DeletedModels
-            deleted_ids = DeletedModels.objects.values_list('id', flat=True)
+            deleted_ids = DeletedModels.objects.filter(profile=self.profile).values_list('id', flat=True)
             Store.objects.filter(id__in=deleted_ids).update(deleted=True)
             DeletedModels.objects.all().delete()
 
     @transaction.atomic
-    def _store_to_app(self):
+    def store_to_app(self):
         """
         Takes data from the store and integrates into the application.
         """
         syncable_dict = _profile_models[self.profile]
         # iterate through classes which are in foreign key dependency order
         for model_name, klass_model in iteritems(syncable_dict):
-            for store_model in Store.objects.filter(model_name=model_name, deleted=False, dirty_bit=True):
-                concrete_store_model = klass_model.deserialize(json.loads(store_model.serialized))
-                try:
-                    concrete_store_model.save(update_dirty_bit_to=False)
-                except ObjectDoesNotExist:
-                    DeletedModels.objects.update_or_create(defaults={'id': concrete_store_model.id, 'profile': concrete_store_model.morango_profile},
-                                                           id=concrete_store_model.id)
-
-    def open_network_sync_connection(host, scope):
-        pass
-
-    def open_disk_sync_connection(path, scope):
-        pass
+            for store_model in Store.objects.filter(model_name=model_name, dirty_bit=True):
+                if store_model.deleted:
+                    klass_model.objects.filter(id=store_model.id).delete()
+                else:
+                    app_model = klass_model.deserialize(json.loads(store_model.serialized))
+                    try:
+                        app_model.save(update_dirty_bit_to=False)
+                    # when deserializing, we catch this exception in case we have a reference to a missing object (foreign key) not in the app layer
+                    except ObjectDoesNotExist:
+                        DeletedModels.objects.update_or_create(defaults={'id': app_model.id, 'profile': app_model.morango_profile},
+                                                               id=app_model.id)
+                store_model.dirty_bit = False
+                store_model.save(update_fields=['dirty_bit'])

@@ -115,7 +115,7 @@ class CertificateSerializationTestCase(CertificateTestCaseMixin, TestCase):
     def test_deserialized_certs_validate(self):
         self.subset_cert_deserialized.check_certificate()
         self.root_cert_deserialized.check_certificate()
-        
+
         self.subset_cert.delete()  # to avoid "Certificate with this Id already exists" error
         self.subset_cert_deserialized.full_clean()
 
