@@ -18,9 +18,9 @@ class CertificateTestCaseMixin(object):
             version=1,
             primary_scope_param_key="mainpartition",
             description="Root cert for ${mainpartition}.",
-            read_scope_def="",
-            write_scope_def="",
-            read_write_scope_def="${mainpartition}",
+            read_filter_template="",
+            write_filter_template="",
+            read_write_filter_template="${mainpartition}",
         )
 
         self.subset_scope_def = ScopeDefinition.objects.create(
@@ -29,9 +29,9 @@ class CertificateTestCaseMixin(object):
             version=1,
             primary_scope_param_key="",
             description="Subset cert under ${mainpartition} for ${subpartition}.",
-            read_scope_def="${mainpartition}",
-            write_scope_def="${mainpartition}:${subpartition}",
-            read_write_scope_def="",
+            read_filter_template="${mainpartition}",
+            write_filter_template="${mainpartition}:${subpartition}",
+            read_write_filter_template="",
         )
 
         self.root_cert = Certificate.generate_root_certificate(self.root_scope_def.id)

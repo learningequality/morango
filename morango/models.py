@@ -7,7 +7,7 @@ from django.conf import settings
 from django.db import models, transaction
 from django.utils import timezone
 
-from .certificates import *
+from .certificates import Certificate, ScopeDefinition
 from .manager import SyncableModelManager
 from .utils.uuids import UUIDField, UUIDModelMixin, sha2_uuid
 
@@ -114,13 +114,19 @@ class SyncSession(models.Model):
     """
 
     id = models.UUIDField(primary_key=True)
-    # we track when the session started and the last time there was activity for this session
+
+    # track when the session started and the last time there was activity for this session
     start_timestamp = models.DateTimeField(default=timezone.now)
     last_activity_timestamp = models.DateTimeField(blank=True)
-    # JSON of broad scope/(R and/or W) permissions
-    local_scope = models.TextField()
-    remote_scope = models.TextField()
-    host = models.CharField(max_length=255)
+
+    # track the certificates being used by each side for this session
+    local_certificate = models.ForeignKey(Certificate, blank=True, null=True, related_name="syncsessions_local")
+    remote_certificate = models.ForeignKey(Certificate, blank=True, null=True, related_name="syncsessions_remote")
+
+    # information about the connection over which this sync session is happening
+    connection_kind = models.CharField(max_length=10, choices=[(u"network", u"Network"), (u"disk", u"Disk")])
+    connection_path = models.CharField(max_length=1000)  # file path if kind=disk, and base URL if kind=network
+    connection_params = models.TextField(default=u"{}")
 
 
 class TransferSession(models.Model):
