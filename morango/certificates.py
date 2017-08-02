@@ -82,6 +82,9 @@ class Certificate(mptt.models.MPTTModel, UUIDModelMixin):
         cert.save()
         return cert
 
+    def has_private_key(self):
+        return self._private_key is not None
+
     def serialize(self):
         if not self.id:
             self.id = self.calculate_uuid()
@@ -112,9 +115,12 @@ class Certificate(mptt.models.MPTTModel, UUIDModelMixin):
         )
         return model
 
+    def _serialize_if_needed(self):
+        if not self.serialized:
+            self.serialized = self.serialize()
+
     def sign_certificate(self, cert_to_sign):
-        if not cert_to_sign.serialized:
-            cert_to_sign.serialized = cert_to_sign.serialize()
+        cert_to_sign._serialize_if_needed()
         cert_to_sign.signature = self.sign(cert_to_sign.serialized)
 
     def check_certificate(self):
