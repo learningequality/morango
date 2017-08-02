@@ -1,12 +1,13 @@
 import json
 
+from django.core.exceptions import ObjectDoesNotExist
 from django.core.serializers.json import DjangoJSONEncoder
 from django.db import transaction
 from django.db.models import F
 from django.utils.six import iteritems
-from morango.models import InstanceIDModel, RecordMaxCounter, Store
+from morango.models import DeletedModels, InstanceIDModel, RecordMaxCounter, Store
 
-from .register_models import _profile_models
+from morango.utils.register_models import _profile_models
 
 
 class MorangoProfileController(object):
@@ -15,7 +16,7 @@ class MorangoProfileController(object):
         assert profile, "profile needs to be defined."
         self.profile = profile
 
-    def _serialize_into_store(self):
+    def serialize_into_store(self):
         """
         Takes data from app layer and serializes the models into the store.
         """
@@ -32,9 +33,16 @@ class MorangoProfileController(object):
             for (_, klass_model) in iteritems(syncable_dict):
                 for app_model in klass_model.objects.filter(_morango_dirty_bit=True):
                     try:
-                        # set new serialized data on this store model
                         store_model = Store.objects.get(id=app_model.id)
-                        store_model.serialized = DjangoJSONEncoder().encode(app_model.serialize())
+
+                        # if store record dirty and app record dirty, append store serialized to conflicting data
+                        if store_model.dirty_bit:
+                            store_model.conflicting_serialized_data = store_model.serialized + "\n" + store_model.conflicting_serialized_data
+
+                        # set new serialized data on this store model
+                        ser_dict = json.loads(store_model.serialized)
+                        ser_dict.update(app_model.serialize())
+                        store_model.serialized = DjangoJSONEncoder().encode(ser_dict)
 
                         # create or update instance and counter on the record max counter for this store model
                         defaults.update({'store_model_id': store_model.id})
@@ -45,7 +53,7 @@ class MorangoProfileController(object):
                         store_model.last_saved_counter = current_id.counter
 
                         # update fields for this store model
-                        store_model.save(update_fields=['serialized', 'last_saved_instance', 'last_saved_counter'])
+                        store_model.save(update_fields=['serialized', 'last_saved_instance', 'last_saved_counter', 'conflicting_serialized_data'])
 
                     except Store.DoesNotExist:
                         kwargs = {
@@ -58,27 +66,39 @@ class MorangoProfileController(object):
                             'partition': app_model._morango_partition,
                         }
                         # create store model and record max counter for the app model
-                        store_model = Store.objects.create(**kwargs)
-                        defaults.update({'store_model_id': store_model.id})
+                        Store.objects.create(**kwargs)
+                        defaults.update({'store_model_id': app_model.id})
                         RecordMaxCounter(**defaults).save()
 
                     # set dirty bit to false for this model
                     app_model.save(update_dirty_bit_to=False, update_fields=['_morango_dirty_bit'])
 
-    @transaction.atomic
-    def _store_to_app(self):
+            # update deleted flags based on DeletedModels
+            deleted_ids = DeletedModels.objects.filter(profile=self.profile).values_list('id', flat=True)
+            Store.objects.filter(id__in=deleted_ids).update(deleted=True)
+            DeletedModels.objects.all().delete()
+
+    def deserialize_from_store(self):
         """
         Takes data from the store and integrates into the application.
         """
-        syncable_dict = _profile_models[self.profile]
-        # iterate through classes which are in foreign key dependency order
-        for model_name, klass_model in iteritems(syncable_dict):
-            for store_model in Store.objects.filter(model_name=model_name):
-                concrete_store_model = klass_model.deserialize(json.loads(store_model.serialized))
-                concrete_store_model.save(update_dirty_bit_to=False)
+        # we first serialize to avoid deserialization merge conflicts
+        self.serialize_into_store()
 
-    def open_network_sync_connection(host, scope):
-        pass
+        with transaction.atomic():
+            syncable_dict = _profile_models[self.profile]
+            # iterate through classes which are in foreign key dependency order
+            for model_name, klass_model in iteritems(syncable_dict):
+                for store_model in Store.objects.filter(model_name=model_name, profile=self.profile, dirty_bit=True):
+                    if store_model.deleted:
+                        klass_model.objects.filter(id=store_model.id).delete()
+                    else:
+                        app_model = klass_model.deserialize(json.loads(store_model.serialized))
+                        try:
+                            app_model.save(update_dirty_bit_to=False)
+                        # when deserializing, we catch this exception in case we have a reference to a missing object (foreign key) not in the app layer
+                        except ObjectDoesNotExist:
+                            app_model._update_deleted_models()
 
-    def open_disk_sync_connection(path, scope):
-        pass
+            # clear dirty bit for all store models for this profile
+            Store.objects.filter(profile=self.profile, dirty_bit=True).update(dirty_bit=False)

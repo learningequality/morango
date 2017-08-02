@@ -185,6 +185,8 @@ class Store(AbstractStore):
     """
 
     id = UUIDField(primary_key=True)
+    # used to know which store records to deserialize into app layer
+    dirty_bit = models.BooleanField(default=False)
 
 
 class Buffer(AbstractStore):
@@ -268,6 +270,10 @@ class SyncableModel(UUIDModelMixin):
 
     class Meta:
         abstract = True
+
+    def _update_deleted_models(self):
+        DeletedModels.objects.update_or_create(defaults={'id': self.id, 'profile': self.morango_profile},
+                                               id=self.id)
 
     def save(self, update_dirty_bit_to=True, *args, **kwargs):
         if update_dirty_bit_to is None:

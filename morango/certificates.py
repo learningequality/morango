@@ -1,16 +1,14 @@
-import base64
 import json
 import mptt
 import mptt.models
 import six
 import string
-import uuid
 
 from django.core.management import call_command
 from django.db import models
 
 from .crypto import Key, PrivateKeyField, PublicKeyField
-from .utils.uuids import UUIDModelMixin, UUIDField
+from .utils.uuids import UUIDModelMixin
 from .errors import CertificateScopeNotSubset, CertificateSignatureInvalid, CertificateIDInvalid, CertificateProfileInvalid, CertificateRootScopeInvalid
 
 class Certificate(mptt.models.MPTTModel, UUIDModelMixin):
