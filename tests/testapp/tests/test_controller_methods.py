@@ -139,6 +139,32 @@ class SerializeIntoStoreTestCase(TestCase):
         self.mc.serialize_into_store()
         self.assertTrue(Store.objects.get(pk=child_id).deleted)
 
+    def test_conflicting_data_appended(self):
+        serialized = json.dumps({"username": "deadb\neef"})
+        conflicting = []
+        user = MyUser.objects.create(username="user")
+        self.mc.serialize_into_store()
+
+        # add serialized fields to conflicting data
+        conflicting.insert(0, serialized)
+        conflicting.insert(0, json.dumps(user.serialize()))
+
+        # set store record and app record dirty bits to true to force serialization merge conflict
+        Store.objects.update(conflicting_serialized_data=serialized, dirty_bit=True)
+        user.username = "user1"
+        user.save(update_dirty_bit_to=True)
+        self.mc.serialize_into_store()
+
+        # assert we have placed serialized object into store's serialized field
+        user_json = json.dumps(user.serialize())
+        st = Store.objects.get(id=user.id)
+        self.assertEqual(st.serialized, user_json)
+
+        # assert store serialized field is moved to conflicting data
+        conflicting_serialized_data = st.conflicting_serialized_data.split('\n')
+        for x in range(len(conflicting)):
+            self.assertEqual(conflicting[x], conflicting_serialized_data[x])
+
 
 class RecordMaxCounterUpdatesDuringSerialization(TestCase):
 
@@ -228,8 +254,8 @@ class DeserializationFromStoreIntoAppTestCase(TestCase):
 
     def test_update_app_with_newer_data_from_store(self):
         name = 'test'
-        FacilityModelFactory(id=self.ident, name=name)
-        fac = Facility.objects.get(id=self.ident)
+        fac = FacilityModelFactory(id=self.ident, name=name)
+        fac.save(update_dirty_bit_to=False)
         self.assertEqual(fac.name, name)
 
         self.mc.deserialize_from_store()

@@ -53,7 +53,7 @@ class MorangoProfileController(object):
                         store_model.last_saved_counter = current_id.counter
 
                         # update fields for this store model
-                        store_model.save(update_fields=['serialized', 'last_saved_instance', 'last_saved_counter'])
+                        store_model.save(update_fields=['serialized', 'last_saved_instance', 'last_saved_counter', 'conflicting_serialized_data'])
 
                     except Store.DoesNotExist:
                         kwargs = {
@@ -82,7 +82,7 @@ class MorangoProfileController(object):
         """
         Takes data from the store and integrates into the application.
         """
-
+        # we first serialize to avoid deserialization merge conflicts
         self.serialize_into_store()
 
         with transaction.atomic():
