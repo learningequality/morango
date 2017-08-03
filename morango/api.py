@@ -128,21 +128,27 @@ class CertificateViewSet(viewsets.ModelViewSet):
 
         params = self.request.query_params
 
+        base_queryset = models.Certificate.objects
+
+        # filter by profile, if requested
+        if "profile" in params:
+            base_queryset = base_queryset.filter(profile=params["profile"])
+
         try:
 
             # if specified, filter by primary partition, and only include certs the server owns
             if "primary_partition" in params:
-                target_cert = models.Certificate.objects.get(id=params["primary_partition"])
+                target_cert = base_queryset.get(id=params["primary_partition"])
                 return target_cert.get_descendants(include_self=True).exclude(_private_key=None)
 
             # if specified, return the certificate chain for a certificate owned by the server
             if "ancestors_of" in params:
-                target_cert = models.Certificate.objects.exclude(_private_key=None).get(id=params["ancestors_of"])
+                target_cert = base_queryset.exclude(_private_key=None).get(id=params["ancestors_of"])
                 return target_cert.get_ancestors(include_self=True)
 
         except models.Certificate.DoesNotExist:
             # if the target_cert can't be found, just return an empty queryset
-            return models.Certificate.objects.none()
+            return base_queryset.none()
 
-        # TODO: only allow this full list view if the user is authenticated / superuser?
-        return models.Certificate.objects.all()
+        # if no filters were specified, just return all certificates owned by the server
+        return base_queryset.exclude(_private_key=None)
