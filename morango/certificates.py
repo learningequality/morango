@@ -13,7 +13,7 @@ from .errors import CertificateScopeNotSubset, CertificateSignatureInvalid, Cert
 
 class Certificate(mptt.models.MPTTModel, UUIDModelMixin):
 
-    uuid_input_fields = ("public_key", "profile")
+    uuid_input_fields = ("public_key", "profile", "salt")
 
     parent = models.ForeignKey("Certificate", blank=True, null=True)
 
@@ -27,6 +27,9 @@ class Certificate(mptt.models.MPTTModel, UUIDModelMixin):
 
     # track the certificate's public key so we can verify any certificates it signs
     public_key = PublicKeyField()
+
+    # a salt value to include in the UUID calculation, to prevent CSR requests from forcing ID collisions
+    salt = models.CharField(max_length=32, blank=True)
 
     # the JSON-serialized copy of all the fields above
     serialized = models.TextField()

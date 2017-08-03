@@ -1,4 +1,5 @@
 import json
+import uuid
 
 from django.contrib.auth import authenticate
 from django.core.exceptions import ValidationError
@@ -86,7 +87,8 @@ class CertificateViewSet(viewsets.ModelViewSet):
             # inflate the provided data into an actual in-memory certificate
             certificate = models.Certificate(**serialized_cert.validated_data)
 
-            # add an ID and signature to the certificate
+            # add a salt, ID and signature to the certificate
+            certificate.salt = uuid.uuid4().hex
             certificate.id = certificate.calculate_uuid()
             certificate.parent.sign_certificate(certificate)
 
