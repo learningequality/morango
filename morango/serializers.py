@@ -26,5 +26,5 @@ class CertificateSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = Certificate
-        fields = ('id', 'parent', 'profile', 'scope_definition', 'scope_version', 'scope_params', 'public_key', 'serialized', 'signature',)
-        read_only_fields = ('serialized', 'id', 'signature',)
+        fields = ('id', 'parent', 'profile', 'scope_definition', 'scope_version', 'scope_params', 'public_key', 'serialized', 'signature', 'salt')
+        read_only_fields = ('serialized', 'id', 'signature', 'salt')
