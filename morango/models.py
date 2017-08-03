@@ -118,6 +118,7 @@ class SyncSession(models.Model):
     # track when the session started and the last time there was activity for this session
     start_timestamp = models.DateTimeField(default=timezone.now)
     last_activity_timestamp = models.DateTimeField(blank=True)
+    active = models.BooleanField(default=True)
 
     # track the certificates being used by each side for this session
     local_certificate = models.ForeignKey(Certificate, blank=True, null=True, related_name="syncsessions_local")
@@ -125,8 +126,14 @@ class SyncSession(models.Model):
 
     # information about the connection over which this sync session is happening
     connection_kind = models.CharField(max_length=10, choices=[(u"network", u"Network"), (u"disk", u"Disk")])
-    connection_path = models.CharField(max_length=1000)  # file path if kind=disk, and base URL if kind=network
-    connection_params = models.TextField(default=u"{}")
+    connection_path = models.CharField(max_length=1000)  # file path if kind=disk, and base URL of server if kind=network
+
+    # for network connections, keep track of the IPs on either end
+    local_ip = models.CharField(max_length=100, blank=True)
+    remote_ip = models.CharField(max_length=100, blank=True)
+
+    local_instance = models.TextField(default=u"{}")
+    remote_instance = models.TextField(default=u"{}")
 
 
 class TransferSession(models.Model):
@@ -147,6 +154,11 @@ class TransferSession(models.Model):
     records_remaining = models.IntegerField()
     records_total = models.IntegerField()
     sync_session = models.ForeignKey(SyncSession)
+
+    # track when the transfer session started and the last time there was activity on it
+    start_timestamp = models.DateTimeField(default=timezone.now)
+    last_activity_timestamp = models.DateTimeField(blank=True)
+
 
 
 class DeletedModels(models.Model):
