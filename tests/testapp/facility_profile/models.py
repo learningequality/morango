@@ -40,7 +40,6 @@ class Facility(MorangoMPTTModel, FacilityDataSyncableModel):
 class MyUser(AbstractBaseUser, FacilityDataSyncableModel):
     # Morango syncing settings
     morango_model_name = "user"
-    uuid_input_fields = ("username",)
 
     USERNAME_FIELD = "username"
 
@@ -52,13 +51,12 @@ class MyUser(AbstractBaseUser, FacilityDataSyncableModel):
         return self.username
 
     def calculate_partition(self, *args, **kwargs):
-        return ''
+        return '{id}:user'.format(id=self.ID_PLACEHOLDER)
 
 
 class SummaryLog(FacilityDataSyncableModel):
     # Morango syncing settings
     morango_model_name = "contentsummarylog"
-    uuid_input_fields = ("user_id", "content_id")
 
     user = models.ForeignKey(MyUser)
     content_id = UUIDField(db_index=True, default=uuid.uuid4)
@@ -67,7 +65,7 @@ class SummaryLog(FacilityDataSyncableModel):
         return '{}:{}'.format(self.user.id, self.content_id)
 
     def calculate_partition(self, *args, **kwargs):
-        return ''
+        return '{user_id}:user:summary'.format(user_id=self.user.id)
 
 
 class InteractionLog(FacilityDataSyncableModel):
@@ -81,7 +79,7 @@ class InteractionLog(FacilityDataSyncableModel):
         return None
 
     def calculate_partition(self, *args, **kwargs):
-        return ''
+        return '{user_id}:user:interaction'.format(user_id=self.user.id)
 
 
 class ProxyParent(MorangoMPTTModel):

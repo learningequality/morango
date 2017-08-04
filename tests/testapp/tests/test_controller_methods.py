@@ -140,6 +140,7 @@ class SerializeIntoStoreTestCase(TestCase):
         self.assertTrue(Store.objects.get(pk=child_id).deleted)
 
     def test_conflicting_data_appended(self):
+        self.maxDiff = None
         serialized = json.dumps({"username": "deadb\neef"})
         conflicting = []
         user = MyUser.objects.create(username="user")
