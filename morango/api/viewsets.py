@@ -1,82 +1,20 @@
 import json
 import uuid
 
-from django.contrib.auth import authenticate
 from django.core.exceptions import ValidationError
-from rest_framework import filters, pagination, viewsets, permissions, response, status, authentication
+from django.http import Http404
+from django.utils import timezone
+from ipware.ip import get_ip
+from rest_framework import viewsets, response, status
 
-from . import models, serializers, errors
-
-
-class BasicMultiArgumentAuthentication(authentication.BasicAuthentication):
-    """
-    HTTP Basic authentication against username (plus any other optional arguments) and password.
-    """
-
-    def authenticate_credentials(self, userargs, password):
-        """
-        Authenticate the userargs and password against Django auth backends.
-        The "userargs" string may be just the username, or a querystring-encoded set of params.
-        """
-
-        credentials = {
-            'password': password
-        }
-
-        if "=" not in userargs:
-            # if it doesn't seem to be in querystring format, just use it as the username
-            credentials[get_user_model().USERNAME_FIELD] = userargs
-        else:
-            # parse out the user args from querystring format into the credentials dict
-            for arg in userargs.split("&"):
-                key, val = arg.split("=")
-                credentials[key] = val
-
-        # authenticate the user via Django's auth backends
-        user = authenticate(**credentials)
-
-        if user is None:
-            raise exceptions.AuthenticationFailed(_('Invalid credentials.'))
-
-        if not user.is_active:
-            raise exceptions.AuthenticationFailed(_('User inactive or deleted.'))
-
-        return (user, None)
-
-
-class CertificatePermissions(permissions.BasePermission):
-    """
-    Object-level permission to only allow owners of an object to edit it.
-    Assumes the model instance has an `owner` attribute.
-    """
-
-    def has_permission(self, request, view):
-
-        # the Django REST Framework browseable API calls this to see what buttons to show
-        if not request.data:
-            return True
-
-        # we allow anyone to read certificates
-        if request.method in permissions.SAFE_METHODS:
-            return True
-
-        # other than read (or other safe) operations, we only allow POST
-        if request.method == "POST":
-            # check that the authenticated user has the appropriate permissions to create the certificate
-            if hasattr(request.user, "has_morango_certificate_scope_permission"):
-                scope_definition_id = request.data.get("scope_definition")
-                scope_params = json.loads(request.data.get("scope_params"))
-                if scope_definition_id and scope_params and isinstance(scope_params, dict):
-                    return request.user.has_morango_certificate_scope_permission(scope_definition_id, scope_params)
-            return False
-
-        return False
+from . import serializers, permissions
+from .. import models, errors
 
 
 class CertificateViewSet(viewsets.ModelViewSet):
-    permission_classes = (CertificatePermissions,)
+    permission_classes = (permissions.CertificatePermissions,)
     serializer_class = serializers.CertificateSerializer
-    authentication_classes = (authentication.SessionAuthentication, BasicMultiArgumentAuthentication)
+    authentication_classes = (permissions.BasicMultiArgumentAuthentication,)
 
     def create(self, request):
 
@@ -154,3 +92,64 @@ class CertificateViewSet(viewsets.ModelViewSet):
 
         # if no filters were specified, just return all certificates owned by the server
         return base_queryset.exclude(_private_key=None)
+
+
+class NonceViewSet(viewsets.ModelViewSet):
+    permission_classes = (permissions.NoncePermissions,)
+    serializer_class = serializers.NonceSerializer
+
+    def create(self, request):
+        nonce = models.Nonce.objects.create(ip=get_ip(request))
+
+        return response.Response(
+            serializers.NonceSerializer(nonce).data,
+            status=status.HTTP_201_CREATED,
+        )
+
+
+class SyncSessionViewSet(viewsets.ModelViewSet):
+    permission_classes = (permissions.SyncSessionPermissions,)
+    serializer_class = serializers.SyncSessionSerializer
+
+    def create(self, request):
+
+        instance_id, _ = models.InstanceIDModel.get_or_create_current_instance()
+
+        # attempt to extract the local IP from the 
+        local_ip = request.META.get('SERVER_NAME', '')
+        try:
+            local_ip = socket.gethostbyname(local_ip)
+        except:
+            pass
+
+        data = {
+            "id": request.data.get("id"),
+            "start_timestamp": timezone.now(),
+            "last_activity_timestamp": timezone.now(),
+            "active": True,
+            "is_server": True,
+            "local_certificate_id": request.data.get("server_certificate_id"),
+            "remote_certificate_id": request.data.get("client_certificate_id"),
+            "connection_kind": "network",
+            "connection_path": request.data.get("connection_path"),
+            "local_ip": local_ip,
+            "remote_ip": get_ip(request),
+            "local_instance": json.dumps(serializers.InstanceIDSerializer(instance_id).data),
+            "remote_instance": request.data.get("instance"),
+        }
+
+        syncsession = models.SyncSession(**data)
+        syncsession.save()
+        
+        return response.Response(
+            serializers.SyncSessionSerializer(syncsession).data,
+            status=status.HTTP_201_CREATED,
+        )
+
+    def perform_destroy(self, syncsession):
+        
+        if not syncsession.active:
+            raise Http404
+
+        syncsession.active = False
+        syncsession.save()

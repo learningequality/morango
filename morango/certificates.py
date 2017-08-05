@@ -5,11 +5,12 @@ import six
 import string
 
 from django.core.management import call_command
-from django.db import models
+from django.db import models, transaction
+from django.utils import timezone
 
 from .crypto import Key, PrivateKeyField, PublicKeyField
 from .utils.uuids import UUIDModelMixin
-from .errors import CertificateScopeNotSubset, CertificateSignatureInvalid, CertificateIDInvalid, CertificateProfileInvalid, CertificateRootScopeInvalid
+from .errors import CertificateScopeNotSubset, CertificateSignatureInvalid, CertificateIDInvalid, CertificateProfileInvalid, CertificateRootScopeInvalid, NonceDoesNotExist, NonceExpired
 
 class Certificate(mptt.models.MPTTModel, UUIDModelMixin):
 
@@ -152,6 +153,50 @@ class Certificate(mptt.models.MPTTModel, UUIDModelMixin):
                 raise CertificateProfileInvalid("Certificate profile is {} but parent's is {}" \
                                                 .format(self.profile, self.parent.profile))
 
+    @classmethod
+    def save_certificate_chain(cls, cert_chain, expected_last_id=None):
+
+        # parse the chain from json if needed
+        if isinstance(cert_chain, six.string_types):
+            cert_chain = json.loads(cert_chain)
+
+        # start from the bottom of the chain
+        cert_data = cert_chain[-1]
+
+        # parse the cert data from json if needed
+        if isinstance(cert_data, six.string_types):
+            cert_data = json.loads(cert_data)
+
+        # create an in-memory instance of the cert from the serialized data and signature
+        cert = cls.deserialize(cert_data["serialized"], cert_data["signature"])
+
+        # verify the id of the cert matches the id of the outer serialized data
+        assert cert_data["id"] == cert.id
+
+        # check that the expected ID matches, if specified
+        if expected_last_id:
+            assert cert.id == expected_last_id
+
+        # if cert already exists locally, it's already been verified, so no need to continue
+        try:
+            return cls.objects.get(id=cert.id)
+        except cls.DoesNotExist:
+            pass
+
+        # recurse up the certificate chain, until we hit a cert that exists or is the root
+        if len(cert_chain) > 1:
+            cls.save_certificate_chain(cert_chain[:-1], expected_last_id=cert.parent_id)
+        else:
+            assert not cert.parent_id, "First cert in chain must be a root cert (no parent)"
+
+        # ensure the certificate checks out (now that we know its parent, if any, is saved)
+        cert.check_certificate()
+
+        # save the certificate, as it's now fully verified
+        cert.save()
+
+        return cert
+
     def sign(self, value):
         assert self.private_key, "Can only sign using certificates that have private keys"
         return self.private_key.sign(value)
@@ -161,6 +206,38 @@ class Certificate(mptt.models.MPTTModel, UUIDModelMixin):
 
     def get_scope(self):
         return self.scope_definition.get_scope(self.scope_params)
+
+
+class Nonce(UUIDModelMixin):
+    """
+    Stores temporary nonce values used for cryptographic handshakes during syncing.
+    These nonces are requested by the client, and then generated and stored by the server.
+    When the client then goes to initiate a sync session, it signs the nonce value using
+    the private key from the certificate it is using for the session, to prove to the
+    server that it owns the certificate. The server checks that the nonce exists and hasn't
+    expired, and then deletes it.
+    """
+
+    uuid_input_fields = "RANDOM"
+
+    timestamp = models.DateTimeField(default=timezone.now)
+    ip = models.CharField(max_length=100, blank=True)
+
+    @classmethod
+    def use_nonce(cls, nonce_value):
+        with transaction.atomic():
+            # try fetching the nonce
+            try:
+                nonce = cls.objects.get(id=nonce_value)
+            except cls.DoesNotExist:
+                raise NonceDoesNotExist()
+            # check that the nonce hasn't expired
+            if not (0 < (timezone.now() - nonce.timestamp).total_seconds() < 60):
+                nonce.delete()
+                raise NonceExpired()
+            # now that we've used it, delete the nonce
+            nonce.delete()
+            return True
 
 
 class ScopeDefinition(models.Model):

@@ -7,7 +7,7 @@ from django.conf import settings
 from django.db import models, transaction
 from django.utils import timezone
 
-from .certificates import Certificate, ScopeDefinition
+from .certificates import Certificate, ScopeDefinition, Nonce
 from .manager import SyncableModelManager
 from .utils.uuids import UUIDField, UUIDModelMixin, sha2_uuid
 
@@ -113,13 +113,15 @@ class SyncSession(models.Model):
     the current transfer happening for this sync session.
     """
 
-    id = models.UUIDField(primary_key=True)
+    id = UUIDField(primary_key=True)
 
     # track when the session started and the last time there was activity for this session
     start_timestamp = models.DateTimeField(default=timezone.now)
     last_activity_timestamp = models.DateTimeField(blank=True)
     active = models.BooleanField(default=True)
 
+    # track whether this device is acting as the server for the sync session
+    is_server = models.BooleanField(default=False)
     # track the certificates being used by each side for this session
     local_certificate = models.ForeignKey(Certificate, blank=True, null=True, related_name="syncsessions_local")
     remote_certificate = models.ForeignKey(Certificate, blank=True, null=True, related_name="syncsessions_remote")
@@ -142,7 +144,7 @@ class TransferSession(models.Model):
     between 2 morango instances.
     """
 
-    id = models.UUIDField(primary_key=True)
+    id = UUIDField(primary_key=True)
     # partition/filter to know what subset of data is to be synced
     filter = models.TextField()
     # is session pushing or pulling data
