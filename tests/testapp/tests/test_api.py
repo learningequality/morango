@@ -1,13 +1,16 @@
 import base64
 import json
 import sys
+import uuid
 
 from django.core.urlresolvers import reverse
 
 from rest_framework.test import APITestCase as BaseTestCase
 
-from morango.certificates import Certificate, ScopeDefinition, Key
+from morango.api.serializers import CertificateSerializer, InstanceIDSerializer
+from morango.certificates import Certificate, ScopeDefinition, Key, Nonce
 from morango.errors import CertificateScopeNotSubset, CertificateSignatureInvalid, CertificateIDInvalid, CertificateProfileInvalid, CertificateRootScopeInvalid
+from morango.models import InstanceIDModel
 from facility_profile.models import MyUser
 
 
@@ -70,6 +73,19 @@ class CertificateTestCaseMixin(object):
             private_key=Key(),
         )
         self.root_cert1_with_key.sign_certificate(self.subset_cert1_without_key)
+        self.subset_cert1_without_key.save()
+
+        self.sub_subset_cert1_with_key = Certificate(
+            parent=self.subset_cert1_without_key,
+            profile=self.profile,
+            scope_definition=self.subset_scope_def,
+            scope_version=self.subset_scope_def.version,
+            scope_params=self.subset_cert1_without_key.scope_params,
+            private_key=Key(),
+        )
+        self.subset_cert1_without_key.sign_certificate(self.sub_subset_cert1_with_key)
+        self.sub_subset_cert1_with_key.save()
+
         self.subset_cert1_without_key._private_key = None
         self.subset_cert1_without_key.save()
 
@@ -88,6 +104,8 @@ class CertificateTestCaseMixin(object):
         self.root_cert2_without_key._private_key = None
         self.root_cert2_without_key.save()
 
+        self.original_cert_count = Certificate.objects.count()
+
     def make_cert_endpoint_request(self, params={}, method="GET"):
         fn = getattr(self.client, method.lower())
         response = fn(reverse('certificates-list'), params, format='json')
@@ -103,10 +121,11 @@ class CertificateListingTestCase(CertificateTestCaseMixin, APITestCase):
 
     def test_certificate_filtering_by_primary_partition(self):
         
-        # check that only the root cert is returned when it's the one with a private key
+        # check that only the root cert and leaf cert are returned when they're the ones with a private key
         _, data = self.make_cert_endpoint_request(params={'primary_partition': self.root_cert1_with_key.id})
-        self.assertEqual(len(data), 1)
+        self.assertEqual(len(data), 2)
         self.assertEqual(data[0]["id"], self.root_cert1_with_key.id)
+        self.assertEqual(data[1]["id"], self.sub_subset_cert1_with_key.id)
         
         # check that only the subcert is returned when it's the one with a private key
         _, data = self.make_cert_endpoint_request(params={'primary_partition': self.root_cert2_without_key.id})
@@ -152,11 +171,12 @@ class CertificateListingTestCase(CertificateTestCaseMixin, APITestCase):
         
     def test_certificate_full_list_request(self):
 
-        # check that both the certs owned by the server (for which it has private keys) are returned
+        # check that all the certs owned by the server (for which it has private keys) are returned
         _, data = self.make_cert_endpoint_request()
-        self.assertEqual(len(data), 2)
+        self.assertEqual(len(data), 3)
         self.assertEqual(data[0]["id"], self.root_cert1_with_key.id)
-        self.assertEqual(data[1]["id"], self.subset_cert2_with_key.id)
+        self.assertEqual(data[1]["id"], self.sub_subset_cert1_with_key.id)
+        self.assertEqual(data[2]["id"], self.subset_cert2_with_key.id)
 
         # check that no certificates are returned when profile doesn't match
         _, data = self.make_cert_endpoint_request(params={"profile": "namelessone"})
@@ -164,7 +184,7 @@ class CertificateListingTestCase(CertificateTestCaseMixin, APITestCase):
 
         # check that certificates are returned when profile does match
         _, data = self.make_cert_endpoint_request(params={"profile": self.profile})
-        self.assertEqual(len(data), 2)
+        self.assertEqual(len(data), 3)
 
 
 class CertificateCreationTestCase(CertificateTestCaseMixin, APITestCase):
@@ -186,24 +206,24 @@ class CertificateCreationTestCase(CertificateTestCaseMixin, APITestCase):
         self.perform_basic_authentication(self.superuser)
         response, data, key = self.make_csr(parent=self.root_cert1_with_key)
         self.assertEqual(response.status_code, 201)
-        self.assertEqual(Certificate.objects.count(), 5)
+        self.assertEqual(Certificate.objects.count(), self.original_cert_count + 1)
 
     def test_certificate_creation_fails_for_non_superuser(self):
         self.perform_basic_authentication(self.user)
         response, data, key = self.make_csr(parent=self.root_cert1_with_key)
         self.assertEqual(response.status_code, 403)
-        self.assertEqual(Certificate.objects.count(), 4)
+        self.assertEqual(Certificate.objects.count(), self.original_cert_count)
 
     def test_certificate_creation_fails_without_credentials(self):
         response, data, key = self.make_csr(parent=self.root_cert1_with_key)
-        self.assertEqual(response.status_code, 403)
-        self.assertEqual(Certificate.objects.count(), 4)
+        self.assertEqual(response.status_code, 401)
+        self.assertEqual(Certificate.objects.count(), self.original_cert_count)
 
     def assert_certificate_creation_fails_with_bad_parameters(self, parent, **params):
         self.perform_basic_authentication(self.superuser)
         response, data, key = self.make_csr(parent=parent, **params)
         self.assertEqual(response.status_code, 400)
-        self.assertEqual(Certificate.objects.count(), 4)
+        self.assertEqual(Certificate.objects.count(), self.original_cert_count)
 
     def test_certificate_creation_fails_for_wrong_profile(self):
         self.assert_certificate_creation_fails_with_bad_parameters(
@@ -229,3 +249,49 @@ class CertificateCreationTestCase(CertificateTestCaseMixin, APITestCase):
             scope_definition="this-aint-no-scope-def",
         )
 
+
+class NonceCreationTestCase(APITestCase):
+
+    def test_nonces_can_be_created(self):
+        response = self.client.post(reverse('nonces-list'), {}, format='json')
+        data = json.loads(response.content)
+        self.assertEqual(response.status_code, 201)
+        nonces = Nonce.objects.all()
+        self.assertEqual(nonces.count(), 1)
+        self.assertEqual(nonces[0].id, data["id"])
+
+    def test_nonces_list_cannot_be_read(self):
+        response = self.client.get(reverse('nonces-list'), {}, format='json')
+        self.assertEqual(response.status_code, 403)
+        nonces = Nonce.objects.all()
+        self.assertEqual(nonces.count(), 0)
+
+    def test_nonces_item_cannot_be_read(self):
+        # create the nonce
+        response = self.client.post(reverse('nonces-list'), {}, format='json')
+        data = json.loads(response.content)
+        # try to read the nonce
+        response = self.client.get(reverse('nonces-detail', kwargs={"pk": data["id"]}), {}, format='json')
+        self.assertEqual(response.status_code, 403)
+
+
+class SyncSessionCreationTestCase(CertificateTestCaseMixin, APITestCase):
+
+    def test_syncsession_can_be_created(self):
+
+        response = self.client.post(reverse('nonces-list'), {}, format='json')
+        nonce = json.loads(response.content)["id"]
+
+        data = {
+            "id": uuid.uuid4().hex,
+            "server_certificate_id": self.root_cert1_with_key.id,
+            "client_certificate_id": self.sub_subset_cert1_with_key.id,
+            "certificate_chain": json.dumps(CertificateSerializer(self.sub_subset_cert1_with_key.get_ancestors(include_self=True), many=True).data),
+            "connection_path": "http://127.0.0.1:8000",
+            "instance": json.dumps(InstanceIDSerializer(InstanceIDModel.get_or_create_current_instance()[0]).data),
+            "nonce": nonce,
+        }
+
+        data["signature"] = self.sub_subset_cert1_with_key.sign("{nonce}:{id}".format(**data))
+
+        response = self.client.post(reverse('syncsessions-list'), data, format='json')
