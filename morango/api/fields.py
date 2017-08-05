@@ -6,7 +6,7 @@ from ..crypto import Key
 class PublicKeyField(serializers.Field):
 
     def to_representation(self, obj):
-        return unicode(obj)
+        return str(obj)
 
     def to_internal_value(self, data):
         return Key(public_key_string=data)

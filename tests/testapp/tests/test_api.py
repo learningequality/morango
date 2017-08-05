@@ -110,11 +110,11 @@ class CertificateTestCaseMixin(object):
     def make_cert_endpoint_request(self, params={}, method="GET"):
         fn = getattr(self.client, method.lower())
         response = fn(reverse('certificates-list'), params, format='json')
-        data = json.loads(response.content)
+        data = json.loads(response.content.decode())
         return (response, data)
 
     def perform_basic_authentication(self, user):
-        basic_auth_header = 'Basic ' + base64.encodestring("username=%s:%s" % (user.username, user.actual_password))
+        basic_auth_header = b'Basic ' + base64.encodestring(b"username=%s:%s" % (user.username.encode(), user.actual_password.encode()))
         self.client.credentials(HTTP_AUTHORIZATION=basic_auth_header)
 
 
@@ -255,7 +255,7 @@ class NonceCreationTestCase(APITestCase):
 
     def test_nonces_can_be_created(self):
         response = self.client.post(reverse('nonces-list'), {}, format='json')
-        data = json.loads(response.content)
+        data = json.loads(response.content.decode())
         self.assertEqual(response.status_code, 201)
         nonces = Nonce.objects.all()
         self.assertEqual(nonces.count(), 1)
@@ -270,7 +270,7 @@ class NonceCreationTestCase(APITestCase):
     def test_nonces_item_cannot_be_read(self):
         # create the nonce
         response = self.client.post(reverse('nonces-list'), {}, format='json')
-        data = json.loads(response.content)
+        data = json.loads(response.content.decode())
         # try to read the nonce
         response = self.client.get(reverse('nonces-detail', kwargs={"pk": data["id"]}), {}, format='json')
         self.assertEqual(response.status_code, 403)
@@ -282,7 +282,7 @@ class SyncSessionEndpointTestCase(CertificateTestCaseMixin, APITestCase):
 
         # fetch a nonce value to use in creating the syncsession
         response = self.client.post(reverse('nonces-list'), {}, format='json')
-        nonce = json.loads(response.content)["id"]
+        nonce = json.loads(response.content.decode())["id"]
 
         # prepare the data to send in the syncsession creation request
         data = {

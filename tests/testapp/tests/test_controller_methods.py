@@ -155,9 +155,8 @@ class SerializeIntoStoreTestCase(TestCase):
         self.mc.serialize_into_store()
 
         # assert we have placed serialized object into store's serialized field
-        user_json = json.dumps(user.serialize())
         st = Store.objects.get(id=user.id)
-        self.assertEqual(st.serialized, user_json)
+        self.assertEqual(json.loads(st.serialized), user.serialize())
 
         # assert store serialized field is moved to conflicting data
         conflicting_serialized_data = st.conflicting_serialized_data.split('\n')
