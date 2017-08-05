@@ -7,7 +7,7 @@ from django.core.serializers.json import DjangoJSONEncoder
 from django.test import TestCase
 from morango.controller import MorangoProfileController
 from facility_profile.models import Facility, MyUser
-from morango.models import DatabaseIDModel, DeletedModels, InstanceIDModel, RecordMaxCounter, Store
+from morango.models import DeletedModels, InstanceIDModel, RecordMaxCounter, Store
 
 
 def serialized_facility_factory(identifier):
@@ -38,7 +38,6 @@ class StoreModelFacilityFactory(factory.DjangoModelFactory):
 class SerializeIntoStoreTestCase(TestCase):
 
     def setUp(self):
-        DatabaseIDModel.objects.create()
         InstanceIDModel.get_or_create_current_instance()
         self.range = 10
         self.mc = MorangoProfileController('facilitydata')
@@ -169,7 +168,6 @@ class SerializeIntoStoreTestCase(TestCase):
 class RecordMaxCounterUpdatesDuringSerialization(TestCase):
 
     def setUp(self):
-        DatabaseIDModel.objects.create()
         (self.current_id, _) = InstanceIDModel.get_or_create_current_instance()
         self.mc = MorangoProfileController('facilitydata')
         self.fac1 = FacilityModelFactory(name='school')
@@ -219,7 +217,6 @@ class RecordMaxCounterUpdatesDuringSerialization(TestCase):
 class DeserializationFromStoreIntoAppTestCase(TestCase):
 
     def setUp(self):
-        DatabaseIDModel.objects.create()
         (self.current_id, _) = InstanceIDModel.get_or_create_current_instance()
         self.range = 10
         self.mc = MorangoProfileController('facilitydata')

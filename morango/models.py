@@ -12,7 +12,7 @@ from .manager import SyncableModelManager
 from .utils.uuids import UUIDField, UUIDModelMixin, sha2_uuid
 
 
-class DatabaseManager(models.Manager):
+class DatabaseIDManager(models.Manager):
     """
     We override ``model.Manager`` in order to wrap creating a new database ID model within a transaction. With the
     creation of a new database ID model, we set all previously created models current flag to False.
@@ -25,7 +25,7 @@ class DatabaseManager(models.Manager):
             # set current flag to false for all database_id models
             DatabaseIDModel.objects.update(current=False)
 
-            return super(DatabaseManager, self).create(**kwargs)
+            return super(DatabaseIDManager, self).create(**kwargs)
 
 
 class DatabaseIDModel(UUIDModelMixin):
@@ -35,7 +35,7 @@ class DatabaseIDModel(UUIDModelMixin):
 
     uuid_input_fields = "RANDOM"
 
-    objects = DatabaseManager()
+    objects = DatabaseIDManager()
 
     current = models.BooleanField(default=True)
     date_generated = models.DateTimeField(default=timezone.now)
@@ -50,6 +50,15 @@ class DatabaseIDModel(UUIDModelMixin):
                 DatabaseIDModel.objects.update(current=False)
 
             super(DatabaseIDModel, self).save(*args, **kwargs)
+
+    @classmethod
+    def get_or_create_current_database_id(cls):
+
+        with transaction.atomic():
+            try:
+                return cls.objects.get(current=True)
+            except cls.DoesNotExist:
+                return cls.objects.create()
 
 
 class InstanceIDModel(UUIDModelMixin):
@@ -71,8 +80,8 @@ class InstanceIDModel(UUIDModelMixin):
     db_path = models.CharField(max_length=1000)
     system_id = models.CharField(max_length=100, blank=True)
 
-    @staticmethod
-    def get_or_create_current_instance():
+    @classmethod
+    def get_or_create_current_instance(cls):
         """Get the instance model corresponding to the current system, or create a new
         one if the system is new or its properties have changed (e.g. OS from upgrade)."""
 
@@ -86,7 +95,7 @@ class InstanceIDModel(UUIDModelMixin):
             "platform": plat,
             "hostname": platform.node(),
             "sysversion": sys.version,
-            "database": DatabaseIDModel.objects.get(current=True),
+            "database": DatabaseIDModel.get_or_create_current_database_id(),
             "db_path": os.path.abspath(settings.DATABASES['default']['NAME']),
             "system_id": os.environ.get("MORANGO_SYSTEM_ID", ""),
         }
@@ -100,9 +109,9 @@ class InstanceIDModel(UUIDModelMixin):
 
         # do within transaction so we only ever have 1 current instance ID
         with transaction.atomic():
-            obj, created = InstanceIDModel.objects.get_or_create(**kwargs)
+            obj, created = cls.objects.get_or_create(**kwargs)
             if created:
-                InstanceIDModel.objects.exclude(id=obj.id).update(current=False)
+                cls.objects.exclude(id=obj.id).update(current=False)
 
         return obj, created
 
@@ -122,6 +131,7 @@ class SyncSession(models.Model):
 
     # track whether this device is acting as the server for the sync session
     is_server = models.BooleanField(default=False)
+
     # track the certificates being used by each side for this session
     local_certificate = models.ForeignKey(Certificate, blank=True, null=True, related_name="syncsessions_local")
     remote_certificate = models.ForeignKey(Certificate, blank=True, null=True, related_name="syncsessions_remote")

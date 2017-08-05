@@ -38,7 +38,6 @@ class UUIDModelMixinTestCase(TestCase):
 class InstanceIDModelTestCase(TestCase):
 
     def setUp(self):
-        DatabaseIDModel.objects.create()
         InstanceIDModel.get_or_create_current_instance()
 
     def test_creating_same_instance_ID_model(self):
