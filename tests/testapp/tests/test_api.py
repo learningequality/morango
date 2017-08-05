@@ -4,13 +4,14 @@ import sys
 import uuid
 
 from django.core.urlresolvers import reverse
+from django.utils import timezone
 
 from rest_framework.test import APITestCase as BaseTestCase
 
 from morango.api.serializers import CertificateSerializer, InstanceIDSerializer
 from morango.certificates import Certificate, ScopeDefinition, Key, Nonce
 from morango.errors import CertificateScopeNotSubset, CertificateSignatureInvalid, CertificateIDInvalid, CertificateProfileInvalid, CertificateRootScopeInvalid
-from morango.models import InstanceIDModel
+from morango.models import InstanceIDModel, SyncSession
 from facility_profile.models import MyUser
 
 
@@ -275,13 +276,15 @@ class NonceCreationTestCase(APITestCase):
         self.assertEqual(response.status_code, 403)
 
 
-class SyncSessionCreationTestCase(CertificateTestCaseMixin, APITestCase):
+class SyncSessionEndpointTestCase(CertificateTestCaseMixin, APITestCase):
 
-    def test_syncsession_can_be_created(self):
+    def get_initial_syncsession_data_for_request(self):
 
+        # fetch a nonce value to use in creating the syncsession
         response = self.client.post(reverse('nonces-list'), {}, format='json')
         nonce = json.loads(response.content)["id"]
 
+        # prepare the data to send in the syncsession creation request
         data = {
             "id": uuid.uuid4().hex,
             "server_certificate_id": self.root_cert1_with_key.id,
@@ -292,6 +295,103 @@ class SyncSessionCreationTestCase(CertificateTestCaseMixin, APITestCase):
             "nonce": nonce,
         }
 
+        # sign the nonce/ID combo to attach to the request
         data["signature"] = self.sub_subset_cert1_with_key.sign("{nonce}:{id}".format(**data))
 
+        return data
+
+    def assertSyncSessionCreationFails(self, data, status_code=403):
+
+        # make the API call to attempt to create the SyncSession, and make sure it was denied
         response = self.client.post(reverse('syncsessions-list'), data, format='json')
+        self.assertEqual(response.status_code, status_code)
+
+        # check that the syncsession was not created
+        self.assertEqual(SyncSession.objects.count(), 0)
+
+    def test_syncsession_can_be_created(self):
+
+        data = self.get_initial_syncsession_data_for_request()
+
+        # delete two of the certs from the chain so we can make sure they get added back
+        self.sub_subset_cert1_with_key.delete()
+        self.subset_cert1_without_key.delete()
+        self.assertEqual(Certificate.objects.count(), self.original_cert_count - 2)
+
+        # make the API call to create the SyncSession
+        response = self.client.post(reverse('syncsessions-list'), data, format='json')
+        self.assertEqual(response.status_code, 201)
+
+        # check that the cert chain was deserialized
+        self.assertEqual(Certificate.objects.count(), self.original_cert_count)
+
+        # check that the syncsession was created
+        syncsession = SyncSession.objects.get()
+        self.assertEqual(syncsession.id, data["id"])
+        self.assertEqual(syncsession.remote_certificate_id, data["client_certificate_id"])
+        self.assertEqual(syncsession.local_certificate_id, data["server_certificate_id"])
+        self.assertTrue(syncsession.active)
+
+    def test_syncsession_creation_fails_with_bad_signature(self):
+
+        data = self.get_initial_syncsession_data_for_request()
+
+        data["signature"] = self.sub_subset_cert1_with_key.sign("nonsense:id")
+
+        self.assertSyncSessionCreationFails(data)
+
+    def test_syncsession_creation_fails_with_client_cert_not_matching_cert_chain(self):
+
+        data = self.get_initial_syncsession_data_for_request()
+
+        data["certificate_chain"] = json.dumps(CertificateSerializer(self.subset_cert2_with_key.get_ancestors(include_self=True), many=True).data)
+
+        self.assertSyncSessionCreationFails(data)
+
+    def test_syncsession_creation_fails_with_expired_nonce(self):
+
+        data = self.get_initial_syncsession_data_for_request()
+
+        Nonce.objects.all().update(timestamp=timezone.datetime(2000, 1, 1, tzinfo=timezone.get_current_timezone()))
+
+        self.assertSyncSessionCreationFails(data)
+
+    def test_syncsession_creation_fails_with_nonexistent_nonce(self):
+
+        data = self.get_initial_syncsession_data_for_request()
+
+        Nonce.objects.all().delete()
+
+        self.assertSyncSessionCreationFails(data)
+
+    def test_syncsession_creation_fails_with_nonexistent_server_certificate(self):
+
+        data = self.get_initial_syncsession_data_for_request()
+
+        data["server_certificate_id"] = uuid.uuid4().hex
+
+        self.assertSyncSessionCreationFails(data, status_code=400)
+
+    def test_syncsession_can_be_deleted(self):
+
+        self.test_syncsession_can_be_created()
+
+        syncsession = SyncSession.objects.get()
+        self.assertEqual(syncsession.active, True)
+
+        response = self.client.delete(reverse('syncsessions-detail', kwargs={"pk": syncsession.id}), format='json')
+        self.assertEqual(response.status_code, 204)
+
+        # check that the syncsession was "deleted"
+        self.assertEqual(SyncSession.objects.get().active, False)
+
+    def test_inactive_syncsession_cannot_be_deleted(self):
+
+        self.test_syncsession_can_be_created()
+
+        syncsession = SyncSession.objects.get()
+        syncsession.active = False
+        syncsession.save()
+
+        response = self.client.delete(reverse('syncsessions-detail', kwargs={"pk": syncsession.id}), format='json')
+        self.assertEqual(response.status_code, 404)

@@ -237,7 +237,6 @@ class Nonce(UUIDModelMixin):
                 raise NonceExpired()
             # now that we've used it, delete the nonce
             nonce.delete()
-            return True
 
 
 class ScopeDefinition(models.Model):

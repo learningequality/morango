@@ -44,14 +44,11 @@ class CertificateViewSet(viewsets.ModelViewSet):
                 certificate.check_certificate()
             except errors.MorangoCertificateError as e:
                 return response.Response(
-                    {e.__class__.__name__: e.message},
+                    {"error_class": e.__class__.__name__, "error_message": e.message},
                     status=status.HTTP_400_BAD_REQUEST
                 )
 
             # we got this far, and everything looks good, so we can save the certificate
-            # TODO: How do we prevent someone from creating a fake cert (for a public key
-            # they don't own but know about from their own syncing)? Require a signed nonce
-            # as part of the POST here?
             certificate.save()
 
             # return a serialized copy of the signed certificate to the client
@@ -61,7 +58,6 @@ class CertificateViewSet(viewsets.ModelViewSet):
             )
 
         else:
-            # error = serialized_cert.errors.get('username', None)
             return response.Response(serialized_cert.errors, status=status.HTTP_400_BAD_REQUEST)
 
     def get_queryset(self):
@@ -115,21 +111,32 @@ class SyncSessionViewSet(viewsets.ModelViewSet):
 
         instance_id, _ = models.InstanceIDModel.get_or_create_current_instance()
 
-        # attempt to extract the local IP from the 
+        # attempt to extract the local IP from the request host
         local_ip = request.META.get('SERVER_NAME', '')
         try:
             local_ip = socket.gethostbyname(local_ip)
         except:
             pass
 
+        # attempt to load the requested certificates
+        try:
+            local_cert = models.Certificate.objects.get(id=request.data.get("server_certificate_id"))
+            remote_cert = models.Certificate.objects.get(id=request.data.get("client_certificate_id"))
+        except models.Certificate.DoesNotExist:
+            return response.Response(
+                "Requested certificate does not exist!",
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        # build the data to be used for creation the syncsession
         data = {
             "id": request.data.get("id"),
             "start_timestamp": timezone.now(),
             "last_activity_timestamp": timezone.now(),
             "active": True,
             "is_server": True,
-            "local_certificate_id": request.data.get("server_certificate_id"),
-            "remote_certificate_id": request.data.get("client_certificate_id"),
+            "local_certificate": local_cert,
+            "remote_certificate": remote_cert,
             "connection_kind": "network",
             "connection_path": request.data.get("connection_path"),
             "local_ip": local_ip,
@@ -147,9 +154,8 @@ class SyncSessionViewSet(viewsets.ModelViewSet):
         )
 
     def perform_destroy(self, syncsession):
-        
-        if not syncsession.active:
-            raise Http404
-
         syncsession.active = False
         syncsession.save()
+
+    def get_queryset(self):
+        return models.SyncSession.objects.filter(active=True)

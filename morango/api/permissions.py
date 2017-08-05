@@ -5,6 +5,8 @@ from rest_framework import permissions, authentication
 
 from ..crypto import Key
 from ..models import Certificate, Nonce
+from ..errors import MorangoCertificateError, MorangoNonceError
+
 
 class BasicMultiArgumentAuthentication(authentication.BasicAuthentication):
     """
@@ -81,18 +83,19 @@ class SyncSessionPermissions(permissions.BasePermission):
 
     def has_permission(self, request, view):
 
-        return True
-
         if request.method == "DELETE":
             return True
 
         if request.method == "POST":
             
             # verify and save the certificate chain to our cert store
-            client_cert = Certificate.save_certificate_chain(
-                request.data.pop("certificate_chain"),
-                expected_last_id=request.data.get("client_certificate_id")
-            )
+            try:
+                client_cert = Certificate.save_certificate_chain(
+                    request.data.pop("certificate_chain"),
+                    expected_last_id=request.data.get("client_certificate_id")
+                )
+            except (AssertionError, MorangoCertificateError):
+                return False
 
             # check that the nonce/id were properly signed
             message = "{nonce}:{id}".format(**request.data)
@@ -100,7 +103,9 @@ class SyncSessionPermissions(permissions.BasePermission):
                 return False
 
             # check that the nonce is valid, and consume it so it can't be used again
-            if not Nonce.use_nonce(request.data.pop("nonce")):
+            try:
+                Nonce.use_nonce(request.data.pop("nonce"))
+            except MorangoNonceError:
                 return False
 
             return True
