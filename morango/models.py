@@ -155,22 +155,16 @@ class TransferSession(models.Model):
     """
 
     id = UUIDField(primary_key=True)
-    # partition/filter to know what subset of data is to be synced
-    filter = models.TextField()
-    # is session pushing or pulling data
-    incoming = models.BooleanField()
-    # is this session actively pushing or pulling data?
-    active = models.BooleanField(default=True)
-    chunksize = models.IntegerField(default=500)
-    # we track how many records are left to be synced in this session
-    records_remaining = models.IntegerField()
-    records_total = models.IntegerField()
+    filter = models.TextField()  # partition/filter to know what subset of data is to be synced
+    incoming = models.BooleanField()  # is session pushing or pulling data
+    active = models.BooleanField(default=True)  # is this transfer session still active?
+    records_transferred = models.IntegerField(default=0)  # track how many records have already been transferred
+    records_total = models.IntegerField(blank=True, null=True)  # total number of records to be synced across in this transfer
     sync_session = models.ForeignKey(SyncSession)
 
     # track when the transfer session started and the last time there was activity on it
     start_timestamp = models.DateTimeField(default=timezone.now)
     last_activity_timestamp = models.DateTimeField(blank=True)
-
 
 
 class DeletedModels(models.Model):
