@@ -163,10 +163,6 @@ class Certificate(mptt.models.MPTTModel, UUIDModelMixin):
         # start from the bottom of the chain
         cert_data = cert_chain[-1]
 
-        # parse the cert data from json if needed
-        if isinstance(cert_data, six.string_types):
-            cert_data = json.loads(cert_data)
-
         # create an in-memory instance of the cert from the serialized data and signature
         cert = cls.deserialize(cert_data["serialized"], cert_data["signature"])
 

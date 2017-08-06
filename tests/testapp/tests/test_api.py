@@ -114,7 +114,7 @@ class CertificateTestCaseMixin(object):
         return (response, data)
 
     def perform_basic_authentication(self, user):
-        basic_auth_header = b'Basic ' + base64.encodestring(b"username=%s:%s" % (user.username.encode(), user.actual_password.encode()))
+        basic_auth_header = b'Basic ' + base64.encodestring(("username=%s:%s" % (user.username.encode(), user.actual_password.encode())).encode())
         self.client.credentials(HTTP_AUTHORIZATION=basic_auth_header)
 
 
