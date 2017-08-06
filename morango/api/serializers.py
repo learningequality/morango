@@ -1,7 +1,7 @@
 from rest_framework import serializers, exceptions
 
 from .fields import PublicKeyField
-from ..models import Certificate, Nonce, SyncSession, InstanceIDModel
+from ..models import Certificate, Nonce, SyncSession, TransferSession, InstanceIDModel
 
 
 class CertificateSerializer(serializers.ModelSerializer):
@@ -35,6 +35,14 @@ class SyncSessionSerializer(serializers.ModelSerializer):
         model = SyncSession
         fields = ('id', 'start_timestamp', 'last_activity_timestamp', 'active', 'local_certificate', 'remote_certificate', 'connection_kind', 'connection_path', 'local_ip', 'remote_ip', 'local_instance', 'remote_instance')
         read_only_fields = ('start_timestamp', 'last_activity_timestamp', 'active', 'local_certificate', 'connection_kind', 'local_ip', 'remote_ip', 'local_instance',)
+
+
+class TransferSessionSerializer(serializers.ModelSerializer):
+
+    class Meta:
+        model = TransferSession
+        fields = ('id', 'start_timestamp', 'last_activity_timestamp', 'active', 'filter', 'incoming', 'records_transferred', 'records_total', 'sync_session',)
+        read_only_fields = ('start_timestamp', 'last_activity_timestamp', 'active', 'records_transferred',)
 
 
 class InstanceIDSerializer(serializers.ModelSerializer):

@@ -8,7 +8,7 @@ from ipware.ip import get_ip
 from rest_framework import viewsets, response, status
 
 from . import serializers, permissions
-from .. import models, errors
+from .. import models, errors, certificates
 
 
 class CertificateViewSet(viewsets.ModelViewSet):
@@ -148,7 +148,7 @@ class SyncSessionViewSet(viewsets.ModelViewSet):
 
         syncsession = models.SyncSession(**data)
         syncsession.save()
-        
+
         return response.Response(
             serializers.SyncSessionSerializer(syncsession).data,
             status=status.HTTP_201_CREATED,
@@ -160,3 +160,71 @@ class SyncSessionViewSet(viewsets.ModelViewSet):
 
     def get_queryset(self):
         return models.SyncSession.objects.filter(active=True)
+
+
+class TransferSessionViewSet(viewsets.ModelViewSet):
+    permission_classes = (permissions.TransferSessionPermissions,)
+    serializer_class = serializers.TransferSessionSerializer
+
+    def create(self, request):
+
+        # attempt to load the requested syncsession
+        try:
+            syncsession = models.SyncSession.objects.filter(active=True).get(id=request.data.get("sync_session_id"))
+        except models.SyncSession.DoesNotExist:
+            return response.Response(
+                "Requested syncsession does not exist or is no longer active!",
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        # a push is to transfer data from client to server; a pull is the inverse
+        is_a_push = request.data.get("push")
+
+        # check that the requested filter is within the appropriate certificate scopes
+        scope_error_msg = None
+        requested_filter = certificates.Filter(request.data.get("filter"))
+        remote_scope = syncsession.remote_certificate.get_scope()
+        local_scope = syncsession.local_certificate.get_scope()
+        if request.data.get("push"):
+            if not requested_filter.is_subset_of(remote_scope.write_filter):
+                scope_error_msg = "Client certificate scope does not permit pushing for the requested filter."
+            if not requested_filter.is_subset_of(local_scope.read_filter):
+                scope_error_msg = "Server certificate scope does not permit receiving pushes for the requested filter."
+        else:
+            if not requested_filter.is_subset_of(remote_scope.read_filter):
+                scope_error_msg = "Client certificate scope does not permit pulling for the requested filter."
+            if not requested_filter.is_subset_of(local_scope.write_filter):
+                scope_error_msg = "Server certificate scope does not permit responding to pulls for the requested filter."
+        if scope_error_msg:
+            return response.Response(
+                scope_error_msg,
+                status=status.HTTP_403_FORBIDDEN
+            )
+
+        # build the data to be used for creating the transfersession
+        data = {
+            "id": request.data.get("id"),
+            "start_timestamp": timezone.now(),
+            "last_activity_timestamp": timezone.now(),
+            "active": True,
+            "filter": request.data.get("filter"),
+            "incoming": request.data.get("push"),
+            "records_total": request.data.get("records_total") if is_a_push else None,
+            "sync_session": syncsession,
+        }
+
+        transfersession = models.TransferSession(**data)
+        transfersession.full_clean()
+        transfersession.save()
+
+        return response.Response(
+            serializers.TransferSessionSerializer(transfersession).data,
+            status=status.HTTP_201_CREATED,
+        )
+
+    def perform_destroy(self, transfersession):
+        transfersession.active = False
+        transfersession.save()
+
+    def get_queryset(self):
+        return models.TransferSession.objects.filter(active=True)

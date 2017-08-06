@@ -11,7 +11,7 @@ from rest_framework.test import APITestCase as BaseTestCase
 from morango.api.serializers import CertificateSerializer, InstanceIDSerializer
 from morango.certificates import Certificate, ScopeDefinition, Key, Nonce
 from morango.errors import CertificateScopeNotSubset, CertificateSignatureInvalid, CertificateIDInvalid, CertificateProfileInvalid, CertificateRootScopeInvalid
-from morango.models import InstanceIDModel, SyncSession
+from morango.models import InstanceIDModel, SyncSession, TransferSession
 from facility_profile.models import MyUser
 
 
@@ -61,7 +61,7 @@ class CertificateTestCaseMixin(object):
             version=1,
             primary_scope_param_key="",
             description="Subset cert under ${mainpartition} for ${subpartition}.",
-            read_filter_template="${mainpartition}",
+            read_filter_template="${mainpartition}:shared\n${mainpartition}:${subpartition}",
             write_filter_template="${mainpartition}:${subpartition}",
             read_write_filter_template="",
         )
@@ -403,4 +403,184 @@ class SyncSessionEndpointTestCase(CertificateTestCaseMixin, APITestCase):
         syncsession.save()
 
         response = self.client.delete(reverse('syncsessions-detail', kwargs={"pk": syncsession.id}), format='json')
+        self.assertEqual(response.status_code, 404)
+
+
+class TransferSessionEndpointTestCase(CertificateTestCaseMixin, APITestCase):
+
+    def create_syncsession(self, client_certificate=None, server_certificate=None):
+
+        if not client_certificate:
+            client_certificate = self.sub_subset_cert1_with_key
+
+        if not server_certificate:
+            server_certificate = self.root_cert1_with_key
+
+        # fetch a nonce value to use in creating the syncsession
+        response = self.client.post(reverse('nonces-list'), {}, format='json')
+        nonce = json.loads(response.content.decode())["id"]
+
+        # prepare the data to send in the syncsession creation request
+        data = {
+            "id": uuid.uuid4().hex,
+            "server_certificate_id": server_certificate.id,
+            "client_certificate_id": client_certificate.id,
+            "certificate_chain": json.dumps(CertificateSerializer(client_certificate.get_ancestors(include_self=True), many=True).data),
+            "connection_path": "http://127.0.0.1:8000",
+            "instance": json.dumps(InstanceIDSerializer(InstanceIDModel.get_or_create_current_instance()[0]).data),
+            "nonce": nonce,
+        }
+
+        # sign the nonce/ID combo to attach to the request
+        data["signature"] = client_certificate.sign("{nonce}:{id}".format(**data))
+
+        # make the API call to create the SyncSession
+        response = self.client.post(reverse('syncsessions-list'), data, format='json')
+        self.assertEqual(response.status_code, 201)
+
+        return SyncSession.objects.get(id=data["id"])
+
+    def make_transfersession_creation_request(self, filter, push, syncsession=None, expected_status=201, expected_message=None):
+
+        if not syncsession:
+            syncsession = self.create_syncsession()
+
+        data = {
+            "id": uuid.uuid4().hex,
+            "filter": filter,
+            "push": push,
+            "records_total": 0,
+            "sync_session_id": syncsession.id,
+        }
+
+        # make the API call to attempt to create the TransferSession
+        response = self.client.post(reverse('transfersessions-list'), data, format='json')
+        self.assertEqual(response.status_code, expected_status)
+
+        if expected_status == 201:
+            # check that the syncsession was created
+            transfersession = TransferSession.objects.get()
+            self.assertTrue(transfersession.active)
+        else:
+            # check that the syncsession was not created
+            self.assertEqual(TransferSession.objects.count(), 0)
+
+        if expected_message:
+            self.assertIn(expected_message, response.content.decode())
+
+        return response
+
+    def test_transfersession_can_be_created(self):
+
+        self.make_transfersession_creation_request(
+            filter=str(self.sub_subset_cert1_with_key.get_scope().write_filter),
+            push=True,
+        )
+
+    def test_transfersession_can_be_created_with_smaller_subset_filter(self):
+
+        self.make_transfersession_creation_request(
+            filter=str(self.sub_subset_cert1_with_key.get_scope().read_filter).split()[0],
+            push=False,
+        )
+
+    def test_transfersession_creation_fails_for_push_when_filter_not_in_client_write_scope(self):
+
+        response = self.make_transfersession_creation_request(
+            filter=str(self.root_cert1_with_key.get_scope().read_filter),
+            push=True,
+            expected_status=403,
+            expected_message="Client certificate scope does not permit pushing",
+        )
+
+    def test_transfersession_creation_fails_for_push_when_filter_not_in_server_read_scope(self):
+
+        syncsession = self.create_syncsession(
+            client_certificate=self.root_cert1_with_key,
+            server_certificate=self.sub_subset_cert1_with_key,
+        )
+
+        response = self.make_transfersession_creation_request(
+            filter=str(self.root_cert1_with_key.get_scope().write_filter),
+            push=True,
+            syncsession=syncsession,
+            expected_status=403,
+            expected_message="Server certificate scope does not permit receiving pushes",
+        )
+
+    def test_transfersession_creation_fails_for_pull_when_filter_not_in_client_read_scope(self):
+
+        response = self.make_transfersession_creation_request(
+            filter=str(self.root_cert1_with_key.get_scope().read_filter),
+            push=False,
+            expected_status=403,
+            expected_message="Client certificate scope does not permit pulling",
+        )
+
+    def test_transfersession_creation_fails_for_pull_when_filter_not_in_server_write_scope(self):
+
+        syncsession = self.create_syncsession(
+            client_certificate=self.root_cert1_with_key,
+            server_certificate=self.sub_subset_cert1_with_key,
+        )
+
+        response = self.make_transfersession_creation_request(
+            filter=str(self.root_cert1_with_key.get_scope().write_filter),
+            push=False,
+            syncsession=syncsession,
+            expected_status=403,
+            expected_message="Server certificate scope does not permit responding to pulls",
+        )
+
+    def test_transfersession_creation_fails_for_expired_syncsession(self):
+
+        syncsession = self.create_syncsession()
+
+        syncsession.active = False
+        syncsession.save()
+
+        response = self.make_transfersession_creation_request(
+            filter=str(self.sub_subset_cert1_with_key.get_scope().write_filter),
+            push=True,
+            expected_status=400,
+            expected_message="Requested syncsession does not exist",
+            syncsession=syncsession,
+        )
+
+    def test_transfersession_creation_fails_for_nonexistent_syncsession(self):
+
+        syncsession = self.create_syncsession()
+
+        syncsession.delete()
+
+        response = self.make_transfersession_creation_request(
+            filter=str(self.sub_subset_cert1_with_key.get_scope().write_filter),
+            push=True,
+            expected_status=400,
+            expected_message="Requested syncsession does not exist",
+            syncsession=syncsession,
+        )
+
+    def test_transfersession_can_be_deleted(self):
+
+        self.test_transfersession_can_be_created()
+
+        transfersession = TransferSession.objects.get()
+        self.assertEqual(transfersession.active, True)
+
+        response = self.client.delete(reverse('transfersessions-detail', kwargs={"pk": transfersession.id}), format='json')
+        self.assertEqual(response.status_code, 204)
+
+        # check that the transfersession was "deleted"
+        self.assertEqual(TransferSession.objects.get().active, False)
+
+    def test_inactive_transfersession_cannot_be_deleted(self):
+
+        self.test_transfersession_can_be_created()
+
+        transfersession = TransferSession.objects.get()
+        transfersession.active = False
+        transfersession.save()
+
+        response = self.client.delete(reverse('transfersessions-detail', kwargs={"pk": transfersession.id}), format='json')
         self.assertEqual(response.status_code, 404)

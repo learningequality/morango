@@ -7,11 +7,14 @@ import string
 from django.core.management import call_command
 from django.db import models, transaction
 from django.utils import timezone
+from future.utils import python_2_unicode_compatible
 
 from .crypto import Key, PrivateKeyField, PublicKeyField
 from .utils.uuids import UUIDModelMixin
 from .errors import CertificateScopeNotSubset, CertificateSignatureInvalid, CertificateIDInvalid, CertificateProfileInvalid, CertificateRootScopeInvalid, NonceDoesNotExist, NonceExpired
 
+
+@python_2_unicode_compatible
 class Certificate(mptt.models.MPTTModel, UUIDModelMixin):
 
     uuid_input_fields = ("public_key", "profile", "salt")
@@ -204,6 +207,10 @@ class Certificate(mptt.models.MPTTModel, UUIDModelMixin):
     def get_scope(self):
         return self.scope_definition.get_scope(self.scope_params)
 
+    def __str__(self):
+        if self.scope_definition:
+            return self.scope_definition.get_description(self.scope_params)
+
 
 class Nonce(UUIDModelMixin):
     """
@@ -272,7 +279,13 @@ class ScopeDefinition(models.Model):
     def get_scope(self, params):
         return Scope(definition=self, params=params)
 
+    def get_description(self, params):
+        if isinstance(params, six.string_types):
+            params = json.loads(params)
+        return string.Template(self.description).safe_substitute(params)
 
+
+@python_2_unicode_compatible
 class Filter(object):
 
     def __init__(self, template, params={}):
@@ -313,6 +326,9 @@ class Filter(object):
 
     def __iter__(self):
         return iter(self._filter_tuple)
+
+    def __str__(self):
+        return u"\n".join(self._filter_tuple)
 
 
 class Scope(object):
