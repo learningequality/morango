@@ -39,6 +39,9 @@ class CertificateTestCaseMixin(object):
         self.superuser.set_password(self.superuser.actual_password)
         self.superuser.save()
 
+        self.fakeuser = MyUser(username="fakeuser")
+        self.fakeuser.actual_password = "nosauce"
+
         self.profile = "testprofile"
 
         self.root_scope_def = ScopeDefinition.objects.create(
@@ -114,7 +117,7 @@ class CertificateTestCaseMixin(object):
         return (response, data)
 
     def perform_basic_authentication(self, user):
-        basic_auth_header = b'Basic ' + base64.encodestring(("username=%s:%s" % (user.username.encode(), user.actual_password.encode())).encode())
+        basic_auth_header = b'Basic ' + base64.encodestring(("username=%s:%s" % (user.username, user.actual_password)).encode())
         self.client.credentials(HTTP_AUTHORIZATION=basic_auth_header)
 
 
@@ -216,6 +219,12 @@ class CertificateCreationTestCase(CertificateTestCaseMixin, APITestCase):
         self.assertEqual(Certificate.objects.count(), self.original_cert_count)
 
     def test_certificate_creation_fails_without_credentials(self):
+        response, data, key = self.make_csr(parent=self.root_cert1_with_key)
+        self.assertEqual(response.status_code, 401)
+        self.assertEqual(Certificate.objects.count(), self.original_cert_count)
+
+    def test_certificate_creation_fails_with_bad_credentials(self):
+        self.perform_basic_authentication(self.fakeuser)
         response, data, key = self.make_csr(parent=self.root_cert1_with_key)
         self.assertEqual(response.status_code, 401)
         self.assertEqual(Certificate.objects.count(), self.original_cert_count)

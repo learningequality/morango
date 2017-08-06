@@ -1,7 +1,7 @@
 import json
 
 from django.contrib.auth import authenticate
-from rest_framework import permissions, authentication
+from rest_framework import permissions, authentication, exceptions
 
 from ..crypto import Key
 from ..models import Certificate, Nonce
@@ -36,10 +36,10 @@ class BasicMultiArgumentAuthentication(authentication.BasicAuthentication):
         user = authenticate(**credentials)
 
         if user is None:
-            raise exceptions.AuthenticationFailed(_('Invalid credentials.'))
+            raise exceptions.AuthenticationFailed('Invalid credentials.')
 
         if not user.is_active:
-            raise exceptions.AuthenticationFailed(_('User inactive or deleted.'))
+            raise exceptions.AuthenticationFailed('User inactive or deleted.')
 
         return (user, None)
 
