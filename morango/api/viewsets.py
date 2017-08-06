@@ -45,7 +45,7 @@ class CertificateViewSet(viewsets.ModelViewSet):
             except errors.MorangoCertificateError as e:
                 return response.Response(
                     {"error_class": e.__class__.__name__,
-                    "error_message": getattr(e, "message", getattr(e, "args", ("",))[0])},
+                    "error_message": getattr(e, "message", (getattr(e, "args") or ("",))[0])},
                     status=status.HTTP_400_BAD_REQUEST
                 )
 

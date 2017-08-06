@@ -147,7 +147,8 @@ class Certificate(mptt.models.MPTTModel, UUIDModelMixin):
             if not self.parent.verify(self.serialized, self.signature):
                 raise CertificateSignatureInvalid()
             # check that certificate's scope is a subset of parent's scope
-            self.get_scope().verify_subset_of(self.parent.get_scope())
+            if not self.get_scope().is_subset_of(self.parent.get_scope()):
+                raise CertificateScopeNotSubset()
             # check that certificate is for same profile as parent
             if self.profile != self.parent.profile:
                 raise CertificateProfileInvalid("Certificate profile is {} but parent's is {}" \
@@ -272,40 +273,65 @@ class ScopeDefinition(models.Model):
         return Scope(definition=self, params=params)
 
 
+class Filter(object):
+
+    def __init__(self, template, params={}):
+        # ensure params have been deserialized
+        if isinstance(params, six.string_types):
+            params = json.loads(params)
+        self._template = template
+        self._params = params
+        self._filter_string = string.Template(template).safe_substitute(params)
+        self._filter_tuple = tuple(self._filter_string.split())
+
+    def is_subset_of(self, other):
+        for partition in self._filter_tuple:
+            if not partition.startswith(other._filter_tuple):
+                return False
+        return True
+
+    def contains_partition(self, partition):
+        return partition.startswith(self._filter_tuple)
+
+    def __le__(self, other):
+        return self.is_subset_of(other)
+
+    def __eq__(self, other):
+        for partition in self._filter_tuple:
+            if partition not in other._filter_tuple:
+                return False
+        for partition in other._filter_tuple:
+            if partition not in self._filter_tuple:
+                return False
+        return True
+
+    def __contains__(self, partition):
+        return self.contains_partition(partition)
+
+    def __add__(self, other):
+        return Filter(self._filter_string + "\n" + other._filter_string)
+
+    def __iter__(self):
+        return iter(self._filter_tuple)
+
+
 class Scope(object):
 
     def __init__(self, definition, params):
-        # ensure params has been deserialized
-        if isinstance(params, six.string_types):
-            params = json.loads(params)
-        # inflate the scope definition by filling in the filter templates from the params
-        rw_filter = self._fill_in_filter_template(definition.read_write_filter_template, params)
-        self.read_filter = rw_filter + self._fill_in_filter_template(definition.read_filter_template, params)
-        self.write_filter = rw_filter + self._fill_in_filter_template(definition.write_filter_template, params)
+        # turn the scope definition filter templates into Filter objects
+        rw_filter = Filter(definition.read_write_filter_template, params)
+        self.read_filter = rw_filter + Filter(definition.read_filter_template, params)
+        self.write_filter = rw_filter + Filter(definition.write_filter_template, params)
 
-    def _fill_in_filter_template(self, template, params):
-        return tuple(string.Template(template).safe_substitute(params).split())
-
-    def _verify_subset_for_field(self, scope, fieldname):
-        s1 = getattr(self, fieldname)
-        s2 = getattr(scope, fieldname)
-        for partition in s1:
-            if not partition.startswith(s2):
-                raise CertificateScopeNotSubset(
-                    "No partition prefix found for {partition} in {scope} ({fieldname})!".format(
-                        partition=partition,
-                        scope=s2,
-                        fieldname=fieldname,
-                    )
-                )
-
-    def verify_subset_of(self, scope):
-        self._verify_subset_for_field(scope, "read_filter")
-        self._verify_subset_for_field(scope, "write_filter")
-
-    def is_subset_of(self, scope):
-        try:
-            self.verify_subset_of(scope)
-        except CertificateScopeNotSubset:
+    def is_subset_of(self, other):
+        if not self.read_filter.is_subset_of(other.read_filter):
+            return False
+        if not self.write_filter.is_subset_of(other.write_filter):
             return False
         return True
+
+    def __le__(self, other):
+        return self.is_subset_of(other)
+
+    def __eq__(self, other):
+        return self.read_filter == other.read_filter and self.write_filter == other.write_filter
