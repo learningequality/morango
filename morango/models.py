@@ -4,7 +4,7 @@ import sys
 import uuid
 
 from django.conf import settings
-from django.db import models, transaction
+from django.db import connection, models, transaction
 from django.utils import timezone
 
 from .certificates import Certificate, ScopeDefinition
@@ -222,11 +222,40 @@ class AbstractCounter(models.Model):
 class DatabaseMaxCounter(AbstractCounter):
     """
     ``DatabaseMaxCounter`` is used to keep track of what data this database already has across all
-    instances for a particular filter. Whenever 2 morango instances sync with each other we keep track
-    of those filters, as well as the maximum counter we received for each instance during the sync session.
+    instances for a particular partition prefix. Whenever 2 morango instances sync with each other we keep track
+    of those partition prefixes from the filters, as well as the maximum counter we received for each instance during the sync session.
     """
 
-    filter = models.TextField()
+    partition = models.CharField(max_length=128, default="")
+
+    @classmethod
+    def calculate_filter_max_counters(cls, filters):
+
+        # create string of prefixes to place into sql statement
+        filter_list = filters.split('\n')
+        for i, prefix in enumerate(filter_list):
+            filter_list[i] = "('" + prefix + "')"
+
+        condition = ", ".join(filter_list)
+
+        filter_max_calculation = """
+        SELECT PMC.instance, MIN(PMC.counter)
+        FROM
+            (
+            SELECT dmc.instance_id as instance, MAX(dmc.counter) as counter, filter as filter_partition
+            FROM {dmc_table} as dmc, (SELECT "" as filter FROM (VALUES {filter_list}))
+            WHERE filter LIKE dmc.partition || '%'
+            GROUP BY instance, filter_partition
+            ) as PMC
+        GROUP BY PMC.instance
+        HAVING {count} = COUNT(PMC.filter_partition)
+        """.format(dmc_table=cls._meta.db_table,
+                   filter_list=condition,
+                   count=len(filter_list))
+
+        with connection.cursor() as cursor:
+            cursor.execute(filter_max_calculation)
+            return cursor.fetchall()
 
 
 class RecordMaxCounter(AbstractCounter):
