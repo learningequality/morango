@@ -70,13 +70,13 @@ class MorangoProfileController(object):
                         defaults.update({'store_model_id': app_model.id})
                         RecordMaxCounter(**defaults).save()
 
-                    # set dirty bit to false for this model
-                    app_model.save(update_dirty_bit_to=False, update_fields=['_morango_dirty_bit'])
+                # set dirty bit to false for all models for this class
+                klass_model.objects.filter(_morango_dirty_bit=True).update(update_dirty_bit_to=False)
 
             # update deleted flags based on DeletedModels
             deleted_ids = DeletedModels.objects.filter(profile=self.profile).values_list('id', flat=True)
             Store.objects.filter(id__in=deleted_ids).update(deleted=True)
-            DeletedModels.objects.all().delete()
+            DeletedModels.objects.filter(profile=self.profile).delete()
 
     def deserialize_from_store(self):
         """
