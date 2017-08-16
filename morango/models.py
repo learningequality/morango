@@ -5,6 +5,7 @@ import uuid
 
 from django.conf import settings
 from django.db import connection, models, transaction
+from django.db.models import F
 from django.utils import timezone
 
 from .certificates import Certificate, ScopeDefinition
@@ -105,6 +106,12 @@ class InstanceIDModel(UUIDModelMixin):
                 InstanceIDModel.objects.exclude(id=obj.id).update(current=False)
 
         return obj, created
+
+    @staticmethod
+    @transaction.atomic
+    def get_and_update_current_instance():
+        InstanceIDModel.objects.filter(current=True).update(counter=F('counter') + 1)
+        return InstanceIDModel.objects.get(current=True)
 
 
 class SyncSession(models.Model):
