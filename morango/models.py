@@ -241,16 +241,16 @@ class DatabaseMaxCounter(AbstractCounter):
         # create string of prefixes to place into sql statement
         filter_list = filters.split('\n')
         for i, prefix in enumerate(filter_list):
-            filter_list[i] = "('" + prefix + "')"
+            filter_list[i] = "SELECT '{}' AS a".format(prefix)
 
-        condition = ", ".join(filter_list)
+        condition = " UNION ".join(filter_list)
 
         filter_max_calculation = """
         SELECT PMC.instance, MIN(PMC.counter)
         FROM
             (
             SELECT dmc.instance_id as instance, MAX(dmc.counter) as counter, filter as filter_partition
-            FROM {dmc_table} as dmc, (SELECT "" as filter FROM (VALUES {filter_list}))
+            FROM {dmc_table} as dmc, (SELECT T.a as filter FROM ({filter_list}) as T)
             WHERE filter LIKE dmc.partition || '%'
             GROUP BY instance, filter_partition
             ) as PMC
