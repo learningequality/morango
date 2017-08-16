@@ -4,7 +4,7 @@ from django.contrib.auth import authenticate
 from rest_framework import permissions, authentication, exceptions
 
 from ..crypto import Key
-from ..models import Certificate, Nonce
+from ..models import Certificate, Nonce, TransferSession, Buffer
 from ..errors import MorangoCertificateError, MorangoNonceError
 
 
@@ -122,5 +122,23 @@ class TransferSessionPermissions(permissions.BasePermission):
 
         if request.method == "POST":
             return True  # we'll be doing some additional permission checks in the viewset
+
+        return False
+
+
+class BufferPermissions(permissions.BasePermission):
+
+    def has_permission(self, request, view):
+
+        if request.method == "POST":
+            return True
+
+        if request.method == "GET":
+            sesh_id = request.query_params.get("transfer_session_id")
+            if not sesh_id:
+                return False
+            if not TransferSession.objects.filter(id=sesh_id, active=True, incoming=False).exists():
+                return False
+            return True
 
         return False

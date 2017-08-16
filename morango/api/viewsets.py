@@ -5,7 +5,7 @@ from django.core.exceptions import ValidationError
 from django.http import Http404
 from django.utils import timezone
 from ipware.ip import get_ip
-from rest_framework import viewsets, response, status
+from rest_framework import viewsets, response, status, generics, mixins, pagination
 
 from . import serializers, permissions
 from .. import models, errors, certificates
@@ -138,6 +138,7 @@ class SyncSessionViewSet(viewsets.ModelViewSet):
             "is_server": True,
             "local_certificate": local_cert,
             "remote_certificate": remote_cert,
+            "profile": request.data.get("profile"),
             "connection_kind": "network",
             "connection_path": request.data.get("connection_path"),
             "local_ip": local_ip,
@@ -228,3 +229,39 @@ class TransferSessionViewSet(viewsets.ModelViewSet):
 
     def get_queryset(self):
         return models.TransferSession.objects.filter(active=True)
+
+
+class BufferViewSet(mixins.ListModelMixin, viewsets.GenericViewSet):
+    permission_classes = (permissions.BufferPermissions,)
+    serializer_class = serializers.BufferSerializer
+    pagination_class = pagination.LimitOffsetPagination
+
+    def create(self, request):
+        data = request.data if isinstance(request.data, list) else [request.data]
+        serial_data = serializers.BufferSerializer(data=data, many=True)
+        if serial_data.is_valid():
+
+            # ensure the transfer session allows pushes, and is same across records
+            if not serial_data.validated_data[0]["transfer_session"].incoming:
+                return response.Response(
+                    "Specified TransferSession does not allow pushes.",
+                    status=status.HTTP_403_FORBIDDEN
+                )
+            if len(set(rec["transfer_session"] for rec in serial_data.data)) > 1:
+                return response.Response(
+                    "All pushed records must be associated with the same TransferSession.",
+                    status=status.HTTP_403_FORBIDDEN
+                )
+
+            serial_data.save()
+            return response.Response(status=status.HTTP_201_CREATED)
+
+        else:
+
+            return response.Response(serial_data.errors, status=status.HTTP_400_BAD_REQUEST)
+
+    def get_queryset(self):
+
+        session_id = self.request.query_params["transfer_session_id"]
+
+        return models.Buffer.objects.filter(transfer_session_id=session_id)

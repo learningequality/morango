@@ -1,6 +1,6 @@
 django>=1.9.7,<1.10
 django-mptt>=0.8.0
 rsa>=3.4.2
-django-rest-framework>=0.1.0
+djangorestframework>=3.3.3
 django-ipware>=1.1.6
 future==0.16.0

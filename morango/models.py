@@ -7,7 +7,7 @@ from django.conf import settings
 from django.db import models, transaction
 from django.utils import timezone
 
-from .certificates import Certificate, ScopeDefinition, Nonce
+from .certificates import Certificate, ScopeDefinition, Nonce, Filter
 from .manager import SyncableModelManager
 from .utils.uuids import UUIDField, UUIDModelMixin, sha2_uuid
 
@@ -136,6 +136,9 @@ class SyncSession(models.Model):
     local_certificate = models.ForeignKey(Certificate, blank=True, null=True, related_name="syncsessions_local")
     remote_certificate = models.ForeignKey(Certificate, blank=True, null=True, related_name="syncsessions_remote")
 
+    # track the morango profile this sync session is happening for
+    profile = models.CharField(max_length=40)
+
     # information about the connection over which this sync session is happening
     connection_kind = models.CharField(max_length=10, choices=[(u"network", u"Network"), (u"disk", u"Disk")])
     connection_path = models.CharField(max_length=1000)  # file path if kind=disk, and base URL of server if kind=network
@@ -156,7 +159,7 @@ class TransferSession(models.Model):
 
     id = UUIDField(primary_key=True)
     filter = models.TextField()  # partition/filter to know what subset of data is to be synced
-    incoming = models.BooleanField()  # is session pushing or pulling data
+    incoming = models.BooleanField()  # is session pushing or pulling data?
     active = models.BooleanField(default=True)  # is this transfer session still active?
     records_transferred = models.IntegerField(default=0)  # track how many records have already been transferred
     records_total = models.IntegerField(blank=True, null=True)  # total number of records to be synced across in this transfer
@@ -165,6 +168,9 @@ class TransferSession(models.Model):
     # track when the transfer session started and the last time there was activity on it
     start_timestamp = models.DateTimeField(default=timezone.now)
     last_activity_timestamp = models.DateTimeField(blank=True)
+
+    def get_filter(self):
+        return Filter(self.filter)
 
 
 class DeletedModels(models.Model):
@@ -185,17 +191,21 @@ class AbstractStore(models.Model):
     ``Buffer``.
     """
 
+    profile = models.CharField(max_length=40)
+
     serialized = models.TextField(blank=True)
     deleted = models.BooleanField(default=False)
-    # morango UUID instance and counter at time of serialization
+
+    # ID of last InstanceIDModel and its corresponding counter at time of serialization
     last_saved_instance = UUIDField()
     last_saved_counter = models.IntegerField()
-    # morango_model_name of model
-    model_name = models.CharField(max_length=40)
-    profile = models.CharField(max_length=40)
-    # colon-separated partition values that specify which segment of data this record belongs to
+
+    # fields used to compute UUIDs, filter data, and load data into the correct app models
     partition = models.TextField()
-    # conflicting data that needs a merge conflict resolution
+    source_id = models.CharField(max_length=96)
+    model_name = models.CharField(max_length=40)
+
+    # conflicting data that needs merge conflict resolution
     conflicting_serialized_data = models.TextField(blank=True)
 
     class Meta:
@@ -209,15 +219,18 @@ class Store(AbstractStore):
     """
 
     id = UUIDField(primary_key=True)
-    # used to know which store records to deserialize into app layer
+    # used to know which store records need to be deserialized into the app layer models
     dirty_bit = models.BooleanField(default=False)
 
 
-class Buffer(AbstractStore):
+class Buffer(AbstractStore, UUIDModelMixin):
     """
-    ``Buffer`` is where records from the internal store are kept temporarily,
-    until they are sent or received by another morango instance.
+    ``Buffer`` is where records from the internal store are queued up temporarily, before being
+    sent to another morango instance, or stored while being received from another instance, before
+    dequeuing into the local store.
     """
+
+    uuid_input_fields = ("transfer_session_id", "model_uuid")
 
     transfer_session = models.ForeignKey(TransferSession)
     model_uuid = UUIDField()
@@ -228,9 +241,9 @@ class AbstractCounter(models.Model):
     Abstract class which shares fields across multiple counter models.
     """
 
-    # the UUID of the morango instance that was last synced for this model or filter
+    # the UUID of the morango instance for which we're tracking the counter
     instance_id = UUIDField()
-    # the counter of the morango instance at the time of serialization
+    # the counter of the morango instance at the time of serialization or merge conflict resolution
     counter = models.IntegerField()
 
     class Meta:
