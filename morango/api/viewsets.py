@@ -129,6 +129,12 @@ class SyncSessionViewSet(viewsets.ModelViewSet):
                 status=status.HTTP_400_BAD_REQUEST
             )
 
+        if local_cert.profile != remote_cert.profile:
+            return response.Response(
+                "Certificates must both be associated with the same profile",
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
         # build the data to be used for creation the syncsession
         data = {
             "id": request.data.get("id"),
@@ -138,7 +144,7 @@ class SyncSessionViewSet(viewsets.ModelViewSet):
             "is_server": True,
             "local_certificate": local_cert,
             "remote_certificate": remote_cert,
-            "profile": request.data.get("profile"),
+            "profile": local_cert.profile,
             "connection_kind": "network",
             "connection_path": request.data.get("connection_path"),
             "local_ip": local_ip,
