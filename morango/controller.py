@@ -20,7 +20,7 @@ class MorangoProfileController(object):
         Takes data from app layer and serializes the models into the store.
         """
         # ensure that we write and retrieve the counter in one go for consistency
-        current_id = InstanceIDModel.get_and_update_current_instance()
+        current_id = InstanceIDModel.get_current_instance_and_increment_counter()
 
         with transaction.atomic():
             defaults = {'instance_id': current_id.id, 'counter': current_id.counter}
@@ -67,7 +67,7 @@ class MorangoProfileController(object):
                         defaults.update({'store_model_id': app_model.id})
                         RecordMaxCounter(**defaults).save()
 
-                # set dirty bit to false for all models for this class
+                # set dirty bit to false for all instances of this model
                 klass_model.objects.filter(_morango_dirty_bit=True).update(update_dirty_bit_to=False)
 
             # update deleted flags based on DeletedModels

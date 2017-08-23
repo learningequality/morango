@@ -109,7 +109,7 @@ class InstanceIDModel(UUIDModelMixin):
 
     @staticmethod
     @transaction.atomic
-    def get_and_update_current_instance():
+    def get_current_instance_and_increment_counter():
         InstanceIDModel.objects.filter(current=True).update(counter=F('counter') + 1)
         return InstanceIDModel.objects.get(current=True)
 

@@ -20,6 +20,7 @@ class FacilityFactory(factory.DjangoModelFactory):
 
     name = factory.Sequence(lambda n: "Fac %d" % n)
 
+
 class AbstractStoreFactory(factory.DjangoModelFactory):
 
     class Meta:
@@ -66,7 +67,7 @@ def create_dummy_store_data():
     data['group1_c1'] = [FacilityFactory() for _ in range(5)]
     data['mc'].serialize_into_store()  # counter is at 1
 
-    # create group of facilites and second serialization
+    # create group of facilities and second serialization
     data['group1_c2'] = [FacilityFactory() for _ in range(5)]
 
     # create users and logs associated with user
@@ -90,6 +91,10 @@ def create_dummy_store_data():
     data['user3_interlogs'] = [InteractionLog.objects.create(user=data['user3']) for _ in range(5)]
 
     data['mc'].serialize_into_store()  # new counter is at 1
+
+    data['user4'] = MyUser.objects.create(username='invalid', _morango_partition='badpartition')
+    data['mc'].serialize_into_store()  # new counter is at 2
+
     return data
 
 def setUpIds(common_id=True):
@@ -114,29 +119,57 @@ def create_buffer_and_store_dummy_data(transfer_session_id):
     # example data for reverse ff
     data['model1'] = 'a' * 32
     data['model1_rmc_ids'] = setUpIds()
+    # store1: last_saved => D: 3
+    # RMCs A: 3, B: 1, C: 2, D: 3
     StoreFactory(last_saved_instance=data['model1_rmc_ids'][3], last_saved_counter=3, id=data['model1'])
     create_rmc_data(3, 1, 2, 3, data['model1_rmc_ids'], data['model1'])
     data['model1_rmcb_ids'] = setUpIds()
+    # buffer1: last_saved => A: 1
+    # RMCBs A: 1, F: 2, G: 3, H: 4
     BufferFactory(last_saved_instance=data['model1_rmcb_ids'][0], last_saved_counter=1, model_uuid=data['model1'], transfer_session_id=transfer_session_id)
     create_rmcb_data(1, 2, 3, 4, data['model1_rmcb_ids'], data['model1'], transfer_session_id)
 
-    # example data for merge conflict
+    # example data for merge conflict (rmcb.counter > rmc.counter)
     data['model2'] = 'b' * 32
     data['model2_rmc_ids'] = setUpIds()
+    # store2: last_saved => C: 2
+    # RMCs A: 1, B: 1, C: 2, D: 3
     StoreFactory(last_saved_instance=data['model2_rmc_ids'][2], last_saved_counter=2, id=data['model2'], conflicting_serialized_data="store")
     create_rmc_data(1, 1, 2, 3, data['model2_rmc_ids'], data['model2'])
     data['model2_rmcb_ids'] = setUpIds()
+    # buffer2: last_saved => F: 2
+    # RMCBs A: 3, F: 2, G: 3, H: 4
     BufferFactory(serialized="buffer", last_saved_instance=data['model2_rmcb_ids'][1], last_saved_counter=2, model_uuid=data['model2'],
-                  transfer_session_id=transfer_session_id)
+                  transfer_session_id=transfer_session_id, deleted=1)
     create_rmcb_data(3, 2, 3, 4, data['model2_rmcb_ids'], data['model2'], transfer_session_id)
+
+    # example data for merge conflict (rmcb.counter <= rmc.counter)
+    data['model5'] = 'e' * 32
+    data['model5_rmc_ids'] = setUpIds()
+    # store5: last_saved => C: 2
+    # RMCs A: 3, B: 1, C: 2, D: 3
+    StoreFactory(last_saved_instance=data['model5_rmc_ids'][2], last_saved_counter=2, id=data['model5'], conflicting_serialized_data="store")
+    create_rmc_data(3, 1, 2, 3, data['model5_rmc_ids'], data['model5'])
+    data['model5_rmcb_ids'] = setUpIds()
+    # buffer5: last_saved => F: 2
+    # RMCBs A: 1, F: 2, G: 3, H: 4
+    BufferFactory(serialized="buffer", last_saved_instance=data['model5_rmcb_ids'][1], last_saved_counter=2, model_uuid=data['model5'],
+                  transfer_session_id=transfer_session_id, deleted=1)
+    create_rmcb_data(1, 2, 3, 4, data['model5_rmcb_ids'], data['model5'], transfer_session_id)
 
     # example data for ff
     data['model3'] = 'c' * 32
     data['model3_rmc_ids'] = setUpIds()
-    StoreFactory(last_saved_instance=data['model3_rmc_ids'][0], last_saved_counter=2, id=data['model3'])
+    # store3: last_saved => A: 1
+    # RMCs A: 1, B: 2, C: 3, D: 4
+    StoreFactory(last_saved_instance=data['model3_rmc_ids'][0], last_saved_counter=1, id=data['model3'])
     create_rmc_data(1, 2, 3, 4, data['model3_rmc_ids'], data['model3'])
     data['model3_rmcb_ids'] = setUpIds()
-    BufferFactory(last_saved_instance=data['model3_rmcb_ids'][1], last_saved_counter=2, model_uuid=data['model3'], transfer_session_id=transfer_session_id)
+    # buffer3: last_saved => F: 2
+    # RMCBs A: 3, F: 2, G: 3, H: 4
+    data['serialized'] = "serialized"
+    BufferFactory(serialized=data['serialized'], last_saved_instance=data['model3_rmcb_ids'][1], last_saved_counter=2, model_uuid=data['model3'],
+                  transfer_session_id=transfer_session_id)
     create_rmcb_data(3, 2, 3, 4, data['model3_rmcb_ids'], data['model3'], transfer_session_id)
 
     # example for missing store data
