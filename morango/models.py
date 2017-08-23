@@ -240,10 +240,7 @@ class DatabaseMaxCounter(AbstractCounter):
 
         # create string of prefixes to place into sql statement
         filter_list = filters.split('\n')
-        for i, prefix in enumerate(filter_list):
-            filter_list[i] = "SELECT '{}' AS a".format(prefix)
-
-        condition = " UNION ".join(filter_list)
+        condition = " UNION ".join(["SELECT '{}' AS a".format(prefix) for prefix in filter_list])
 
         filter_max_calculation = """
         SELECT PMC.instance, MIN(PMC.counter)
@@ -262,7 +259,7 @@ class DatabaseMaxCounter(AbstractCounter):
 
         with connection.cursor() as cursor:
             cursor.execute(filter_max_calculation)
-            return cursor.fetchall()
+            return dict(cursor.fetchall())
 
 
 class RecordMaxCounter(AbstractCounter):

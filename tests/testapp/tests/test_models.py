@@ -35,10 +35,10 @@ class FilterMaxCounterTestCase(TestCase):
 
     def test_filter_not_in_dmc(self):
         fmcs = DatabaseMaxCounter.calculate_filter_max_counters("ZZZ")
-        self.assertFalse(fmcs)
+        self.assertEqual(fmcs, {})
 
     def test_instances_for_one_partition_but_not_other(self):
-        fmcs = dict(DatabaseMaxCounter.calculate_filter_max_counters(self.user_prefix_a + "\n" + self.user_prefix_b))
+        fmcs = DatabaseMaxCounter.calculate_filter_max_counters(self.user_prefix_a + "\n" + self.user_prefix_b)
         self.assertEqual(fmcs[self.instance_b], 10)
 
     def test_insufficient_instances_for_all_partitions(self):
@@ -47,11 +47,11 @@ class FilterMaxCounterTestCase(TestCase):
         self.assertFalse(fmcs)
 
     def test_single_partition_with_all_instances(self):
-        fmcs = dict(DatabaseMaxCounter.calculate_filter_max_counters(self.user_prefix_a))
+        fmcs = DatabaseMaxCounter.calculate_filter_max_counters(self.user_prefix_a)
         self.assertEqual(fmcs[self.instance_a], 20)
         self.assertEqual(fmcs[self.instance_b], 10)
 
     def test_all_partitions_have_all_instances(self):
-        fmcs = dict(DatabaseMaxCounter.calculate_filter_max_counters(self.user_prefix_a + "\n" + self.user2_prefix_b))
+        fmcs = DatabaseMaxCounter.calculate_filter_max_counters(self.user_prefix_a + "\n" + self.user2_prefix_b)
         self.assertEqual(fmcs[self.instance_a], 17)
         self.assertEqual(fmcs[self.instance_b], 10)
