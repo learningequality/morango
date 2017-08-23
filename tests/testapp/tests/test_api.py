@@ -455,8 +455,9 @@ class SyncSessionEndpointTestCase(CertificateTestCaseMixin, APITestCase):
         response = self.client.delete(reverse('syncsessions-detail', kwargs={"pk": syncsession.id}), format='json')
         self.assertEqual(response.status_code, 204)
 
-        # check that the syncsession was "deleted"
-        self.assertEqual(SyncSession.objects.get().active, False)
+        # check that the syncsession was "deleted" but not _deleted_
+        self.assertEqual(SyncSession.objects.filter(active=True).count(), 0)
+        self.assertEqual(SyncSession.objects.filter(active=False).count(), 1)
 
     def test_inactive_syncsession_cannot_be_deleted(self):
 
@@ -691,6 +692,7 @@ class BufferEndpointTestCase(CertificateTestCaseMixin, APITestCase):
         return records[0].transfer_session.id
 
     def make_buffer_get_request(self, expected_status=200, expected_count=None, **get_params):
+        """Make a GET request to the buffer endpoint. Warning: Deletes the local buffer instances before validating."""
 
         response = self.client.get(
             reverse('buffers-list'),
@@ -702,6 +704,11 @@ class BufferEndpointTestCase(CertificateTestCaseMixin, APITestCase):
 
         if expected_status == 200:
 
+            t_id = get_params.get("transfer_session_id")
+
+            if expected_count is None:
+                expected_count = Buffer.objects.filter(transfer_session_id=t_id).count()
+
             # load the returned data from JSON
             data = json.loads(response.content.decode())
 
@@ -712,16 +719,14 @@ class BufferEndpointTestCase(CertificateTestCaseMixin, APITestCase):
             # deserialize the records
             serialized_recs = BufferSerializer(data=data, many=True)
 
+            # delete "local" buffer records to avoid uniqueness constraint failures in validation
+            Buffer.objects.filter(transfer_session_id=t_id, model_uuid__in=[d["model_uuid"] for d in data]).delete()
+
             # ensure the incoming records validate
             self.assertTrue(serialized_recs.is_valid())
 
             # check that the correct number of buffer items was returned
-            self.assertEqual(
-                expected_count if expected_count is not None else Buffer.objects.filter(
-                    transfer_session_id=get_params.get("transfer_session_id")
-                ).count(),
-                len(serialized_recs.validated_data)
-            )
+            self.assertEqual(expected_count, len(serialized_recs.validated_data))
 
             return serialized_recs
 
@@ -782,6 +787,10 @@ class BufferEndpointTestCase(CertificateTestCaseMixin, APITestCase):
             offset=0,
             expected_count=3,
         )
+
+    def test_pull_by_page_offset_works(self):
+
+        transfer_session_id = self.create_records_for_pulling(count=5)
 
         self.make_buffer_get_request(
             transfer_session_id=transfer_session_id,

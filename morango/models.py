@@ -147,6 +147,7 @@ class SyncSession(models.Model):
     local_ip = models.CharField(max_length=100, blank=True)
     remote_ip = models.CharField(max_length=100, blank=True)
 
+    # serialized copies of the client and server instance model fields, for debugging/tracking purposes
     local_instance = models.TextField(default=u"{}")
     remote_instance = models.TextField(default=u"{}")
 
@@ -223,17 +224,18 @@ class Store(AbstractStore):
     dirty_bit = models.BooleanField(default=False)
 
 
-class Buffer(AbstractStore, UUIDModelMixin):
+class Buffer(AbstractStore):
     """
     ``Buffer`` is where records from the internal store are queued up temporarily, before being
     sent to another morango instance, or stored while being received from another instance, before
     dequeuing into the local store.
     """
 
-    uuid_input_fields = ("transfer_session_id", "model_uuid")
-
     transfer_session = models.ForeignKey(TransferSession)
     model_uuid = UUIDField()
+
+    class Meta:
+        unique_together = ("transfer_session", "model_uuid")
 
 
 class AbstractCounter(models.Model):

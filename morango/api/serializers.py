@@ -80,5 +80,4 @@ class BufferSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = Buffer
-        fields = ('id', 'serialized', 'deleted', 'last_saved_instance', 'last_saved_counter', 'partition', 'source_id', 'model_name', 'conflicting_serialized_data', 'model_uuid', 'transfer_session')
-        read_only_fields = ('id',)
+        fields = ('serialized', 'deleted', 'last_saved_instance', 'last_saved_counter', 'partition', 'source_id', 'model_name', 'conflicting_serialized_data', 'model_uuid', 'transfer_session')

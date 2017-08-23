@@ -178,6 +178,7 @@ class Certificate(mptt.models.MPTTModel, UUIDModelMixin):
             assert cert.id == expected_last_id
 
         # if cert already exists locally, it's already been verified, so no need to continue
+        # (this also means we have the full cert chain for it, given the `parent` relations)
         try:
             return cls.objects.get(id=cert.id)
         except cls.DoesNotExist:
