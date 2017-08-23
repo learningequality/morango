@@ -23,104 +23,83 @@ class QueueStoreIntoBufferTestCase(TestCase):
         self.filter_prefixes = []
         self.fsics = {}
 
-    def test_all_fsics(self):
-        self.fsics = {self.data['group1_id'].id: 0, self.data['group2_id'].id: 0}
-        self.data['sc']._queue_into_buffer(self.filter_prefixes, self.fsics)
+    def assertRecordsBuffered(self, filter_prefixes, fsics, records):
+        self.data['sc']._queue_into_buffer(filter_prefixes, fsics)
         buffer_ids = Buffer.objects.values_list('model_uuid', flat=True)
         rmcb_ids = RecordMaxCounterBuffer.objects.values_list('model_uuid', flat=True)
-        for i in self.data['group1_c1']:
-            self.assertIn(i.id, buffer_ids)
-            self.assertIn(i.id, rmcb_ids)
-        for i in self.data['group1_c2']:
-            self.assertIn(i.id, buffer_ids)
-            self.assertIn(i.id, rmcb_ids)
-        for i in self.data['group2_c1']:
+        # ensure all store and buffer records are buffered
+        for i in records:
             self.assertIn(i.id, buffer_ids)
             self.assertIn(i.id, rmcb_ids)
 
-    def test_fsic_specific_id(self):
-        self.fsics = {self.data['group2_id'].id: 0}
-        self.data['sc']._queue_into_buffer(self.filter_prefixes, self.fsics)
+    def assertRecordsNotBuffered(self, filter_prefixes, fsics, records):
+        self.data['sc']._queue_into_buffer(filter_prefixes, fsics)
         buffer_ids = Buffer.objects.values_list('model_uuid', flat=True)
         rmcb_ids = RecordMaxCounterBuffer.objects.values_list('model_uuid', flat=True)
-        for i in self.data['group1_c1']:
+        # ensure all store and buffer records are buffered
+        for i in records:
             self.assertNotIn(i.id, buffer_ids)
             self.assertNotIn(i.id, rmcb_ids)
-        for i in self.data['group1_c2']:
-            self.assertNotIn(i.id, buffer_ids)
-            self.assertNotIn(i.id, rmcb_ids)
-        for i in self.data['group2_c1']:
-            self.assertIn(i.id, buffer_ids)
-            self.assertIn(i.id, rmcb_ids)
+
+    def test_all_fsics(self):
+        self.fsics = {self.data['group1_id'].id: 0, self.data['group2_id'].id: 0}
+        self.data['sc']._queue_into_buffer(self.filter_prefixes, self.fsics)
+        # ensure all store and buffer records are buffered
+        self.assertRecordsBuffered(self.filter_prefixes, self.fsics, self.data['group1_c1'])
+        self.assertRecordsBuffered(self.filter_prefixes, self.fsics, self.data['group1_c2'])
+        self.assertRecordsBuffered(self.filter_prefixes, self.fsics, self.data['group2_c1'])
+
+    def test_fsic_specific_id(self):
+        self.fsics = {self.data['group2_id'].id: 0}
+        # ensure only records modified with 2nd instance id are buffered
+        self.assertRecordsNotBuffered(self.filter_prefixes, self.fsics, self.data['group1_c1'])
+        self.assertRecordsNotBuffered(self.filter_prefixes, self.fsics, self.data['group1_c2'])
+        self.assertRecordsBuffered(self.filter_prefixes, self.fsics, self.data['group2_c1'])
 
     def test_fsic_counters(self):
         counter = InstanceIDModel.objects.get(id=self.data['group1_id'].id).counter
         self.fsics = {self.data['group1_id'].id: counter - 1}
-        self.data['sc']._queue_into_buffer(self.filter_prefixes, self.fsics)
-        buffer_ids = Buffer.objects.values_list('model_uuid', flat=True)
-        rmcb_ids = RecordMaxCounterBuffer.objects.values_list('model_uuid', flat=True)
-        for i in self.data['group1_c1']:
-            self.assertNotIn(i.id, buffer_ids)
-            self.assertNotIn(i.id, rmcb_ids)
-        for i in self.data['group1_c2']:
-            self.assertIn(i.id, buffer_ids)
-            self.assertIn(i.id, rmcb_ids)
-        for i in self.data['group2_c1']:
-            self.assertNotIn(i.id, buffer_ids)
-            self.assertNotIn(i.id, rmcb_ids)
+        # ensure only records with updated 1st instance id are buffered
+        self.assertRecordsNotBuffered(self.filter_prefixes, self.fsics, self.data['group1_c1'])
+        self.assertRecordsBuffered(self.filter_prefixes, self.fsics, self.data['group1_c2'])
+        self.assertRecordsNotBuffered(self.filter_prefixes, self.fsics, self.data['group2_c1'])
 
     def test_fsic_counters_too_high(self):
         self.fsics = {self.data['group1_id'].id: 100, self.data['group2_id'].id: 100}
         self.data['sc']._queue_into_buffer(self.filter_prefixes, self.fsics)
+        # ensure no records are buffered
         self.assertFalse(Buffer.objects.all())
         self.assertFalse(RecordMaxCounterBuffer.objects.all())
 
     def test_partition_filter_buffering(self):
         self.filter_prefixes = ['{}:user:summary'.format(self.data['user3'].id),
                                 '{}:user:interaction'.format(self.data['user3'].id)]
-        self.data['sc']._queue_into_buffer(self.filter_prefixes, self.fsics)
-        buffer_ids = Buffer.objects.values_list('model_uuid', flat=True)
-        rmcb_ids = RecordMaxCounterBuffer.objects.values_list('model_uuid', flat=True)
-        self.assertNotIn(self.data['user2'].id, buffer_ids)
-        self.assertNotIn(self.data['user2'].id, rmcb_ids)
-        for i in self.data['user3_sumlogs']:
-            self.assertIn(i.id, buffer_ids)
-            self.assertIn(i.id, rmcb_ids)
-        for i in self.data['user3_interlogs']:
-            self.assertIn(i.id, buffer_ids)
-            self.assertIn(i.id, rmcb_ids)
+        # ensure records with different partition values are buffered
+        self.assertRecordsNotBuffered(self.filter_prefixes, self.fsics, [self.data['user2']])
+        self.assertRecordsBuffered(self.filter_prefixes, self.fsics, self.data['user3_sumlogs'])
+        self.assertRecordsBuffered(self.filter_prefixes, self.fsics, self.data['user3_interlogs'])
 
     def test_partition_prefix_buffering(self):
         self.filter_prefixes = ['{}'.format(self.data['user2'].id)]
-        self.data['sc']._queue_into_buffer(self.filter_prefixes, self.fsics)
-        buffer_ids = Buffer.objects.values_list('model_uuid', flat=True)
-        rmcb_ids = RecordMaxCounterBuffer.objects.values_list('model_uuid', flat=True)
-        self.assertIn(self.data['user2'].id, buffer_ids)
-        self.assertIn(self.data['user2'].id, rmcb_ids)
-        for i in self.data['user2_sumlogs']:
-            self.assertIn(i.id, buffer_ids)
-            self.assertIn(i.id, rmcb_ids)
-        for i in self.data['user2_interlogs']:
-            self.assertIn(i.id, buffer_ids)
-            self.assertIn(i.id, rmcb_ids)
-        self.assertNotIn(self.data['user3'].id, buffer_ids)
-        self.assertNotIn(self.data['user3'].id, rmcb_ids)
+        # ensure only records with user2 partition are buffered
+        self.assertRecordsBuffered(self.filter_prefixes, self.fsics, [self.data['user2']])
+        self.assertRecordsBuffered(self.filter_prefixes, self.fsics, self.data['user2_sumlogs'])
+        self.assertRecordsBuffered(self.filter_prefixes, self.fsics, self.data['user2_interlogs'])
+        self.assertRecordsNotBuffered(self.filter_prefixes, self.fsics, [self.data['user3']])
 
     def test_partition_and_fsic_buffering(self):
         self.filter_prefixes = ['{}:user:summary'.format(self.data['user1'].id)]
-        self.fsics = {self.data['group1_id']: 1}
-        self.data['sc']._queue_into_buffer(self.filter_prefixes, self.fsics)
-        buffer_ids = Buffer.objects.values_list('model_uuid', flat=True)
-        rmcb_ids = RecordMaxCounterBuffer.objects.values_list('model_uuid', flat=True)
-        for i in self.data['user1_sumlogs']:
-            self.assertIn(i.id, buffer_ids)
-            self.assertIn(i.id, rmcb_ids)
-        for i in self.data['user2_sumlogs']:
-            self.assertNotIn(i.id, buffer_ids)
-            self.assertNotIn(i.id, rmcb_ids)
-        for i in self.data['user3_sumlogs']:
-            self.assertNotIn(i.id, buffer_ids)
-            self.assertNotIn(i.id, rmcb_ids)
+        self.fsics = {self.data['group1_id'].id: 1}
+        # ensure records updated with 1st instance id and summarylog partition are buffered
+        self.assertRecordsBuffered(self.filter_prefixes, self.fsics, self.data['user1_sumlogs'])
+        self.assertRecordsNotBuffered(self.filter_prefixes, self.fsics, self.data['user2_sumlogs'])
+        self.assertRecordsNotBuffered(self.filter_prefixes, self.fsics, self.data['user3_sumlogs'])
+
+    def test_valid_fsic_but_invalid_partition(self):
+        self.filter_prefixes = ['{}:user:summary'.format(self.data['user1'].id)]
+        self.fsics = {self.data['group2_id'].id: 1}
+        # ensure that record with valid fsic but invalid partition is not buffered
+        self.assertRecordsNotBuffered(self.filter_prefixes, self.fsics, [self.data['user4']])
 
 
 class BufferIntoStoreTestCase(TestCase):
