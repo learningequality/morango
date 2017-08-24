@@ -2,9 +2,10 @@ from __future__ import unicode_literals
 
 import uuid
 
-from django.contrib.auth.models import AbstractBaseUser
+from django.contrib.auth.models import AbstractBaseUser, UserManager
 from django.db import models
 from django.utils import timezone
+from morango.manager import SyncableModelManager
 from morango.models import SyncableModel
 from morango.query import SyncableModelQuerySet
 from morango.utils.morango_mptt import MorangoMPTTModel
@@ -18,7 +19,8 @@ class FacilityDataSyncableModel(SyncableModel):
     class Meta:
         abstract = True
 
-class BaseQuerySet(SyncableModelQuerySet):
+
+class SyncableUserModelManager(SyncableModelManager, UserManager):
     pass
 
 
@@ -37,6 +39,7 @@ class Facility(MorangoMPTTModel, FacilityDataSyncableModel):
     def calculate_partition(self, *args, **kwargs):
         return ''
 
+
 class MyUser(AbstractBaseUser, FacilityDataSyncableModel):
     # Morango syncing settings
     morango_model_name = "user"
@@ -44,15 +47,21 @@ class MyUser(AbstractBaseUser, FacilityDataSyncableModel):
 
     USERNAME_FIELD = "username"
 
-    username = models.CharField(max_length=20)
+    is_staff = models.BooleanField(default=False)
+    is_superuser = models.BooleanField(default=False)
 
-    objects = BaseQuerySet.as_manager()
+    username = models.CharField(max_length=20, unique=True)
+
+    objects = SyncableUserModelManager()
 
     def calculate_source_id(self, *args, **kwargs):
         return self.username
 
     def calculate_partition(self, *args, **kwargs):
         return ''
+
+    def has_morango_certificate_scope_permission(self, scope_definition_id, scope_params):
+        return self.is_superuser
 
 
 class SummaryLog(FacilityDataSyncableModel):

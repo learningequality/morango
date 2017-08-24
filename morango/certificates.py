@@ -5,15 +5,19 @@ import six
 import string
 
 from django.core.management import call_command
-from django.db import models
+from django.db import models, transaction
+from django.utils import timezone
+from future.utils import python_2_unicode_compatible
 
 from .crypto import Key, PrivateKeyField, PublicKeyField
 from .utils.uuids import UUIDModelMixin
-from .errors import CertificateScopeNotSubset, CertificateSignatureInvalid, CertificateIDInvalid, CertificateProfileInvalid, CertificateRootScopeInvalid
+from .errors import CertificateScopeNotSubset, CertificateSignatureInvalid, CertificateIDInvalid, CertificateProfileInvalid, CertificateRootScopeInvalid, NonceDoesNotExist, NonceExpired
 
+
+@python_2_unicode_compatible
 class Certificate(mptt.models.MPTTModel, UUIDModelMixin):
 
-    uuid_input_fields = ("public_key", "profile")
+    uuid_input_fields = ("public_key", "profile", "salt")
 
     parent = models.ForeignKey("Certificate", blank=True, null=True)
 
@@ -27,6 +31,9 @@ class Certificate(mptt.models.MPTTModel, UUIDModelMixin):
 
     # track the certificate's public key so we can verify any certificates it signs
     public_key = PublicKeyField()
+
+    # a salt value to include in the UUID calculation, to prevent CSR requests from forcing ID collisions
+    salt = models.CharField(max_length=32, blank=True)
 
     # the JSON-serialized copy of all the fields above
     serialized = models.TextField()
@@ -82,6 +89,9 @@ class Certificate(mptt.models.MPTTModel, UUIDModelMixin):
         cert.save()
         return cert
 
+    def has_private_key(self):
+        return self._private_key is not None
+
     def serialize(self):
         if not self.id:
             self.id = self.calculate_uuid()
@@ -112,9 +122,12 @@ class Certificate(mptt.models.MPTTModel, UUIDModelMixin):
         )
         return model
 
+    def _serialize_if_needed(self):
+        if not self.serialized:
+            self.serialized = self.serialize()
+
     def sign_certificate(self, cert_to_sign):
-        if not cert_to_sign.serialized:
-            cert_to_sign.serialized = cert_to_sign.serialize()
+        cert_to_sign._serialize_if_needed()
         cert_to_sign.signature = self.sign(cert_to_sign.serialized)
 
     def check_certificate(self):
@@ -137,11 +150,53 @@ class Certificate(mptt.models.MPTTModel, UUIDModelMixin):
             if not self.parent.verify(self.serialized, self.signature):
                 raise CertificateSignatureInvalid()
             # check that certificate's scope is a subset of parent's scope
-            self.get_scope().verify_subset_of(self.parent.get_scope())
+            if not self.get_scope().is_subset_of(self.parent.get_scope()):
+                raise CertificateScopeNotSubset()
             # check that certificate is for same profile as parent
             if self.profile != self.parent.profile:
                 raise CertificateProfileInvalid("Certificate profile is {} but parent's is {}" \
                                                 .format(self.profile, self.parent.profile))
+
+    @classmethod
+    def save_certificate_chain(cls, cert_chain, expected_last_id=None):
+
+        # parse the chain from json if needed
+        if isinstance(cert_chain, six.string_types):
+            cert_chain = json.loads(cert_chain)
+
+        # start from the bottom of the chain
+        cert_data = cert_chain[-1]
+
+        # create an in-memory instance of the cert from the serialized data and signature
+        cert = cls.deserialize(cert_data["serialized"], cert_data["signature"])
+
+        # verify the id of the cert matches the id of the outer serialized data
+        assert cert_data["id"] == cert.id
+
+        # check that the expected ID matches, if specified
+        if expected_last_id:
+            assert cert.id == expected_last_id
+
+        # if cert already exists locally, it's already been verified, so no need to continue
+        # (this also means we have the full cert chain for it, given the `parent` relations)
+        try:
+            return cls.objects.get(id=cert.id)
+        except cls.DoesNotExist:
+            pass
+
+        # recurse up the certificate chain, until we hit a cert that exists or is the root
+        if len(cert_chain) > 1:
+            cls.save_certificate_chain(cert_chain[:-1], expected_last_id=cert.parent_id)
+        else:
+            assert not cert.parent_id, "First cert in chain must be a root cert (no parent)"
+
+        # ensure the certificate checks out (now that we know its parent, if any, is saved)
+        cert.check_certificate()
+
+        # save the certificate, as it's now fully verified
+        cert.save()
+
+        return cert
 
     def sign(self, value):
         assert self.private_key, "Can only sign using certificates that have private keys"
@@ -152,6 +207,41 @@ class Certificate(mptt.models.MPTTModel, UUIDModelMixin):
 
     def get_scope(self):
         return self.scope_definition.get_scope(self.scope_params)
+
+    def __str__(self):
+        if self.scope_definition:
+            return self.scope_definition.get_description(self.scope_params)
+
+
+class Nonce(UUIDModelMixin):
+    """
+    Stores temporary nonce values used for cryptographic handshakes during syncing.
+    These nonces are requested by the client, and then generated and stored by the server.
+    When the client then goes to initiate a sync session, it signs the nonce value using
+    the private key from the certificate it is using for the session, to prove to the
+    server that it owns the certificate. The server checks that the nonce exists and hasn't
+    expired, and then deletes it.
+    """
+
+    uuid_input_fields = "RANDOM"
+
+    timestamp = models.DateTimeField(default=timezone.now)
+    ip = models.CharField(max_length=100, blank=True)
+
+    @classmethod
+    def use_nonce(cls, nonce_value):
+        with transaction.atomic():
+            # try fetching the nonce
+            try:
+                nonce = cls.objects.get(id=nonce_value)
+            except cls.DoesNotExist:
+                raise NonceDoesNotExist()
+            # check that the nonce hasn't expired
+            if not (0 < (timezone.now() - nonce.timestamp).total_seconds() < 60):
+                nonce.delete()
+                raise NonceExpired()
+            # now that we've used it, delete the nonce
+            nonce.delete()
 
 
 class ScopeDefinition(models.Model):
@@ -190,41 +280,75 @@ class ScopeDefinition(models.Model):
     def get_scope(self, params):
         return Scope(definition=self, params=params)
 
+    def get_description(self, params):
+        if isinstance(params, six.string_types):
+            params = json.loads(params)
+        return string.Template(self.description).safe_substitute(params)
+
+
+@python_2_unicode_compatible
+class Filter(object):
+
+    def __init__(self, template, params={}):
+        # ensure params have been deserialized
+        if isinstance(params, six.string_types):
+            params = json.loads(params)
+        self._template = template
+        self._params = params
+        self._filter_string = string.Template(template).safe_substitute(params)
+        self._filter_tuple = tuple(self._filter_string.split())
+
+    def is_subset_of(self, other):
+        for partition in self._filter_tuple:
+            if not partition.startswith(other._filter_tuple):
+                return False
+        return True
+
+    def contains_partition(self, partition):
+        return partition.startswith(self._filter_tuple)
+
+    def __le__(self, other):
+        return self.is_subset_of(other)
+
+    def __eq__(self, other):
+        for partition in self._filter_tuple:
+            if partition not in other._filter_tuple:
+                return False
+        for partition in other._filter_tuple:
+            if partition not in self._filter_tuple:
+                return False
+        return True
+
+    def __contains__(self, partition):
+        return self.contains_partition(partition)
+
+    def __add__(self, other):
+        return Filter(self._filter_string + "\n" + other._filter_string)
+
+    def __iter__(self):
+        return iter(self._filter_tuple)
+
+    def __str__(self):
+        return u"\n".join(self._filter_tuple)
+
 
 class Scope(object):
 
     def __init__(self, definition, params):
-        # ensure params has been deserialized
-        if isinstance(params, six.string_types):
-            params = json.loads(params)
-        # inflate the scope definition by filling in the filter templates from the params
-        rw_filter = self._fill_in_filter_template(definition.read_write_filter_template, params)
-        self.read_filter = rw_filter + self._fill_in_filter_template(definition.read_filter_template, params)
-        self.write_filter = rw_filter + self._fill_in_filter_template(definition.write_filter_template, params)
+        # turn the scope definition filter templates into Filter objects
+        rw_filter = Filter(definition.read_write_filter_template, params)
+        self.read_filter = rw_filter + Filter(definition.read_filter_template, params)
+        self.write_filter = rw_filter + Filter(definition.write_filter_template, params)
 
-    def _fill_in_filter_template(self, template, params):
-        return tuple(string.Template(template).safe_substitute(params).split())
-
-    def _verify_subset_for_field(self, scope, fieldname):
-        s1 = getattr(self, fieldname)
-        s2 = getattr(scope, fieldname)
-        for partition in s1:
-            if not partition.startswith(s2):
-                raise CertificateScopeNotSubset(
-                    "No partition prefix found for {partition} in {scope} ({fieldname})!".format(
-                        partition=partition,
-                        scope=s2,
-                        fieldname=fieldname,
-                    )
-                )
-
-    def verify_subset_of(self, scope):
-        self._verify_subset_for_field(scope, "read_filter")
-        self._verify_subset_for_field(scope, "write_filter")
-
-    def is_subset_of(self, scope):
-        try:
-            self.verify_subset_of(scope)
-        except CertificateScopeNotSubset:
+    def is_subset_of(self, other):
+        if not self.read_filter.is_subset_of(other.read_filter):
+            return False
+        if not self.write_filter.is_subset_of(other.write_filter):
             return False
         return True
+
+    def __le__(self, other):
+        return self.is_subset_of(other)
+
+    def __eq__(self, other):
+        return self.read_filter == other.read_filter and self.write_filter == other.write_filter
