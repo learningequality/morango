@@ -151,7 +151,7 @@ class SyncClient(object):
                                              transfer_session_id=self.transfer_session_id)
         cursor.execute(delete_buffered_records)
 
-    def _dequeuing_merge_conflict_rmc(self, cursor):
+    def _dequeuing_merge_conflict_rmcb(self, cursor):
         # transfer record max counters for records with merge conflicts + perform max
         merge_conflict_rmc = """REPLACE INTO {rmc} (instance_id, counter, store_model_id)
                                     SELECT rmcb.instance_id, rmcb.counter, rmcb.model_uuid
@@ -180,24 +180,18 @@ class SyncClient(object):
         # transfer buffer serialized into conflicting store
         merge_conflict_store = """REPLACE INTO {store} (id, serialized, deleted, last_saved_instance, last_saved_counter, model_name,
                                                         profile, partition, conflicting_serialized_data, dirty_bit)
-                                            SELECT store.id, store.serialized, store.deleted OR buffer.deleted, '{current_instance_id}', {current_instance_counter},
-                                                   store.model_name, store.profile, store.partition,
+                                            SELECT store.id, store.serialized, store.deleted OR buffer.deleted, '{current_instance_id}',
+                                                   {current_instance_counter}, store.model_name, store.profile, store.partition,
                                                    buffer.serialized || '\n' || store.conflicting_serialized_data, 1
-                                            FROM {buffer} AS buffer, {rmcb} AS rmcb, {store} AS store, {rmc} as rmc
-                                /*Scope to a single record.*/
-                                WHERE store.id = rmcb.model_uuid
-                                AND store.id = rmc.store_model_id
-                                AND store.id = buffer.model_uuid
-                                /*Where buffer rmc is greater than store rmc*/
-                                AND rmcb.instance_id = rmc.instance_id
-                                AND rmcb.counter > rmc.counter
-                                AND rmcb.transfer_session_id = '{transfer_session_id}'
-                                AND buffer.transfer_session_id = '{transfer_session_id}'
-                                /*Exclude fast-forwards*/
-                                AND NOT EXISTS (SELECT 1 FROM {rmcb} AS rmcb2 WHERE store.id = rmcb2.model_uuid
-                                                                              AND store.last_saved_instance = rmcb2.instance_id
-                                                                              AND store.last_saved_counter <= rmcb2.counter
-                                                                              AND rmcb2.transfer_session_id = '{transfer_session_id}')
+                                            FROM {buffer} AS buffer, {store} AS store
+                                            /*Scope to a single record.*/
+                                            WHERE store.id = buffer.model_uuid
+                                            AND buffer.transfer_session_id = '{transfer_session_id}'
+                                            /*Exclude fast-forwards*/
+                                            AND NOT EXISTS (SELECT 1 FROM {rmcb} AS rmcb2 WHERE store.id = rmcb2.model_uuid
+                                                                                          AND store.last_saved_instance = rmcb2.instance_id
+                                                                                          AND store.last_saved_counter <= rmcb2.counter
+                                                                                          AND rmcb2.transfer_session_id = '{transfer_session_id}')
                                       """.format(buffer=Buffer._meta.db_table,
                                                  rmcb=RecordMaxCounterBuffer._meta.db_table,
                                                  store=Store._meta.db_table,
@@ -232,17 +226,11 @@ class SyncClient(object):
     def _dequeuing_delete_mc_buffer(self, cursor):
         # delete records with merge conflicts from buffer
         delete_mc_buffer = """DELETE FROM {buffer}
-                                    WHERE model_uuid IN
-                                    (SELECT buffer.model_uuid FROM {rmcb} AS rmcb, {store} AS store, {rmc} AS rmc, {buffer} AS buffer
+                                    WHERE EXISTS
+                                    (SELECT 1 FROM {store} AS store, {buffer} AS buffer
                                     /*Scope to a single record.*/
-                                    WHERE store.id = rmcb.model_uuid
-                                    AND store.id = rmc.store_model_id
-                                    AND store.id = buffer.model_uuid
-                                    /*Where buffer rmc is greater than store rmc*/
-                                    AND rmcb.instance_id = rmc.instance_id
-                                    AND rmcb.counter > rmc.counter
-                                    AND rmcb.transfer_session_id = '{transfer_session_id}'
-                                    AND buffer.transfer_session_id = '{transfer_session_id}'
+                                    WHERE store.id = {buffer}.model_uuid
+                                    AND {buffer}.transfer_session_id = '{transfer_session_id}'
                                     /*Exclude fast-forwards*/
                                     AND NOT EXISTS (SELECT 1 FROM {rmcb} AS rmcb2 WHERE store.id = rmcb2.model_uuid
                                                                                   AND store.last_saved_instance = rmcb2.instance_id
@@ -258,15 +246,14 @@ class SyncClient(object):
     def _dequeuing_delete_mc_rmcb(self, cursor):
         # delete rmcb records with merge conflicts
         delete_mc_rmc = """DELETE FROM {rmcb}
-                                WHERE model_uuid IN
-                                    (SELECT rmcb.model_uuid FROM {rmcb} AS rmcb, {store} AS store, {rmc} AS rmc, {buffer} AS buffer
+                                    WHERE EXISTS
+                                    (SELECT 1 FROM {store} AS store, {rmc} AS rmc
                                     /*Scope to a single record.*/
-                                    WHERE store.id = rmcb.model_uuid
+                                    WHERE store.id = {rmcb}.model_uuid
                                     AND store.id = rmc.store_model_id
                                     /*Where buffer rmc is greater than store rmc*/
-                                    AND rmcb.instance_id = rmc.instance_id
-                                    AND rmcb.counter > rmc.counter
-                                    AND rmcb.transfer_session_id = '{transfer_session_id}'
+                                    AND {rmcb}.instance_id = rmc.instance_id
+                                    AND {rmcb}.transfer_session_id = '{transfer_session_id}'
                                     /*Exclude fast fast-forwards*/
                                     AND NOT EXISTS (SELECT 1 FROM {rmcb} AS rmcb2 WHERE store.id = rmcb2.model_uuid
                                                                                   AND store.last_saved_instance = rmcb2.instance_id
@@ -330,9 +317,9 @@ class SyncClient(object):
         with connection.cursor() as cursor:
             self._dequeuing_delete_rmcb_records(cursor)
             self._dequeuing_delete_buffered_records(cursor)
-            self._dequeuing_merge_conflict_rmcb(cursor)
             current_id = InstanceIDModel.get_current_instance_and_increment_counter()
             self._dequeuing_merge_conflict_buffer(cursor, current_id)
+            self._dequeuing_merge_conflict_rmcb(cursor)
             self._dequeuing_update_rmcs_last_saved_by(cursor, current_id)
             self._dequeuing_delete_mc_rmcb(cursor)
             self._dequeuing_delete_mc_buffer(cursor)

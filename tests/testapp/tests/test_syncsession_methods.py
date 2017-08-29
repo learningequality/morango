@@ -140,7 +140,7 @@ class BufferIntoStoreTestCase(TestCase):
         self.assertNotEqual(rmc.counter, rmcb.counter)
         self.assertGreaterEqual(rmcb.counter, rmc.counter)
         with connection.cursor() as cursor:
-            self.data['sc']._dequeuing_merge_conflict_rmc(cursor)
+            self.data['sc']._dequeuing_merge_conflict_rmcb(cursor)
         rmc = RecordMaxCounter.objects.get(instance_id=self.data['model2_rmc_ids'][0], store_model_id=self.data['model2'])
         rmcb = RecordMaxCounterBuffer.objects.get(instance_id=self.data['model2_rmc_ids'][0], model_uuid=self.data['model2'])
         self.assertEqual(rmc.counter, rmcb.counter)
@@ -151,13 +151,13 @@ class BufferIntoStoreTestCase(TestCase):
         self.assertNotEqual(rmc.counter, rmcb.counter)
         self.assertGreaterEqual(rmc.counter, rmcb.counter)
         with connection.cursor() as cursor:
-            self.data['sc']._dequeuing_merge_conflict_rmc(cursor)
+            self.data['sc']._dequeuing_merge_conflict_rmcb(cursor)
         rmc = RecordMaxCounter.objects.get(instance_id=self.data['model5_rmc_ids'][0], store_model_id=self.data['model5'])
         rmcb = RecordMaxCounterBuffer.objects.get(instance_id=self.data['model5_rmc_ids'][0], model_uuid=self.data['model5'])
         self.assertNotEqual(rmc.counter, rmcb.counter)
         self.assertGreaterEqual(rmc.counter, rmcb.counter)
 
-    def test_dequeuing_merge_conflict_buffer(self):
+    def test_dequeuing_merge_conflict_buffer_rmcb_greater_than_rmc(self):
         store = Store.objects.get(id=self.data['model2'])
         self.assertNotEqual(store.last_saved_instance, self.current_id.id)
         self.assertEqual(store.conflicting_serialized_data, "store")
@@ -170,6 +170,18 @@ class BufferIntoStoreTestCase(TestCase):
         self.assertEqual(store.last_saved_counter, current_id.counter)
         self.assertEqual(store.conflicting_serialized_data, "buffer\nstore")
         self.assertTrue(store.deleted)
+
+    def test_dequeuing_merge_conflict_buffer_rmcb_less_rmc(self):
+        store = Store.objects.get(id=self.data['model5'])
+        self.assertNotEqual(store.last_saved_instance, self.current_id.id)
+        self.assertEqual(store.conflicting_serialized_data, "store")
+        with connection.cursor() as cursor:
+            current_id = InstanceIDModel.get_current_instance_and_increment_counter()
+            self.data['sc']._dequeuing_merge_conflict_buffer(cursor, current_id)
+        store = Store.objects.get(id=self.data['model5'])
+        self.assertEqual(store.last_saved_instance, current_id.id)
+        self.assertEqual(store.last_saved_counter, current_id.counter)
+        self.assertEqual(store.conflicting_serialized_data, "buffer\nstore")
 
     def test_dequeuing_update_rmcs_last_saved_by(self):
         self.assertFalse(RecordMaxCounter.objects.filter(instance_id=self.current_id.id).exists())
@@ -191,15 +203,16 @@ class BufferIntoStoreTestCase(TestCase):
         with connection.cursor() as cursor:
             self.data['sc']._dequeuing_delete_mc_rmcb(cursor)
         self.assertFalse(RecordMaxCounterBuffer.objects.filter(model_uuid=self.data['model2'], instance_id=self.data['model2_rmcb_ids'][0]).exists())
+        self.assertTrue(RecordMaxCounterBuffer.objects.filter(model_uuid=self.data['model2'], instance_id=self.data['model2_rmcb_ids'][1]).exists())
         # ensure other records were not deleted
         self.assertTrue(RecordMaxCounterBuffer.objects.filter(model_uuid=self.data['model3'], instance_id=self.data['model3_rmcb_ids'][0]).exists())
 
     def test_dequeuing_insert_remaining_buffer(self):
-        self.assertNotEqual(Store.objects.get(id=self.data['model3']).serialized, self.data['serialized'])
+        self.assertNotEqual(Store.objects.get(id=self.data['model3']).serialized, "buffer")
         self.assertFalse(Store.objects.filter(id=self.data['model4']).exists())
         with connection.cursor() as cursor:
             self.data['sc']._dequeuing_insert_remaining_buffer(cursor)
-        self.assertEqual(Store.objects.get(id=self.data['model3']).serialized, self.data['serialized'])
+        self.assertEqual(Store.objects.get(id=self.data['model3']).serialized, "buffer")
         self.assertTrue(Store.objects.filter(id=self.data['model4']).exists())
 
     def test_dequeuing_insert_remaining_rmcb(self):
@@ -211,13 +224,42 @@ class BufferIntoStoreTestCase(TestCase):
             self.assertTrue(RecordMaxCounter.objects.filter(instance_id=i, store_model_id=self.data['model4']).exists())
 
     def test_dequeuing_delete_remaining_rmcb(self):
-        self.assertTrue(RecordMaxCounterBuffer.objects.exists())
+        self.assertTrue(RecordMaxCounterBuffer.objects.filter(transfer_session_id=self.data['sc'].transfer_session_id).exists())
         with connection.cursor() as cursor:
             self.data['sc']._dequeuing_delete_remaining_rmcb(cursor)
-        self.assertFalse(RecordMaxCounterBuffer.objects.exists())
+        self.assertFalse(RecordMaxCounterBuffer.objects.filter(transfer_session_id=self.data['sc'].transfer_session_id).exists())
 
     def test_dequeuing_delete_remaining_buffer(self):
-        self.assertTrue(Buffer.objects.exists())
+        self.assertTrue(Buffer.objects.filter(transfer_session_id=self.data['sc'].transfer_session_id).exists())
         with connection.cursor() as cursor:
             self.data['sc']._dequeuing_delete_remaining_buffer(cursor)
-        self.assertFalse(Buffer.objects.exists())
+        self.assertFalse(Buffer.objects.filter(transfer_session_id=self.data['sc'].transfer_session_id).exists())
+
+    def test_integrate_into_store(self):
+        self.data['sc']._integrate_into_store()
+        # ensure a record with different transfer session id is not affected
+        self.assertTrue(Buffer.objects.filter(transfer_session_id=self.data['tfs_id']).exists())
+        self.assertFalse(Store.objects.filter(id=self.data['model6']).exists())
+        self.assertFalse(RecordMaxCounter.objects.filter(store_model_id=self.data['model6'], instance_id__in=self.data['model6_rmcb_ids']).exists())
+
+        # ensure reverse fast forward records are not modified
+        self.assertNotEqual(Store.objects.get(id=self.data['model1']).serialized, "buffer")
+        self.assertFalse(RecordMaxCounter.objects.filter(instance_id=self.data['model1_rmcb_ids'][1]).exists())
+
+        # ensure records with merge conflicts are modified
+        self.assertEqual(Store.objects.get(id=self.data['model2']).conflicting_serialized_data, "buffer\nstore")  # conflicting field is overwritten
+        self.assertEqual(Store.objects.get(id=self.data['model5']).conflicting_serialized_data, "buffer\nstore")
+        self.assertTrue(RecordMaxCounter.objects.filter(instance_id=self.data['model2_rmcb_ids'][1]).exists())
+        self.assertTrue(RecordMaxCounter.objects.filter(instance_id=self.data['model5_rmcb_ids'][1]).exists())
+        self.assertEqual(Store.objects.get(id=self.data['model2']).last_saved_instance, InstanceIDModel.get_or_create_current_instance()[0].id)
+        self.assertEqual(Store.objects.get(id=self.data['model5']).last_saved_instance, InstanceIDModel.get_or_create_current_instance()[0].id)
+
+        # ensure fast forward records are modified
+        self.assertEqual(Store.objects.get(id=self.data['model3']).serialized, "buffer")  # serialized field is overwritten
+        self.assertTrue(RecordMaxCounter.objects.filter(instance_id=self.data['model3_rmcb_ids'][1]).exists())
+        self.assertEqual(Store.objects.get(id=self.data['model3']).last_saved_instance, self.data['model3_rmcb_ids'][1])  # last_saved_by is updated
+        self.assertEqual(RecordMaxCounter.objects.get(instance_id=self.data['model3_rmcb_ids'][0], store_model_id=self.data['model3']).counter, 3)
+
+        # ensure all buffer and rmcb records were deleted for this transfer session id
+        self.assertFalse(Buffer.objects.filter(transfer_session_id=self.data['sc'].transfer_session_id).exists())
+        self.assertFalse(RecordMaxCounterBuffer.objects.filter(transfer_session_id=self.data['sc'].transfer_session_id).exists())
