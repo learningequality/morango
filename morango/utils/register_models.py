@@ -49,6 +49,7 @@ def add_syncable_models():
     from morango.query import SyncableModelQuerySet
 
     model_list = []
+    proxy_dict = {}
     for model_class in django.apps.apps.get_models():
         # several validation checks to assert models will be syncing correctly
         if issubclass(model_class, SyncableModel) and not model_class._meta.proxy:
@@ -82,13 +83,25 @@ def add_syncable_models():
             profile = model_class.morango_profile
             _profile_models[profile] = _profile_models.get(profile, [])
 
-            # special case for root proxy model
-            if model_class._meta.proxied_children:
-                model_class._meta.proxied_children.reverse()
-                for proxy_model in model_class._meta.proxied_children:
-                    _insert_model_into_profile_dict(proxy_model.model, profile)
-            else:
-                _insert_model_into_profile_dict(model_class, profile)
+            _insert_model_into_profile_dict(model_class, profile)
+
+        # we keep track of all proxy models in relation to their parent class
+        elif model_class._meta.proxy:
+            base_proxy_model = model_class._meta.proxy_for_model
+            proxy_dict[base_proxy_model] = proxy_dict.get(base_proxy_model, [])
+            if issubclass(base_proxy_model, SyncableModel):
+                if hasattr(model_class, '_morango_proxy_order'):
+                    proxy_dict[base_proxy_model].append(model_class)
+
+    # sort by _morango_proxy_order
+    for proxy in proxy_dict:
+        proxy_dict[proxy] = sorted(proxy_dict[proxy], key=lambda p: p._morango_proxy_order, reverse=True)
+
+    # add proxy models based on order, and remove parent class
+    for base_model, proxy_list in iteritems(proxy_dict):
+        for proxy_model in proxy_list:
+            _insert_model_into_profile_dict(proxy_model, profile)
+        _profile_models[profile].remove(base_model)
 
     # for each profile, create a dict mapping from morango model names to model class
     for profile, model_list in iteritems(_profile_models):
