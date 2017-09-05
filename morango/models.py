@@ -8,12 +8,12 @@ from django.db import connection, models, transaction
 from django.db.models import F
 from django.utils import timezone
 
-from .certificates import Certificate, ScopeDefinition
+from .certificates import Certificate, ScopeDefinition, Nonce, Filter
 from .manager import SyncableModelManager
 from .utils.uuids import UUIDField, UUIDModelMixin, sha2_uuid
 
 
-class DatabaseManager(models.Manager):
+class DatabaseIDManager(models.Manager):
     """
     We override ``model.Manager`` in order to wrap creating a new database ID model within a transaction. With the
     creation of a new database ID model, we set all previously created models current flag to False.
@@ -26,7 +26,7 @@ class DatabaseManager(models.Manager):
             # set current flag to false for all database_id models
             DatabaseIDModel.objects.update(current=False)
 
-            return super(DatabaseManager, self).create(**kwargs)
+            return super(DatabaseIDManager, self).create(**kwargs)
 
 
 class DatabaseIDModel(UUIDModelMixin):
@@ -36,7 +36,7 @@ class DatabaseIDModel(UUIDModelMixin):
 
     uuid_input_fields = "RANDOM"
 
-    objects = DatabaseManager()
+    objects = DatabaseIDManager()
 
     current = models.BooleanField(default=True)
     date_generated = models.DateTimeField(default=timezone.now)
@@ -51,6 +51,15 @@ class DatabaseIDModel(UUIDModelMixin):
                 DatabaseIDModel.objects.update(current=False)
 
             super(DatabaseIDModel, self).save(*args, **kwargs)
+
+    @classmethod
+    def get_or_create_current_database_id(cls):
+
+        with transaction.atomic():
+            try:
+                return cls.objects.get(current=True)
+            except cls.DoesNotExist:
+                return cls.objects.create()
 
 
 class InstanceIDModel(UUIDModelMixin):
@@ -72,8 +81,8 @@ class InstanceIDModel(UUIDModelMixin):
     db_path = models.CharField(max_length=1000)
     system_id = models.CharField(max_length=100, blank=True)
 
-    @staticmethod
-    def get_or_create_current_instance():
+    @classmethod
+    def get_or_create_current_instance(cls):
         """Get the instance model corresponding to the current system, or create a new
         one if the system is new or its properties have changed (e.g. OS from upgrade)."""
 
@@ -87,7 +96,7 @@ class InstanceIDModel(UUIDModelMixin):
             "platform": plat,
             "hostname": platform.node(),
             "sysversion": sys.version,
-            "database": DatabaseIDModel.objects.get(current=True),
+            "database": DatabaseIDModel.get_or_create_current_database_id(),
             "db_path": os.path.abspath(settings.DATABASES['default']['NAME']),
             "system_id": os.environ.get("MORANGO_SYSTEM_ID", ""),
         }
@@ -101,9 +110,9 @@ class InstanceIDModel(UUIDModelMixin):
 
         # do within transaction so we only ever have 1 current instance ID
         with transaction.atomic():
-            obj, created = InstanceIDModel.objects.get_or_create(**kwargs)
+            obj, created = cls.objects.get_or_create(**kwargs)
             if created:
-                InstanceIDModel.objects.exclude(id=obj.id).update(current=False)
+                cls.objects.exclude(id=obj.id).update(current=False)
 
         return obj, created
 
@@ -120,20 +129,34 @@ class SyncSession(models.Model):
     the current transfer happening for this sync session.
     """
 
-    id = models.UUIDField(primary_key=True)
+    id = UUIDField(primary_key=True)
 
     # track when the session started and the last time there was activity for this session
     start_timestamp = models.DateTimeField(default=timezone.now)
     last_activity_timestamp = models.DateTimeField(blank=True)
+    active = models.BooleanField(default=True)
+
+    # track whether this device is acting as the server for the sync session
+    is_server = models.BooleanField(default=False)
 
     # track the certificates being used by each side for this session
     local_certificate = models.ForeignKey(Certificate, blank=True, null=True, related_name="syncsessions_local")
     remote_certificate = models.ForeignKey(Certificate, blank=True, null=True, related_name="syncsessions_remote")
 
+    # track the morango profile this sync session is happening for
+    profile = models.CharField(max_length=40)
+
     # information about the connection over which this sync session is happening
     connection_kind = models.CharField(max_length=10, choices=[(u"network", u"Network"), (u"disk", u"Disk")])
-    connection_path = models.CharField(max_length=1000)  # file path if kind=disk, and base URL if kind=network
-    connection_params = models.TextField(default=u"{}")
+    connection_path = models.CharField(max_length=1000)  # file path if kind=disk, and base URL of server if kind=network
+
+    # for network connections, keep track of the IPs on either end
+    local_ip = models.CharField(max_length=100, blank=True)
+    remote_ip = models.CharField(max_length=100, blank=True)
+
+    # serialized copies of the client and server instance model fields, for debugging/tracking purposes
+    local_instance = models.TextField(default=u"{}")
+    remote_instance = models.TextField(default=u"{}")
 
 
 class TransferSession(models.Model):
@@ -142,18 +165,20 @@ class TransferSession(models.Model):
     between 2 morango instances.
     """
 
-    id = models.UUIDField(primary_key=True)
-    # partition/filter to know what subset of data is to be synced
-    filter = models.TextField()
-    # is session pushing or pulling data
-    incoming = models.BooleanField()
-    # is this session actively pushing or pulling data?
-    active = models.BooleanField(default=True)
-    chunksize = models.IntegerField(default=500)
-    # we track how many records are left to be synced in this session
-    records_remaining = models.IntegerField()
-    records_total = models.IntegerField()
+    id = UUIDField(primary_key=True)
+    filter = models.TextField()  # partition/filter to know what subset of data is to be synced
+    incoming = models.BooleanField()  # is session pushing or pulling data?
+    active = models.BooleanField(default=True)  # is this transfer session still active?
+    records_transferred = models.IntegerField(default=0)  # track how many records have already been transferred
+    records_total = models.IntegerField(blank=True, null=True)  # total number of records to be synced across in this transfer
     sync_session = models.ForeignKey(SyncSession)
+
+    # track when the transfer session started and the last time there was activity on it
+    start_timestamp = models.DateTimeField(default=timezone.now)
+    last_activity_timestamp = models.DateTimeField(blank=True)
+
+    def get_filter(self):
+        return Filter(self.filter)
 
 
 class DeletedModels(models.Model):
@@ -174,17 +199,21 @@ class AbstractStore(models.Model):
     ``Buffer``.
     """
 
+    profile = models.CharField(max_length=40)
+
     serialized = models.TextField(blank=True)
     deleted = models.BooleanField(default=False)
-    # morango UUID instance and counter at time of serialization
+
+    # ID of last InstanceIDModel and its corresponding counter at time of serialization
     last_saved_instance = UUIDField()
     last_saved_counter = models.IntegerField()
-    # morango_model_name of model
-    model_name = models.CharField(max_length=40)
-    profile = models.CharField(max_length=40)
-    # colon-separated partition values that specify which segment of data this record belongs to
+
+    # fields used to compute UUIDs, filter data, and load data into the correct app models
     partition = models.TextField()
-    # conflicting data that needs a merge conflict resolution
+    source_id = models.CharField(max_length=96)
+    model_name = models.CharField(max_length=40)
+
+    # conflicting data that needs merge conflict resolution
     conflicting_serialized_data = models.TextField(blank=True)
 
     class Meta:
@@ -198,18 +227,22 @@ class Store(AbstractStore):
     """
 
     id = UUIDField(primary_key=True)
-    # used to know which store records to deserialize into app layer
+    # used to know which store records need to be deserialized into the app layer models
     dirty_bit = models.BooleanField(default=False)
 
 
 class Buffer(AbstractStore):
     """
-    ``Buffer`` is where records from the internal store are kept temporarily,
-    until they are sent or received by another morango instance.
+    ``Buffer`` is where records from the internal store are queued up temporarily, before being
+    sent to another morango instance, or stored while being received from another instance, before
+    dequeuing into the local store.
     """
 
     transfer_session = models.ForeignKey(TransferSession)
     model_uuid = UUIDField()
+
+    class Meta:
+        unique_together = ("transfer_session", "model_uuid")
 
 
 class AbstractCounter(models.Model):
@@ -217,9 +250,9 @@ class AbstractCounter(models.Model):
     Abstract class which shares fields across multiple counter models.
     """
 
-    # the UUID of the morango instance that was last synced for this model or filter
+    # the UUID of the morango instance for which we're tracking the counter
     instance_id = UUIDField()
-    # the counter of the morango instance at the time of serialization
+    # the counter of the morango instance at the time of serialization or merge conflict resolution
     counter = models.IntegerField()
 
     class Meta:

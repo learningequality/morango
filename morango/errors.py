@@ -48,3 +48,15 @@ class CertificateProfileInvalid(MorangoCertificateError):
 
 class CertificateRootScopeInvalid(MorangoCertificateError):
     pass
+
+
+class MorangoNonceError(MorangoError):
+    pass
+
+
+class NonceDoesNotExist(MorangoNonceError):
+    pass
+
+
+class NonceExpired(MorangoNonceError):
+    pass
