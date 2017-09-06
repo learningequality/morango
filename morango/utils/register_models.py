@@ -101,7 +101,8 @@ def add_syncable_models():
     for base_model, proxy_list in iteritems(proxy_dict):
         for proxy_model in proxy_list:
             _insert_model_into_profile_dict(proxy_model, profile)
-        _profile_models[profile].remove(base_model)
+        if base_model in _profile_models:
+            _profile_models[profile].remove(base_model)
 
     # for each profile, create a dict mapping from morango model names to model class
     for profile, model_list in iteritems(_profile_models):
