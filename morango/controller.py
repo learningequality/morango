@@ -15,7 +15,7 @@ class MorangoProfileController(object):
         assert profile, "profile needs to be defined."
         self.profile = profile
 
-    def serialize_into_store(self):
+    def serialize_into_store(self, filter_id=None):
         """
         Takes data from app layer and serializes the models into the store.
         """
@@ -28,7 +28,10 @@ class MorangoProfileController(object):
             # filter through all models with the dirty bit turned on
             syncable_dict = _profile_models[self.profile]
             for (_, klass_model) in iteritems(syncable_dict):
-                for app_model in klass_model.objects.filter(_morango_dirty_bit=True):
+                klass_queryset = klass_model.objects.filter(_morango_dirty_bit=True)
+                if filter_id:
+                    klass_queryset = klass_queryset.filter(_morango_partition__contains=filter_id)
+                for app_model in klass_queryset:
                     try:
                         store_model = Store.objects.get(id=app_model.id)
 
@@ -68,7 +71,7 @@ class MorangoProfileController(object):
                         RecordMaxCounter(**defaults).save()
 
                 # set dirty bit to false for all instances of this model
-                klass_model.objects.filter(_morango_dirty_bit=True).update(update_dirty_bit_to=False)
+                klass_queryset.update(update_dirty_bit_to=False)
 
             # update deleted flags based on DeletedModels
             deleted_ids = DeletedModels.objects.filter(profile=self.profile).values_list('id', flat=True)
