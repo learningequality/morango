@@ -25,6 +25,9 @@ class MorangoProfileController(object):
         with transaction.atomic():
             defaults = {'instance_id': current_id.id, 'counter': current_id.counter}
 
+            new_store_records = []
+            new_rmc_records = []
+
             # filter through all models with the dirty bit turned on
             syncable_dict = _profile_models[self.profile]
             for (_, klass_model) in iteritems(syncable_dict):
@@ -66,12 +69,16 @@ class MorangoProfileController(object):
                             'partition': app_model._morango_partition,
                         }
                         # create store model and record max counter for the app model
-                        Store.objects.create(**kwargs)
+                        new_store_records.append(Store(**kwargs))
                         defaults.update({'store_model_id': app_model.id})
-                        RecordMaxCounter(**defaults).save()
+                        new_rmc_records.append(RecordMaxCounter(**defaults))
 
                 # set dirty bit to false for all instances of this model
                 klass_queryset.update(update_dirty_bit_to=False)
+
+            # bulk create store and rmc records
+            Store.objects.bulk_create(new_store_records)
+            RecordMaxCounter.objects.bulk_create(new_rmc_records)
 
             # update deleted flags based on DeletedModels
             deleted_ids = DeletedModels.objects.filter(profile=self.profile).values_list('id', flat=True)
