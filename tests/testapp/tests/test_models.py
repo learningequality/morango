@@ -2,6 +2,7 @@ import factory
 
 from django.test import TestCase
 from morango.models import DatabaseMaxCounter
+from morango.certificates import Filter
 
 
 class DatabaseMaxCounterFactory(factory.DjangoModelFactory):
@@ -34,24 +35,24 @@ class FilterMaxCounterTestCase(TestCase):
         DatabaseMaxCounterFactory(instance_id=self.instance_b, partition=self.user2_prefix_b, counter=2)
 
     def test_filter_not_in_dmc(self):
-        fmcs = DatabaseMaxCounter.calculate_filter_max_counters("ZZZ")
+        fmcs = DatabaseMaxCounter.calculate_filter_max_counters(Filter("ZZZ"))
         self.assertEqual(fmcs, {})
 
     def test_instances_for_one_partition_but_not_other(self):
-        fmcs = DatabaseMaxCounter.calculate_filter_max_counters(self.user_prefix_a + "\n" + self.user_prefix_b)
+        fmcs = DatabaseMaxCounter.calculate_filter_max_counters(Filter(self.user_prefix_a + "\n" + self.user_prefix_b))
         self.assertEqual(fmcs[self.instance_b], 10)
 
     def test_insufficient_instances_for_all_partitions(self):
         user_with_prefix = self.prefix_b + "user_id:richard"
-        fmcs = DatabaseMaxCounter.calculate_filter_max_counters(self.prefix_a + "\n" + user_with_prefix)
+        fmcs = DatabaseMaxCounter.calculate_filter_max_counters(Filter(self.prefix_a + "\n" + user_with_prefix))
         self.assertFalse(fmcs)
 
     def test_single_partition_with_all_instances(self):
-        fmcs = DatabaseMaxCounter.calculate_filter_max_counters(self.user_prefix_a)
+        fmcs = DatabaseMaxCounter.calculate_filter_max_counters(Filter(self.user_prefix_a))
         self.assertEqual(fmcs[self.instance_a], 20)
         self.assertEqual(fmcs[self.instance_b], 10)
 
     def test_all_partitions_have_all_instances(self):
-        fmcs = DatabaseMaxCounter.calculate_filter_max_counters(self.user_prefix_a + "\n" + self.user2_prefix_b)
+        fmcs = DatabaseMaxCounter.calculate_filter_max_counters(Filter(self.user_prefix_a + "\n" + self.user2_prefix_b))
         self.assertEqual(fmcs[self.instance_a], 17)
         self.assertEqual(fmcs[self.instance_b], 10)

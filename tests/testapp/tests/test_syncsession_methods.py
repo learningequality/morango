@@ -23,8 +23,7 @@ class QueueStoreIntoBufferTestCase(TestCase):
         self.filter_prefixes = []
         self.fsics = {}
 
-    def assertRecordsBuffered(self, filter_prefixes, fsics, records):
-        self.data['sc']._queue_into_buffer(filter_prefixes, fsics)
+    def assertRecordsBuffered(self, records):
         buffer_ids = Buffer.objects.values_list('model_uuid', flat=True)
         rmcb_ids = RecordMaxCounterBuffer.objects.values_list('model_uuid', flat=True)
         # ensure all store and buffer records are buffered
@@ -32,8 +31,7 @@ class QueueStoreIntoBufferTestCase(TestCase):
             self.assertIn(i.id, buffer_ids)
             self.assertIn(i.id, rmcb_ids)
 
-    def assertRecordsNotBuffered(self, filter_prefixes, fsics, records):
-        self.data['sc']._queue_into_buffer(filter_prefixes, fsics)
+    def assertRecordsNotBuffered(self, records):
         buffer_ids = Buffer.objects.values_list('model_uuid', flat=True)
         rmcb_ids = RecordMaxCounterBuffer.objects.values_list('model_uuid', flat=True)
         # ensure all store and buffer records are buffered
@@ -45,24 +43,26 @@ class QueueStoreIntoBufferTestCase(TestCase):
         self.fsics = {self.data['group1_id'].id: 0, self.data['group2_id'].id: 0}
         self.data['sc']._queue_into_buffer(self.filter_prefixes, self.fsics)
         # ensure all store and buffer records are buffered
-        self.assertRecordsBuffered(self.filter_prefixes, self.fsics, self.data['group1_c1'])
-        self.assertRecordsBuffered(self.filter_prefixes, self.fsics, self.data['group1_c2'])
-        self.assertRecordsBuffered(self.filter_prefixes, self.fsics, self.data['group2_c1'])
+        self.assertRecordsBuffered(self.data['group1_c1'])
+        self.assertRecordsBuffered(self.data['group1_c2'])
+        self.assertRecordsBuffered(self.data['group2_c1'])
 
     def test_fsic_specific_id(self):
         self.fsics = {self.data['group2_id'].id: 0}
+        self.data['sc']._queue_into_buffer(self.filter_prefixes, self.fsics)
         # ensure only records modified with 2nd instance id are buffered
-        self.assertRecordsNotBuffered(self.filter_prefixes, self.fsics, self.data['group1_c1'])
-        self.assertRecordsNotBuffered(self.filter_prefixes, self.fsics, self.data['group1_c2'])
-        self.assertRecordsBuffered(self.filter_prefixes, self.fsics, self.data['group2_c1'])
+        self.assertRecordsNotBuffered(self.data['group1_c1'])
+        self.assertRecordsNotBuffered(self.data['group1_c2'])
+        self.assertRecordsBuffered(self.data['group2_c1'])
 
     def test_fsic_counters(self):
         counter = InstanceIDModel.objects.get(id=self.data['group1_id'].id).counter
         self.fsics = {self.data['group1_id'].id: counter - 1}
+        self.data['sc']._queue_into_buffer(self.filter_prefixes, self.fsics)
         # ensure only records with updated 1st instance id are buffered
-        self.assertRecordsNotBuffered(self.filter_prefixes, self.fsics, self.data['group1_c1'])
-        self.assertRecordsBuffered(self.filter_prefixes, self.fsics, self.data['group1_c2'])
-        self.assertRecordsNotBuffered(self.filter_prefixes, self.fsics, self.data['group2_c1'])
+        self.assertRecordsNotBuffered(self.data['group1_c1'])
+        self.assertRecordsBuffered(self.data['group1_c2'])
+        self.assertRecordsNotBuffered(self.data['group2_c1'])
 
     def test_fsic_counters_too_high(self):
         self.fsics = {self.data['group1_id'].id: 100, self.data['group2_id'].id: 100}
@@ -74,32 +74,35 @@ class QueueStoreIntoBufferTestCase(TestCase):
     def test_partition_filter_buffering(self):
         self.filter_prefixes = ['{}:user:summary'.format(self.data['user3'].id),
                                 '{}:user:interaction'.format(self.data['user3'].id)]
+        self.data['sc']._queue_into_buffer(self.filter_prefixes, self.fsics)
         # ensure records with different partition values are buffered
-        self.assertRecordsNotBuffered(self.filter_prefixes, self.fsics, [self.data['user2']])
-        self.assertRecordsBuffered(self.filter_prefixes, self.fsics, self.data['user3_sumlogs'])
-        self.assertRecordsBuffered(self.filter_prefixes, self.fsics, self.data['user3_interlogs'])
+        self.assertRecordsNotBuffered([self.data['user2']])
+        self.assertRecordsBuffered(self.data['user3_sumlogs'])
+        self.assertRecordsBuffered(self.data['user3_interlogs'])
 
     def test_partition_prefix_buffering(self):
         self.filter_prefixes = ['{}'.format(self.data['user2'].id)]
+        self.data['sc']._queue_into_buffer(self.filter_prefixes, self.fsics)
         # ensure only records with user2 partition are buffered
-        self.assertRecordsBuffered(self.filter_prefixes, self.fsics, [self.data['user2']])
-        self.assertRecordsBuffered(self.filter_prefixes, self.fsics, self.data['user2_sumlogs'])
-        self.assertRecordsBuffered(self.filter_prefixes, self.fsics, self.data['user2_interlogs'])
-        self.assertRecordsNotBuffered(self.filter_prefixes, self.fsics, [self.data['user3']])
+        self.assertRecordsBuffered([self.data['user2']])
+        self.assertRecordsBuffered(self.data['user2_sumlogs'])
+        self.assertRecordsBuffered(self.data['user2_interlogs'])
+        self.assertRecordsNotBuffered([self.data['user3']])
 
     def test_partition_and_fsic_buffering(self):
         self.filter_prefixes = ['{}:user:summary'.format(self.data['user1'].id)]
         self.fsics = {self.data['group1_id'].id: 1}
+        self.data['sc']._queue_into_buffer(self.filter_prefixes, self.fsics)
         # ensure records updated with 1st instance id and summarylog partition are buffered
-        self.assertRecordsBuffered(self.filter_prefixes, self.fsics, self.data['user1_sumlogs'])
-        self.assertRecordsNotBuffered(self.filter_prefixes, self.fsics, self.data['user2_sumlogs'])
-        self.assertRecordsNotBuffered(self.filter_prefixes, self.fsics, self.data['user3_sumlogs'])
+        self.assertRecordsBuffered(self.data['user1_sumlogs'])
+        self.assertRecordsNotBuffered(self.data['user2_sumlogs'])
+        self.assertRecordsNotBuffered(self.data['user3_sumlogs'])
 
     def test_valid_fsic_but_invalid_partition(self):
         self.filter_prefixes = ['{}:user:summary'.format(self.data['user1'].id)]
         self.fsics = {self.data['group2_id'].id: 1}
         # ensure that record with valid fsic but invalid partition is not buffered
-        self.assertRecordsNotBuffered(self.filter_prefixes, self.fsics, [self.data['user4']])
+        self.assertRecordsNotBuffered([self.data['user4']])
 
 
 class BufferIntoStoreTestCase(TestCase):

@@ -272,8 +272,7 @@ class DatabaseMaxCounter(AbstractCounter):
     def calculate_filter_max_counters(cls, filters):
 
         # create string of prefixes to place into sql statement
-        filter_list = filters.split('\n')
-        condition = " UNION ".join(["SELECT '{}' AS a".format(prefix) for prefix in filter_list])
+        condition = " UNION ".join(["SELECT '{}' AS a".format(prefix) for prefix in filters])
 
         filter_max_calculation = """
         SELECT PMC.instance, MIN(PMC.counter)
@@ -288,7 +287,7 @@ class DatabaseMaxCounter(AbstractCounter):
         HAVING {count} = COUNT(PMC.filter_partition)
         """.format(dmc_table=cls._meta.db_table,
                    filter_list=condition,
-                   count=len(filter_list))
+                   count=len(filters))
 
         with connection.cursor() as cursor:
             cursor.execute(filter_max_calculation)

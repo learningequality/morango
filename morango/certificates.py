@@ -331,6 +331,9 @@ class Filter(object):
     def __str__(self):
         return u"\n".join(self._filter_tuple)
 
+    def __len__(self):
+        return len(self._filter_tuple)
+
 
 class Scope(object):
 
