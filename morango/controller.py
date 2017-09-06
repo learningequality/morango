@@ -3,7 +3,6 @@ import json
 from django.core.exceptions import ObjectDoesNotExist
 from django.core.serializers.json import DjangoJSONEncoder
 from django.db import transaction
-from django.db.models import F
 from django.utils.six import iteritems
 from morango.models import DeletedModels, InstanceIDModel, RecordMaxCounter, Store
 
@@ -21,9 +20,7 @@ class MorangoProfileController(object):
         Takes data from app layer and serializes the models into the store.
         """
         # ensure that we write and retrieve the counter in one go for consistency
-        with transaction.atomic():
-            InstanceIDModel.objects.filter(current=True).update(counter=F('counter') + 1)
-            current_id = InstanceIDModel.objects.get(current=True)
+        current_id = InstanceIDModel.get_current_instance_and_increment_counter()
 
         with transaction.atomic():
             defaults = {'instance_id': current_id.id, 'counter': current_id.counter}
@@ -70,13 +67,13 @@ class MorangoProfileController(object):
                         defaults.update({'store_model_id': app_model.id})
                         RecordMaxCounter(**defaults).save()
 
-                    # set dirty bit to false for this model
-                    app_model.save(update_dirty_bit_to=False, update_fields=['_morango_dirty_bit'])
+                # set dirty bit to false for all instances of this model
+                klass_model.objects.filter(_morango_dirty_bit=True).update(update_dirty_bit_to=False)
 
             # update deleted flags based on DeletedModels
             deleted_ids = DeletedModels.objects.filter(profile=self.profile).values_list('id', flat=True)
             Store.objects.filter(id__in=deleted_ids).update(deleted=True)
-            DeletedModels.objects.all().delete()
+            DeletedModels.objects.filter(profile=self.profile).delete()
 
     def deserialize_from_store(self):
         """

@@ -2,7 +2,7 @@ import mock
 import uuid
 
 from django.test import TestCase
-from facility_profile.models import Facility, InteractionLog
+from facility_profile.models import Facility, MyUser, InteractionLog
 from morango.models import DatabaseIDModel, InstanceIDModel
 from morango.utils.uuids import sha2_uuid
 
@@ -12,9 +12,9 @@ class UUIDModelMixinTestCase(TestCase):
         self.fac = Facility(name='bob')
 
     def test_calculate_uuid(self):
-        log_with_random_id = InteractionLog()
+        log_with_random_id = InteractionLog(user=MyUser.objects.create())
         with mock.patch('uuid.uuid4', return_value=uuid.UUID('12345678123456781234567812345678')):
-            target_uuid = sha2_uuid("", "12345678123456781234567812345678", log_with_random_id.morango_model_name)
+            target_uuid = sha2_uuid(log_with_random_id.calculate_partition(), "12345678123456781234567812345678", log_with_random_id.morango_model_name)
             self.assertEqual(log_with_random_id.calculate_uuid(), target_uuid)
 
     def test_save_with_id(self):
