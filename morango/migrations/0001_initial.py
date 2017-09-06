@@ -44,7 +44,7 @@ class Migration(migrations.Migration):
                 ('salt', models.CharField(blank=True, max_length=32)),
                 ('serialized', models.TextField()),
                 ('signature', models.TextField()),
-                ('_private_key', morango.crypto.PrivateKeyField(blank=True, db_column=b'private_key', null=True)),
+                ('_private_key', morango.crypto.PrivateKeyField(blank=True, db_column='private_key', null=True)),
                 ('lft', models.PositiveIntegerField(db_index=True, editable=False)),
                 ('rght', models.PositiveIntegerField(db_index=True, editable=False)),
                 ('tree_id', models.PositiveIntegerField(db_index=True, editable=False)),
