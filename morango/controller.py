@@ -3,6 +3,7 @@ import json
 from django.core.exceptions import ObjectDoesNotExist
 from django.core.serializers.json import DjangoJSONEncoder
 from django.db import transaction
+from django.db.models import Q
 from django.utils.six import iteritems
 from morango.models import DeletedModels, InstanceIDModel, RecordMaxCounter, Store
 
@@ -15,7 +16,7 @@ class MorangoProfileController(object):
         assert profile, "profile needs to be defined."
         self.profile = profile
 
-    def serialize_into_store(self, filter_id=None):
+    def serialize_into_store(self, filters=None):
         """
         Takes data from app layer and serializes the models into the store.
         """
@@ -28,12 +29,16 @@ class MorangoProfileController(object):
             new_store_records = []
             new_rmc_records = []
 
+            # create Q objects for filtering by prefixes
+            if filters:
+                prefix_condition = reduce(lambda x, y: x | y, [Q(_morango_partition__startswith=prefix) for prefix in filters])
+
             # filter through all models with the dirty bit turned on
             syncable_dict = _profile_models[self.profile]
             for (_, klass_model) in iteritems(syncable_dict):
                 klass_queryset = klass_model.objects.filter(_morango_dirty_bit=True)
-                if filter_id:
-                    klass_queryset = klass_queryset.filter(_morango_partition__contains=filter_id)
+                if filters:
+                    klass_queryset = klass_queryset.filter(prefix_condition)
                 for app_model in klass_queryset:
                     try:
                         store_model = Store.objects.get(id=app_model.id)

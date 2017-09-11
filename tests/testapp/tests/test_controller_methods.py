@@ -5,8 +5,9 @@ import uuid
 
 from django.core.serializers.json import DjangoJSONEncoder
 from django.test import TestCase
+from facility_profile.models import Facility, MyUser, SummaryLog
+from morango.certificates import Filter
 from morango.controller import MorangoProfileController
-from facility_profile.models import Facility, MyUser
 from morango.models import DeletedModels, InstanceIDModel, RecordMaxCounter, Store
 
 
@@ -164,6 +165,23 @@ class SerializeIntoStoreTestCase(TestCase):
         for x in range(len(conflicting)):
             self.assertEqual(conflicting[x], conflicting_serialized_data[x])
 
+    def test_filtered_serialization_single_filter(self):
+        fac = FacilityModelFactory()
+        user = MyUser.objects.create(username='deadbeef')
+        log = SummaryLog.objects.create(user=user)
+        self.mc.serialize_into_store(filters=Filter(user._morango_partition))
+        self.assertFalse(Store.objects.filter(id=fac.id).exists())
+        self.assertTrue(Store.objects.filter(id=user.id).exists())
+        self.assertTrue(Store.objects.filter(id=log.id).exists())
+
+    def test_filtered_serialization_multiple_filter(self):
+        user = MyUser.objects.create(username='deadbeef')
+        user2 = MyUser.objects.create(username='alivebeef')
+        log = SummaryLog.objects.create(user=user)
+        self.mc.serialize_into_store(filters=Filter(user._morango_partition + "\n" + user2._morango_partition))
+        self.assertTrue(Store.objects.filter(id=user2.id).exists())
+        self.assertTrue(Store.objects.filter(id=user.id).exists())
+        self.assertTrue(Store.objects.filter(id=log.id).exists())
 
 class RecordMaxCounterUpdatesDuringSerialization(TestCase):
 
