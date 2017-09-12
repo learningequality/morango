@@ -1,4 +1,5 @@
 import json
+import functools
 
 from django.core.exceptions import ObjectDoesNotExist
 from django.core.serializers.json import DjangoJSONEncoder
@@ -31,7 +32,7 @@ class MorangoProfileController(object):
 
             # create Q objects for filtering by prefixes
             if filters:
-                prefix_condition = reduce(lambda x, y: x | y, [Q(_morango_partition__startswith=prefix) for prefix in filters])
+                prefix_condition = functools.reduce(lambda x, y: x | y, [Q(_morango_partition__startswith=prefix) for prefix in filters])
 
             # filter through all models with the dirty bit turned on
             syncable_dict = _profile_models[self.profile]
