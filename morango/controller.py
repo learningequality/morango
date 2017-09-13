@@ -1,7 +1,6 @@
 import json
 import functools
 
-from django.core.exceptions import ObjectDoesNotExist
 from django.core.serializers.json import DjangoJSONEncoder
 from django.db import transaction
 from django.db.models import Q
@@ -9,6 +8,16 @@ from django.utils.six import iteritems
 from morango.models import DeletedModels, InstanceIDModel, RecordMaxCounter, Store
 
 from morango.utils.register_models import _profile_models
+
+
+def _self_referential_fk(klass_model):
+    """
+    Return whether this model has a self ref FK, and the name for the field
+    """
+    for f in klass_model._meta.concrete_fields:
+        if f.related_model == klass_model:
+            return True, f.attname
+    return False, None
 
 
 class MorangoProfileController(object):
@@ -74,6 +83,10 @@ class MorangoProfileController(object):
                             'profile': app_model.morango_profile,
                             'partition': app_model._morango_partition,
                         }
+                        (self_ref_fk_bool, self_ref_fk_name) = _self_referential_fk(klass_model)
+                        if self_ref_fk_bool:
+                            self_ref_fk_value = getattr(app_model, self_ref_fk_name)
+                            kwargs.update({'_self_ref_fk': self_ref_fk_value if self_ref_fk_value else ''})
                         # create store model and record max counter for the app model
                         new_store_records.append(Store(**kwargs))
                         defaults.update({'store_model_id': app_model.id})
@@ -102,16 +115,26 @@ class MorangoProfileController(object):
             syncable_dict = _profile_models[self.profile]
             # iterate through classes which are in foreign key dependency order
             for model_name, klass_model in iteritems(syncable_dict):
-                for store_model in Store.objects.filter(model_name=model_name, profile=self.profile, dirty_bit=True):
-                    if store_model.deleted:
-                        klass_model.objects.filter(id=store_model.id).delete()
-                    else:
-                        app_model = klass_model.deserialize(json.loads(store_model.serialized))
-                        try:
-                            app_model.save(update_dirty_bit_to=False)
-                        # when deserializing, we catch this exception in case we have a reference to a missing object (foreign key) not in the app layer
-                        except ObjectDoesNotExist:
-                            app_model._update_deleted_models()
+                # handle cases where a class has a single FK reference to itself
+                if _self_referential_fk(klass_model)[0]:
+                    clean_parents = Store.objects.filter(dirty_bit=False, model_name=model_name, profile=self.profile).values_list("id", flat=True)
+                    dirty_children = Store.objects.filter(dirty_bit=True, model_name=model_name, profile=self.profile) \
+                                                  .filter(Q(_self_ref_fk__in=clean_parents) | Q(_self_ref_fk=''))
+
+                    # keep iterating until size of dirty_children is 0
+                    while len(dirty_children) > 0:
+                        for store_model in dirty_children:
+                            store_model._deserialize_store_model()
+                            # we update a store model after we have deserialized it
+                            store_model.dirty_bit = False
+                            store_model.save(update_fields=['dirty_bit'])
+
+                        # update lists with new clean parents and dirty children
+                        clean_parents = Store.objects.filter(dirty_bit=False, model_name=model_name, profile=self.profile).values_list("id", flat=True)
+                        dirty_children = Store.objects.filter(dirty_bit=True, model_name=model_name, profile=self.profile, _self_ref_fk__in=clean_parents)
+                else:
+                    for store_model in Store.objects.filter(model_name=model_name, profile=self.profile, dirty_bit=True):
+                        store_model._deserialize_store_model()
 
             # clear dirty bit for all store models for this profile
             Store.objects.filter(profile=self.profile, dirty_bit=True).update(dirty_bit=False)
