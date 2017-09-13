@@ -85,9 +85,9 @@ class SyncClient(object):
         with connection.cursor() as cursor:
             queue_buffer = """INSERT INTO {outgoing_buffer}
                             (model_uuid, serialized, deleted, last_saved_instance, last_saved_counter,
-                             model_name, profile, partition, source_id, conflicting_serialized_data, transfer_session_id)
+                             model_name, profile, partition, source_id, conflicting_serialized_data, transfer_session_id, _self_ref_fk)
                             SELECT id, serialized, deleted, last_saved_instance, last_saved_counter,
-                            model_name, profile, partition, source_id, conflicting_serialized_data, '{transfer_session_id}'
+                            model_name, profile, partition, source_id, conflicting_serialized_data, '{transfer_session_id}', _self_ref_fk
                             FROM {store}
                             WHERE {condition}""".format(outgoing_buffer=Buffer._meta.db_table,
                                                         transfer_session_id=self.transfer_session_id,
@@ -179,10 +179,10 @@ class SyncClient(object):
     def _dequeuing_merge_conflict_buffer(self, cursor, current_id):
         # transfer buffer serialized into conflicting store
         merge_conflict_store = """REPLACE INTO {store} (id, serialized, deleted, last_saved_instance, last_saved_counter, model_name,
-                                                        profile, partition, source_id, conflicting_serialized_data, dirty_bit)
+                                                        profile, partition, source_id, conflicting_serialized_data, dirty_bit, _self_ref_fk)
                                             SELECT store.id, store.serialized, store.deleted OR buffer.deleted, '{current_instance_id}',
                                                    {current_instance_counter}, store.model_name, store.profile, store.partition, store.source_id,
-                                                   buffer.serialized || '\n' || store.conflicting_serialized_data, 1
+                                                   buffer.serialized || '\n' || store.conflicting_serialized_data, 1, store._self_ref_fk
                                             FROM {buffer} AS buffer, {store} AS store
                                             /*Scope to a single record.*/
                                             WHERE store.id = buffer.model_uuid
@@ -269,9 +269,10 @@ class SyncClient(object):
     def _dequeuing_insert_remaining_buffer(self, cursor):
         # insert remaining records into store
         insert_remaining_buffer = """REPLACE INTO {store} (id, serialized, deleted, last_saved_instance, last_saved_counter,
-                                                               model_name, profile, partition, source_id, conflicting_serialized_data, dirty_bit)
+                                                               model_name, profile, partition, source_id, conflicting_serialized_data, dirty_bit, _self_ref_fk)
                                     SELECT buffer.model_uuid, buffer.serialized, buffer.deleted, buffer.last_saved_instance, buffer.last_saved_counter,
-                                           buffer.model_name, buffer.profile, buffer.partition, buffer.source_id, buffer.conflicting_serialized_data, 1
+                                           buffer.model_name, buffer.profile, buffer.partition, buffer.source_id, buffer.conflicting_serialized_data, 1,
+                                           buffer._self_ref_fk
                                     FROM {buffer} AS buffer
                                     WHERE buffer.transfer_session_id = '{transfer_session_id}'
                            """.format(buffer=Buffer._meta.db_table,
