@@ -318,3 +318,28 @@ class DeserializationFromStoreIntoAppTestCase(TestCase):
         st.save()
         self.mc.deserialize_from_store()
         self.assertFalse(Facility.objects.filter(id=st.id).exists())
+
+
+class SelfReferentialFKDeserializationTestCase(TestCase):
+
+    def setUp(self):
+        (self.current_id, _) = InstanceIDModel.get_or_create_current_instance()
+        self.mc = MorangoProfileController('facilitydata')
+
+    def test_delete_model_in_store_deletes_models_in_app(self):
+        root = FacilityModelFactory()
+        child1 = FacilityModelFactory(parent=root)
+        child2 = FacilityModelFactory(parent=root)
+        self.mc.serialize_into_store()
+        # simulate a node being deleted and synced
+        Store.objects.filter(id=child2.id).update(deleted=True)
+        Store.objects.update(dirty_bit=True)
+        grandchild1 = FacilityModelFactory(parent=child2)
+        grandchild2 = FacilityModelFactory(parent=child2)
+
+        self.mc.deserialize_from_store()
+        # ensure tree structure in app layer is correct
+        self.assertTrue(Facility.objects.filter(id=child1.id).exists())
+        self.assertFalse(Facility.objects.filter(id=child2.id).exists())
+        self.assertFalse(Facility.objects.filter(id=grandchild1.id).exists())
+        self.assertFalse(Facility.objects.filter(id=grandchild2.id).exists())
