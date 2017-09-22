@@ -606,7 +606,7 @@ class BufferEndpointTestCase(CertificateTestCaseMixin, APITestCase):
 
         client_cert = kwargs["transfer_session"].sync_session.remote_certificate
         server_cert = kwargs["transfer_session"].sync_session.local_certificate
-        push = kwargs["transfer_session"].incoming
+        push = kwargs["transfer_session"].push
 
         filt = client_cert.get_scope().write_filter if push else client_cert.get_scope().read_filter
         partition = filt._filter_tuple[0] + ":furthersubpart"
@@ -722,7 +722,7 @@ class BufferEndpointTestCase(CertificateTestCaseMixin, APITestCase):
             # delete "local" buffer records to avoid uniqueness constraint failures in validation
             Buffer.objects.filter(transfer_session_id=t_id, model_uuid__in=[d["model_uuid"] for d in data]).delete()
 
-            # ensure the incoming records validate
+            # ensure the push records validate
             self.assertTrue(serialized_recs.is_valid())
 
             # check that the correct number of buffer items was returned
@@ -770,7 +770,7 @@ class BufferEndpointTestCase(CertificateTestCaseMixin, APITestCase):
 
         transfer_session_id = self.create_records_for_pulling()
 
-        TransferSession.objects.filter(id=transfer_session_id).update(incoming=True)
+        TransferSession.objects.filter(id=transfer_session_id).update(push=True)
 
         self.make_buffer_get_request(
             transfer_session_id=transfer_session_id,

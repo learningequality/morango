@@ -4,3 +4,4 @@ rsa>=3.4.2
 djangorestframework>=3.3.3
 django-ipware>=1.1.6
 future==0.16.0
+requests

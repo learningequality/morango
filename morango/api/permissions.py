@@ -87,7 +87,7 @@ class SyncSessionPermissions(permissions.BasePermission):
             return True
 
         if request.method == "POST":
-            
+
             # verify and save the certificate chain to our cert store
             try:
                 client_cert = Certificate.save_certificate_chain(
@@ -137,7 +137,7 @@ class BufferPermissions(permissions.BasePermission):
             sesh_id = request.query_params.get("transfer_session_id")
             if not sesh_id:
                 return False
-            if not TransferSession.objects.filter(id=sesh_id, active=True, incoming=False).exists():
+            if not TransferSession.objects.filter(id=sesh_id, active=True, push=False).exists():
                 return False
             return True
 
