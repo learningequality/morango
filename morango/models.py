@@ -177,6 +177,10 @@ class TransferSession(models.Model):
     start_timestamp = models.DateTimeField(default=timezone.now)
     last_activity_timestamp = models.DateTimeField(blank=True)
 
+    # we keep track of FSICs for both client and server
+    local_fsic = models.TextField(blank=True, default="{}")
+    remote_fsic = models.TextField(blank=True, default="{}")
+
     def get_filter(self):
         return Filter(self.filter)
 
