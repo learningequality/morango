@@ -244,6 +244,9 @@ class Buffer(AbstractStore):
     class Meta:
         unique_together = ("transfer_session", "model_uuid")
 
+    def rmcb_list(self):
+        return RecordMaxCounterBuffer.objects.filter(model_uuid=self.model_uuid, transfer_session=self.transfer_session)
+
 
 class AbstractCounter(models.Model):
     """
