@@ -5,6 +5,7 @@ from django.core.serializers.json import DjangoJSONEncoder
 from django.db import transaction
 from django.utils.six import iteritems
 from morango.models import DeletedModels, InstanceIDModel, RecordMaxCounter, Store
+from morango.syncsession import NetworkSyncConnection
 
 from morango.utils.register_models import _profile_models
 
@@ -99,3 +100,9 @@ class MorangoProfileController(object):
 
             # clear dirty bit for all store models for this profile
             Store.objects.filter(profile=self.profile, dirty_bit=True).update(dirty_bit=False)
+
+    def create_network_connection(self, base_url):
+        return NetworkSyncConnection(base_url, self.profile)
+
+    def create_disk_connection(path):
+        pass
