@@ -7,7 +7,7 @@ from django.core.serializers.json import DjangoJSONEncoder
 from django.test import TestCase
 from facility_profile.models import Facility, MyUser, SummaryLog
 from morango.certificates import Filter
-from morango.controller import MorangoProfileController
+from morango.controller import MorangoProfileController, _self_referential_fk
 from morango.models import DeletedModels, InstanceIDModel, RecordMaxCounter, Store
 
 
@@ -325,6 +325,21 @@ class SelfReferentialFKDeserializationTestCase(TestCase):
     def setUp(self):
         (self.current_id, _) = InstanceIDModel.get_or_create_current_instance()
         self.mc = MorangoProfileController('facilitydata')
+
+    def test_self_ref_fk(self):
+        self.assertEqual(_self_referential_fk(Facility), 'parent_id')
+        self.assertEqual(_self_referential_fk(MyUser), None)
+
+    def test_self_ref_fk_class_adds_value_to_store(self):
+        root = FacilityModelFactory()
+        child = FacilityModelFactory(parent=root)
+        self.mc.serialize_into_store()
+        self.assertEqual(Store.objects.get(id=child.id)._self_ref_fk, root.id)
+
+    def test_regular_class_leaves_value_blank_in_store(self):
+        log = SummaryLog.objects.create(user=MyUser.objects.create(username='user'))
+        self.mc.serialize_into_store()
+        self.assertEqual(Store.objects.get(id=log.id)._self_ref_fk, '')
 
     def test_delete_model_in_store_deletes_models_in_app(self):
         root = FacilityModelFactory()
