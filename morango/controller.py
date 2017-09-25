@@ -17,7 +17,7 @@ class MorangoProfileController(object):
         assert profile, "profile needs to be defined."
         self.profile = profile
 
-    def serialize_into_store(self, filters=None):
+    def serialize_into_store(self, filter=None):
         """
         Takes data from app layer and serializes the models into the store.
         """
@@ -31,14 +31,15 @@ class MorangoProfileController(object):
             new_rmc_records = []
 
             # create Q objects for filtering by prefixes
-            if filters:
-                prefix_condition = functools.reduce(lambda x, y: x | y, [Q(_morango_partition__startswith=prefix) for prefix in filters])
+            prefix_condition = None
+            if filter:
+                prefix_condition = functools.reduce(lambda x, y: x | y, [Q(_morango_partition__startswith=prefix) for prefix in filter])
 
             # filter through all models with the dirty bit turned on
             syncable_dict = _profile_models[self.profile]
             for (_, klass_model) in iteritems(syncable_dict):
                 klass_queryset = klass_model.objects.filter(_morango_dirty_bit=True)
-                if filters:
+                if prefix_condition:
                     klass_queryset = klass_queryset.filter(prefix_condition)
                 for app_model in klass_queryset:
                     try:
