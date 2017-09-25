@@ -1,4 +1,4 @@
-django>=1.9.7,<1.10
+django>=1.9.7
 django-mptt>=0.8.0
 rsa>=3.4.2
 djangorestframework>=3.3.3
