@@ -16,8 +16,8 @@ def _self_referential_fk(klass_model):
     """
     for f in klass_model._meta.concrete_fields:
         if f.related_model == klass_model:
-            return True, f.attname
-    return False, None
+            return f.attname
+    return None
 
 
 class MorangoProfileController(object):
@@ -83,10 +83,11 @@ class MorangoProfileController(object):
                             'profile': app_model.morango_profile,
                             'partition': app_model._morango_partition,
                         }
-                        (self_ref_fk_bool, self_ref_fk_name) = _self_referential_fk(klass_model)
-                        if self_ref_fk_bool:
-                            self_ref_fk_value = getattr(app_model, self_ref_fk_name)
-                            kwargs.update({'_self_ref_fk': self_ref_fk_value if self_ref_fk_value else ''})
+                        # check if model has FK pointing to itself, and add the value to a field on the store
+                        self_ref_fk = _self_referential_fk(klass_model)
+                        if self_ref_fk:
+                            self_ref_fk_value = getattr(app_model, self_ref_fk)
+                            kwargs.update({'_self_ref_fk': self_ref_fk_value or ''})
                         # create store model and record max counter for the app model
                         new_store_records.append(Store(**kwargs))
                         defaults.update({'store_model_id': app_model.id})
@@ -116,7 +117,7 @@ class MorangoProfileController(object):
             # iterate through classes which are in foreign key dependency order
             for model_name, klass_model in iteritems(syncable_dict):
                 # handle cases where a class has a single FK reference to itself
-                if _self_referential_fk(klass_model)[0]:
+                if _self_referential_fk(klass_model):
                     clean_parents = Store.objects.filter(dirty_bit=False, model_name=model_name, profile=self.profile).values_list("id", flat=True)
                     dirty_children = Store.objects.filter(dirty_bit=True, model_name=model_name, profile=self.profile) \
                                                   .filter(Q(_self_ref_fk__in=clean_parents) | Q(_self_ref_fk=''))
