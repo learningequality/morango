@@ -3,17 +3,13 @@ import json
 import mock
 import uuid
 
-from django.core.serializers.json import DjangoJSONEncoder
 from django.test import TestCase
 from facility_profile.models import Facility, MyUser, SummaryLog
 from morango.certificates import Filter
 from morango.controller import MorangoProfileController, _self_referential_fk
 from morango.models import DeletedModels, InstanceIDModel, RecordMaxCounter, Store
 
-
-def serialized_facility_factory(identifier):
-    facility = Facility(name="Facility {}".format(identifier), id=identifier)
-    return DjangoJSONEncoder().encode(facility.serialize())
+from .helpers import serialized_facility_factory
 
 
 class FacilityModelFactory(factory.DjangoModelFactory):
@@ -358,3 +354,18 @@ class SelfReferentialFKDeserializationTestCase(TestCase):
         self.assertFalse(Facility.objects.filter(id=child2.id).exists())
         self.assertFalse(Facility.objects.filter(id=grandchild1.id).exists())
         self.assertFalse(Facility.objects.filter(id=grandchild2.id).exists())
+
+    def test_models_created_successfully(self):
+        root = FacilityModelFactory()
+        child1 = FacilityModelFactory(parent=root)
+        child2 = FacilityModelFactory(parent=root)
+        self.mc.serialize_into_store()
+        Facility.objects.all().delete()
+        DeletedModels.objects.all().delete()
+        Store.objects.update(dirty_bit=True, deleted=False)
+
+        self.mc.deserialize_from_store()
+        # ensure tree structure in app layer is correct
+        self.assertTrue(Facility.objects.filter(id=root.id).exists())
+        self.assertTrue(Facility.objects.filter(id=child1.id).exists())
+        self.assertTrue(Facility.objects.filter(id=child2.id).exists())
