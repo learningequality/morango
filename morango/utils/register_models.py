@@ -18,6 +18,15 @@ _profile_models = {}
 def _get_foreign_key_classes(m):
     return set([field.rel.to for field in m._meta.fields if isinstance(field, ForeignKey)])
 
+def _multiple_self_ref_fk_check(class_model):
+    self_fk = []
+    for f in class_model._meta.concrete_fields:
+        if f.related_model in self_fk:
+            return True
+        if f.related_model == class_model:
+            self_fk.append(class_model)
+    return False
+
 def _insert_model_into_profile_dict(model, profile):
     # When we add models to be synced, we need to make sure
     #   that models that depend on other models are synced AFTER
@@ -57,6 +66,8 @@ def add_syncable_models():
         # several validation checks to assert models will be syncing correctly
         if issubclass(model_class, SyncableModel):
             name = model_class.__name__
+            if _multiple_self_ref_fk_check(model_class):
+                raise InvalidMorangoModelConfiguration("Syncing models with more than 1 self referential ForeignKey are not supported.")
             try:
                 from mptt import models
                 from morango.utils.morango_mptt import MorangoMPTTModel, MorangoMPTTTreeManager, MorangoTreeQuerySet
