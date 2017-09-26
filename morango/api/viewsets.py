@@ -1,10 +1,12 @@
 import json
+import socket
 import uuid
 
 from django.core.exceptions import ValidationError
 from django.http import Http404
 from django.utils import timezone
 from ipware.ip import get_ip
+from morango.models import Buffer, DatabaseMaxCounter, RecordMaxCounterBuffer
 from rest_framework import viewsets, response, status, generics, mixins, pagination
 
 from . import serializers, permissions
@@ -45,7 +47,7 @@ class CertificateViewSet(viewsets.ModelViewSet):
             except errors.MorangoCertificateError as e:
                 return response.Response(
                     {"error_class": e.__class__.__name__,
-                    "error_message": getattr(e, "message", (getattr(e, "args") or ("",))[0])},
+                     "error_message": getattr(e, "message", (getattr(e, "args") or ("",))[0])},
                     status=status.HTTP_400_BAD_REQUEST
                 )
 
@@ -215,9 +217,11 @@ class TransferSessionViewSet(viewsets.ModelViewSet):
             "last_activity_timestamp": timezone.now(),
             "active": True,
             "filter": request.data.get("filter"),
-            "push": not is_a_push,
+            "push": is_a_push,
             "records_total": request.data.get("records_total") if is_a_push else None,
             "sync_session": syncsession,
+            "local_fsic": json.dumps(DatabaseMaxCounter.calculate_filter_max_counters(request.data.get("filter"))),
+            "remote_fsic": request.data.get('local_fsic') or '{}',
         }
 
         transfersession = models.TransferSession(**data)

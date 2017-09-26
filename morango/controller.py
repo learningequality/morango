@@ -102,7 +102,7 @@ class MorangoProfileController(object):
             Store.objects.filter(profile=self.profile, dirty_bit=True).update(dirty_bit=False)
 
     def create_network_connection(self, base_url):
-        return NetworkSyncConnection(base_url, self.profile)
+        return NetworkSyncConnection(base_url=base_url, profile=self.profile)
 
     def create_disk_connection(path):
-        pass
+        raise NotImplementedError("Coming soon...")

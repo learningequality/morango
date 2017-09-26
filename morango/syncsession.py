@@ -33,15 +33,36 @@ class Connection(object):
     and the necessary methods overridden.
     """
 
-    def __init__(self, base_url, profile):
-        self.base_url = base_url
+    def __init__(self, profile):
         self.profile = profile
-        self.sync_session = None
-        self.current_transfer_session = None
 
-    def _request(self, endpoint, method="GET", lookup=None, data={}, params={}, auth=None):
+
+class NetworkSyncConnection(Connection):
+
+    def __init__(self, base_url='', profile=''):
+        self.base_url = base_url
+        super(NetworkSyncConnection, self).__init__(profile)
+
+    def _request(self, endpoint, method="GET", lookup=None, data={}, params={}, userargs=None, password=None):
+        """
+        Generic request method designed to handle any morango endpoint.
+
+        :param endpoint: constant representing which morango endpoint we are querying
+        :param method: HTTP verb/method for request
+        :param lookup: the pk value for the specific object we are querying
+        :param data: dict that will be form-encoded in request
+        :param params: dict to be sent as part of URL's query string
+        :param userargs: Authorization credentials
+        :param password:
+        :return: ``Response`` object from request
+        """
+        # convert user arguments into query str for passing to auth layer
+        if isinstance(userargs, dict):
+            userargs = "&".join(["{}={}".format(key, val) for (key, val) in iteritems(userargs)])
+
+        # build up url and send request
         url = urljoin(urljoin(self.base_url, endpoint), lookup)
-        resp = requests.request(method, url, data=data, params=params, auth=auth)
+        resp = requests.request(method, url, data=data, params=params, auth=(userargs, password))
         resp.raise_for_status()
         return resp
 
@@ -79,29 +100,26 @@ class Connection(object):
         if not server_cert.verify(message, session_resp.data.pop("signature")):
             raise CertificateSignatureInvalid()
 
-        # if sync session successfully created, create on our own side
-        if session_resp.status_code == status.HTTP_201_CREATED:
+        # build the data to be used for creating our own syncsession
+        data = {
+            "id": data['id'],
+            "start_timestamp": timezone.now(),
+            "last_activity_timestamp": timezone.now(),
+            "active": True,
+            "is_server": False,
+            "local_certificate": client_cert,
+            "remote_certificate": server_cert,
+            "profile": client_cert.profile,
+            "connection_kind": "network",
+            "connection_path": self.base_url,
+            "local_ip": socket.gethostbyname(socket.gethostname()),
+            "remote_ip": socket.gethostbyname(self.base_url),
+            "local_instance": json.dumps(InstanceIDSerializer(InstanceIDModel.get_or_create_current_instance()[0]).data),
+            "remote_instance": session_resp.data.get("instance") or "{}",
+        }
+        sync_session = SyncSession.objects.create(**data)
 
-            # build the data to be used for creating our own syncsession
-            data = {
-                "id": data['id'],
-                "start_timestamp": timezone.now(),
-                "last_activity_timestamp": timezone.now(),
-                "active": True,
-                "is_server": False,
-                "local_certificate": client_cert,
-                "remote_certificate": server_cert,
-                "profile": client_cert.profile,
-                "connection_kind": "network",
-                "connection_path": self.base_url,
-                "local_ip": socket.gethostbyname(socket.gethostname()),
-                "remote_ip": socket.gethostbyname(self.base_url),
-                "local_instance": json.dumps(InstanceIDSerializer(InstanceIDModel.get_or_create_current_instance()[0]).data),
-                "remote_instance": session_resp.data.get("instance") or "{}",
-            }
-            self.sync_session = SyncSession.objects.create(**data)
-
-            return SyncClient(self)
+        return SyncClient(self, sync_session, profile=self.profile)
 
     def get_remote_certificates(self, primary_partition):
         remote_certs = []
@@ -113,7 +131,7 @@ class Connection(object):
             remote_certs.append(Certificate.deserialize(cert["serialized"], cert["signature"]))
         return remote_certs
 
-    def certificate_signing_request(self, parent_cert, scope_definition_id, scope_params, username=None, password=None):
+    def certificate_signing_request(self, parent_cert, scope_definition_id, scope_params, userargs=None, password=None):
         csr_key = Key()
         # build up data for csr
         data = {
@@ -124,7 +142,7 @@ class Connection(object):
             "scope_params": scope_params,
             "public_key": csr_key.get_public_key_string()
         }
-        csr_resp = self._request(api_urls.CERTIFICATE, method="POST", data=data, auth=(username, password))
+        csr_resp = self._request(api_urls.CERTIFICATE, method="POST", data=data, userargs=userargs, password=password)
         csr_data = json.loads(csr_resp.data)
 
         # verify cert returned from server, and proceed to save into our records
@@ -134,8 +152,6 @@ class Connection(object):
         csr_cert.save()
         return csr_cert
 
-        pass
-
     def _get_certificate_chain(self, server_cert):
         # get ancestors certificate chain for this server cert
         cert_chain_resp = self._request(api_urls.CERTIFICATE, params={'ancestors_of': server_cert.id})
@@ -143,25 +159,70 @@ class Connection(object):
         # upon receiving cert chain from server, we attempt to save the chain into our records
         Certificate.save_certificate_chain(cert_chain_resp.data, expected_last_id=server_cert.id)
 
-    def _create_transfer_session(self, push, filter_prefixes):
+    def _create_transfer_session(self, data):
+        # create transfer session on server
+        return self._request(api_urls.TRANSFERSESSION, method="POST", data=data)
+
+    def _update_transfer_session(self, data, transfer_session):
+        # update transfer session on server side with kwargs
+        return self._request(api_urls.TRANSFERSESSION, method="PATCH", lookup=transfer_session.id, data=data)
+
+    def _close_transfer_session(self, transfer_session):
+        # "delete" transfer session on server side
+        return self._request(api_urls.TRANSFERSESSION, method="DELETE", lookup=transfer_session.id)
+
+    def _close_sync_session(self, sync_session):
+        # "delete" sync session on server side
+        return self._request(api_urls.SYNCSESSION, method="DELETE", lookup=sync_session.id)
+
+
+class SyncClient(object):
+    """
+    Controller to support client in initiating syncing and performing related operations.
+    """
+    def __init__(self, sync_connection, sync_session, profile=''):
+        self.sync_connection = sync_connection
+        self.sync_session = sync_session
+        self.current_transfer_session = None
+        self.profile = profile
+
+    def close_sync_session(self):
+
+        # "delete" sync session on server side
+        self.sync_connection._close_sync_session(self.sync_session)
+
+        # "delete" our own local sync session
+        self.sync_connection.sync_session.active = False
+        self.sync_connection.sync_session.save()
+        self.sync_connection.sync_session = None
+        self = None
+
+    def _create_transfer_session(self, push, filter):
+
         # build data for creating transfer session on server side
         data = {
             'id': uuid.uuid4().hex,
-            'filter': filter_prefixes,
+            'filter': filter,
             'push': push,
             'sync_session_id': self.sync_session.id,
-            'local_fsic': DatabaseMaxCounter.calculate_filter_max_counters(filter_prefixes)
+            'local_fsic': DatabaseMaxCounter.calculate_filter_max_counters(filter)
         }
-        transfer_resp = self._request(api_urls.TRANSFERSESSION, method="POST", data=data)
+        data['start_timestamp'] = timezone.now()
+        data['last_activity_timestamp'] = timezone.now()
+        self.current_transfer_session = TransferSession.objects.create(**data)
 
-        # if transfersession successfully created, create on our own side
-        if transfer_resp.status_code == status.HTTP_201_CREATED:
-            data['remote_fsic'] = transfer_resp.data.get('local_fsic')
-            data['start_timestamp'] = timezone.now()
-            data['last_activity_timestamp'] = timezone.now()
-            self.current_transfer_session = TransferSession.objects.create(**data)
+        # create transfer session on server side
+        transfer_resp = self.sync_connection._create_transfer_session(self.sync_session)
+
+        self.current_transfer_session.remote_fsic = transfer_resp.data.get('local_fsic')
+        if not push:
+            self.current_transfer_session.records_total = transfer_resp.data.get('records_total')
+        self.current_transfer_session.save()
 
     def _close_transfer_session(self):
+
+        # "delete" transfer session on server side
+        self.sync_connection._close_transfer_session(self.current_transfer_session)
 
         # delete local buffered objects if pushing records
         if self.current_transfer_session.push:
@@ -171,38 +232,6 @@ class Connection(object):
         self.current_transfer_session.active = False
         self.current_transfer_session.save()
         self.current_transfer_session = None
-
-
-class NetworkSyncConnection(Connection):
-
-    def _update_transfer_session(self, data):
-        # update transfer session on server side with kwargs
-        self._request(api_urls.TRANSFERSESSION, method="PATCH", value=self.current_transfer_session.id, data=data)
-
-    def _close_transfer_session(self):
-        # "delete" transfer session on server side
-        self._request(api_urls.TRANSFERSESSION, method="DELETE", value=self.current_transfer_session.id)
-        # proceed to "delete" our own transfer session
-        super(NetworkSyncConnection, self)._close_transfer_session()
-
-
-class SyncClient(object):
-    """
-    Controller to support client in initiating syncing and performing related operations.
-    """
-    def __init__(self, host, profile):
-        self.host = host
-        self.profile = profile
-        self.transfer_session_id = uuid.uuid4().hex
-
-    def initiate_push(self, sync_filter, chunksize):
-        pass
-
-    def initiate_pull(self, sync_filter, fsics, transfer_id):
-        pass
-
-    def close(self):
-        pass
 
     @transaction.atomic
     def _queue_into_buffer(self, filter_prefixes, fsics):
@@ -238,7 +267,7 @@ class SyncClient(object):
                             model_name, profile, partition, source_id, conflicting_serialized_data, '{transfer_session_id}'
                             FROM {store}
                             WHERE {condition}""".format(outgoing_buffer=Buffer._meta.db_table,
-                                                        transfer_session_id=self.transfer_session_id,
+                                                        transfer_session_id=self.current_transfer_session.id,
                                                         condition=where_condition,
                                                         store=Store._meta.db_table)
             cursor.execute(queue_buffer)
@@ -252,7 +281,7 @@ class SyncClient(object):
                                               WHERE buffer.model_uuid = rmc.store_model_id)
                                               AND buffer.transfer_session_id = '{transfer_session_id}'
                                 """.format(outgoing_rmcb=RecordMaxCounterBuffer._meta.db_table,
-                                           transfer_session_id=self.transfer_session_id,
+                                           transfer_session_id=self.current_transfer_session.id,
                                            record_max_counter=RecordMaxCounter._meta.db_table,
                                            outgoing_buffer=Buffer._meta.db_table)
             cursor.execute(queue_rmc_buffer)
@@ -276,7 +305,7 @@ class SyncClient(object):
                                              store=Store._meta.db_table,
                                              rmc=RecordMaxCounter._meta.db_table,
                                              rmcb=RecordMaxCounterBuffer._meta.db_table,
-                                             transfer_session_id=self.transfer_session_id)
+                                             transfer_session_id=self.current_transfer_session.id)
 
         cursor.execute(delete_rmcb_records)
 
@@ -296,7 +325,7 @@ class SyncClient(object):
                                              store=Store._meta.db_table,
                                              rmc=RecordMaxCounter._meta.db_table,
                                              rmcb=RecordMaxCounterBuffer._meta.db_table,
-                                             transfer_session_id=self.transfer_session_id)
+                                             transfer_session_id=self.current_transfer_session.id)
         cursor.execute(delete_buffered_records)
 
     def _dequeuing_merge_conflict_rmcb(self, cursor):
@@ -321,7 +350,7 @@ class SyncClient(object):
                                           store=Store._meta.db_table,
                                           rmc=RecordMaxCounter._meta.db_table,
                                           rmcb=RecordMaxCounterBuffer._meta.db_table,
-                                          transfer_session_id=self.transfer_session_id)
+                                          transfer_session_id=self.current_transfer_session.id)
         cursor.execute(merge_conflict_rmc)
 
     def _dequeuing_merge_conflict_buffer(self, cursor, current_id):
@@ -344,7 +373,7 @@ class SyncClient(object):
                                                  rmcb=RecordMaxCounterBuffer._meta.db_table,
                                                  store=Store._meta.db_table,
                                                  rmc=RecordMaxCounter._meta.db_table,
-                                                 transfer_session_id=self.transfer_session_id,
+                                                 transfer_session_id=self.current_transfer_session.id,
                                                  current_instance_id=current_id.id,
                                                  current_instance_counter=current_id.counter)
         cursor.execute(merge_conflict_store)
@@ -366,7 +395,7 @@ class SyncClient(object):
                                                  rmcb=RecordMaxCounterBuffer._meta.db_table,
                                                  store=Store._meta.db_table,
                                                  rmc=RecordMaxCounter._meta.db_table,
-                                                 transfer_session_id=self.transfer_session_id,
+                                                 transfer_session_id=self.current_transfer_session.id,
                                                  current_instance_id=current_id.id,
                                                  current_instance_counter=current_id.counter)
         cursor.execute(merge_conflict_store)
@@ -388,7 +417,7 @@ class SyncClient(object):
                                           store=Store._meta.db_table,
                                           rmc=RecordMaxCounter._meta.db_table,
                                           rmcb=RecordMaxCounterBuffer._meta.db_table,
-                                          transfer_session_id=self.transfer_session_id)
+                                          transfer_session_id=self.current_transfer_session.id)
         cursor.execute(delete_mc_buffer)
 
     def _dequeuing_delete_mc_rmcb(self, cursor):
@@ -411,7 +440,7 @@ class SyncClient(object):
                                           store=Store._meta.db_table,
                                           rmc=RecordMaxCounter._meta.db_table,
                                           rmcb=RecordMaxCounterBuffer._meta.db_table,
-                                          transfer_session_id=self.transfer_session_id)
+                                          transfer_session_id=self.current_transfer_session.id)
         cursor.execute(delete_mc_rmc)
 
     def _dequeuing_insert_remaining_buffer(self, cursor):
@@ -424,7 +453,7 @@ class SyncClient(object):
                                     WHERE buffer.transfer_session_id = '{transfer_session_id}'
                            """.format(buffer=Buffer._meta.db_table,
                                       store=Store._meta.db_table,
-                                      transfer_session_id=self.transfer_session_id)
+                                      transfer_session_id=self.current_transfer_session.id)
 
         cursor.execute(insert_remaining_buffer)
 
@@ -436,7 +465,7 @@ class SyncClient(object):
                                     WHERE rmcb.transfer_session_id = '{transfer_session_id}'
                            """.format(rmc=RecordMaxCounter._meta.db_table,
                                       rmcb=RecordMaxCounterBuffer._meta.db_table,
-                                      transfer_session_id=self.transfer_session_id)
+                                      transfer_session_id=self.current_transfer_session.id)
 
         cursor.execute(insert_remaining_rmcb)
 
@@ -445,7 +474,7 @@ class SyncClient(object):
         delete_remaining_rmcb = """DELETE FROM {rmcb}
                                   WHERE {rmcb}.transfer_session_id = '{transfer_session_id}'
                                """.format(rmcb=RecordMaxCounterBuffer._meta.db_table,
-                                          transfer_session_id=self.transfer_session_id)
+                                          transfer_session_id=self.current_transfer_session.id)
 
         cursor.execute(delete_remaining_rmcb)
 
@@ -453,12 +482,12 @@ class SyncClient(object):
         delete_remaining_buffer = """DELETE FROM {buffer}
                                  WHERE {buffer}.transfer_session_id = '{transfer_session_id}'
                               """.format(buffer=Buffer._meta.db_table,
-                                         transfer_session_id=self.transfer_session_id)
+                                         transfer_session_id=self.current_transfer_session.id)
 
         cursor.execute(delete_remaining_buffer)
 
     @transaction.atomic
-    def _integrate_into_store(self):
+    def _dequeue_into_store(self):
         """
         Takes data from the buffers and merges into the store and record max counters.
         """

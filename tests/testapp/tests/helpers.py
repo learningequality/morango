@@ -7,9 +7,10 @@ import mock
 import uuid
 
 from django.core.serializers.json import DjangoJSONEncoder
+from django.utils import timezone
 from facility_profile.models import Facility, MyUser, InteractionLog, SummaryLog
 from morango.controller import MorangoProfileController
-from morango.models import DatabaseIDModel, InstanceIDModel, AbstractStore, Store, Buffer, RecordMaxCounter, RecordMaxCounterBuffer
+from morango.models import DatabaseIDModel, InstanceIDModel, AbstractStore, Store, Buffer, RecordMaxCounter, RecordMaxCounterBuffer, SyncSession, TransferSession
 from morango.syncsession import SyncClient
 
 
@@ -61,7 +62,9 @@ def create_dummy_store_data():
 
     # create controllers for app/store/buffer operations
     data['mc'] = MorangoProfileController('facilitydata')
-    data['sc'] = SyncClient('host', 'facilitydata')
+    data['sc'] = SyncClient('host', 'host', profile='facilitydata')
+    session = SyncSession.objects.create(id=uuid.uuid4().hex, profile="facilitydata", last_activity_timestamp=timezone.now())
+    data['sc'].current_transfer_session = TransferSession.objects.create(id=uuid.uuid4().hex, sync_session=session, push=True, last_activity_timestamp=timezone.now())
 
     # create group of facilities and first serialization
     data['group1_c1'] = [FacilityFactory() for _ in range(5)]
