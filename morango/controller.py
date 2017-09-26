@@ -1,8 +1,10 @@
 import json
+import functools
 
 from django.core.exceptions import ObjectDoesNotExist
 from django.core.serializers.json import DjangoJSONEncoder
 from django.db import transaction
+from django.db.models import Q
 from django.utils.six import iteritems
 from morango.models import DeletedModels, InstanceIDModel, RecordMaxCounter, Store
 from morango.syncsession import NetworkSyncConnection
@@ -16,7 +18,7 @@ class MorangoProfileController(object):
         assert profile, "profile needs to be defined."
         self.profile = profile
 
-    def serialize_into_store(self):
+    def serialize_into_store(self, filter=None):
         """
         Takes data from app layer and serializes the models into the store.
         """
@@ -26,10 +28,20 @@ class MorangoProfileController(object):
         with transaction.atomic():
             defaults = {'instance_id': current_id.id, 'counter': current_id.counter}
 
+            # create Q objects for filtering by prefixes
+            prefix_condition = None
+            if filter:
+                prefix_condition = functools.reduce(lambda x, y: x | y, [Q(_morango_partition__startswith=prefix) for prefix in filter])
+
             # filter through all models with the dirty bit turned on
             syncable_dict = _profile_models[self.profile]
             for (_, klass_model) in iteritems(syncable_dict):
-                for app_model in klass_model.objects.filter(_morango_dirty_bit=True):
+                new_store_records = []
+                new_rmc_records = []
+                klass_queryset = klass_model.objects.filter(_morango_dirty_bit=True)
+                if prefix_condition:
+                    klass_queryset = klass_queryset.filter(prefix_condition)
+                for app_model in klass_queryset:
                     try:
                         store_model = Store.objects.get(id=app_model.id)
 
@@ -64,12 +76,16 @@ class MorangoProfileController(object):
                             'partition': app_model._morango_partition,
                         }
                         # create store model and record max counter for the app model
-                        Store.objects.create(**kwargs)
+                        new_store_records.append(Store(**kwargs))
                         defaults.update({'store_model_id': app_model.id})
-                        RecordMaxCounter(**defaults).save()
+                        new_rmc_records.append(RecordMaxCounter(**defaults))
+
+                # bulk create store and rmc records for this class
+                Store.objects.bulk_create(new_store_records)
+                RecordMaxCounter.objects.bulk_create(new_rmc_records)
 
                 # set dirty bit to false for all instances of this model
-                klass_model.objects.filter(_morango_dirty_bit=True).update(update_dirty_bit_to=False)
+                klass_queryset.update(update_dirty_bit_to=False)
 
             # update deleted flags based on DeletedModels
             deleted_ids = DeletedModels.objects.filter(profile=self.profile).values_list('id', flat=True)

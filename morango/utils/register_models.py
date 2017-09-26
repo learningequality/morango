@@ -26,6 +26,10 @@ def _insert_model_into_profile_dict(model, profile):
     # Get the dependencies of the new model
     foreign_key_classes = _get_foreign_key_classes(model)
 
+    # add any more specified dependencies
+    if hasattr(model, '_morango_model_dependencies'):
+        foreign_key_classes = foreign_key_classes | set(model._morango_model_dependencies)
+
     # Find all the existing models that this new model refers to.
     class_indices = [_profile_models[profile].index(cls) for cls in foreign_key_classes if cls in _profile_models[profile]]
 
@@ -51,7 +55,7 @@ def add_syncable_models():
     model_list = []
     for model_class in django.apps.apps.get_models():
         # several validation checks to assert models will be syncing correctly
-        if issubclass(model_class, SyncableModel) and not model_class._meta.proxy:
+        if issubclass(model_class, SyncableModel):
             name = model_class.__name__
             try:
                 from mptt import models
@@ -82,12 +86,8 @@ def add_syncable_models():
             profile = model_class.morango_profile
             _profile_models[profile] = _profile_models.get(profile, [])
 
-            # special case for root proxy model
-            if model_class._meta.proxied_children:
-                model_class._meta.proxied_children.reverse()
-                for proxy_model in model_class._meta.proxied_children:
-                    _insert_model_into_profile_dict(proxy_model.model, profile)
-            else:
+            # don't sync models where morango_model_name is None
+            if model_class.morango_model_name is not None:
                 _insert_model_into_profile_dict(model_class, profile)
 
     # for each profile, create a dict mapping from morango model names to model class
