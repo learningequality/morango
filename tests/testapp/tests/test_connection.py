@@ -16,7 +16,7 @@ from rest_framework import status
 def mock_patch_decorator(func):
 
     def wrapper(*args, **kwargs):
-        mock_object = mock.Mock(status_code=status.HTTP_201_CREATED, content="""{"id": "abc"}""", data={'signature': 'sig', 'local_fsic': '{}'})
+        mock_object = mock.Mock(content=b"""{"id": "abc"}""", data={'signature': 'sig', 'local_fsic': '{}'})
         with mock.patch.object(NetworkSyncConnection, '_request', return_value=mock_object):
             with mock.patch.object(Certificate, 'verify', return_value=True):
                     return func(*args, **kwargs)

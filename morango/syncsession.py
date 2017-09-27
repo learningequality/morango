@@ -73,9 +73,7 @@ class NetworkSyncConnection(Connection):
 
         # request the server for a one-time-use nonce
         nonce_resp = self._request(api_urls.NONCE, method="POST")
-
-        if nonce_resp.status_code == status.HTTP_201_CREATED:
-            nonce = json.loads(nonce_resp.content.decode())["id"]
+        nonce = json.loads(nonce_resp.content.decode())["id"]
 
         # prepare the data to send in the syncsession creation request
         data = {
@@ -212,7 +210,7 @@ class SyncClient(object):
         self.current_transfer_session = TransferSession.objects.create(**data)
 
         # create transfer session on server side
-        transfer_resp = self.sync_connection._create_transfer_session(self.sync_session)
+        transfer_resp = self.sync_connection._create_transfer_session(data)
 
         self.current_transfer_session.remote_fsic = transfer_resp.data.get('local_fsic')
         if not push:
@@ -227,6 +225,7 @@ class SyncClient(object):
         # delete local buffered objects if pushing records
         if self.current_transfer_session.push:
             Buffer.objects.filter(transfer_session=self.current_transfer_session).delete()
+            RecordMaxCounterBuffer.objects.filter(transfer_session=self.current_transfer_session).delete()
 
         # "delete" our own local transfer session
         self.current_transfer_session.active = False
