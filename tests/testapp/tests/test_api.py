@@ -11,7 +11,7 @@ from rest_framework.test import APITestCase as BaseTestCase
 from morango.api.serializers import CertificateSerializer, InstanceIDSerializer, BufferSerializer
 from morango.certificates import Certificate, ScopeDefinition, Key, Nonce
 from morango.errors import CertificateScopeNotSubset, CertificateSignatureInvalid, CertificateIDInvalid, CertificateProfileInvalid, CertificateRootScopeInvalid
-from morango.models import InstanceIDModel, SyncSession, TransferSession, Buffer
+from morango.models import InstanceIDModel, SyncSession, TransferSession, Buffer, RecordMaxCounterBuffer
 from morango.utils.register_models import _profile_models
 
 from facility_profile.models import MyUser
@@ -629,11 +629,29 @@ class BufferEndpointTestCase(CertificateTestCaseMixin, APITestCase):
             Model = _profile_models[data["profile"]][data["model_name"]]
             data["model_uuid"] = Model.compute_namespaced_id(data["partition"], data["source_id"], data["model_name"])
 
-        return Buffer(**data)
+        buffermodel = Buffer.objects.create(**data)
+
+        for i in range(3):
+            RecordMaxCounterBuffer.objects.create(
+                transfer_session=data["transfer_session"],
+                model_uuid=data["model_uuid"],
+                instance_id=uuid.uuid4().hex,
+                counter=i * 3 + 1,
+            )
+
+        return buffermodel
 
     def make_buffer_post_request(self, buffers, expected_status=201):
         serialized_recs = BufferSerializer(buffers, many=True)
-        response = self.client.post(reverse('buffers-list'), serialized_recs.data, format='json')
+
+        # extract that data that is to be posted
+        data = serialized_recs.data
+
+        # delete the records from the DB so we don't conflict when we POST
+        Buffer.objects.all().delete()
+        RecordMaxCounterBuffer.objects.all().delete()
+
+        response = self.client.post(reverse('buffers-list'), data, format='json')
         self.assertEqual(response.status_code, expected_status)
         if expected_status == 201:
             # check that the buffer items were created
@@ -679,8 +697,9 @@ class BufferEndpointTestCase(CertificateTestCaseMixin, APITestCase):
 
         # make the records we'll be querying
         records = [self.build_buffer_item(**transfer_session_kwargs)]
+        transfer_session = records[0].transfer_session
         for i in range(count - 1):
-            records.append(self.build_buffer_item(transfer_session=records[0].transfer_session))
+            records.append(self.build_buffer_item(transfer_session=transfer_session))
 
         # also make some dummy records so we can make sure they don't get returned
         records.append(self.build_buffer_item(push=False, filter=self.default_pull_filter))
@@ -727,6 +746,10 @@ class BufferEndpointTestCase(CertificateTestCaseMixin, APITestCase):
 
             # check that the correct number of buffer items was returned
             self.assertEqual(expected_count, len(serialized_recs.validated_data))
+
+            # check that the correct number of buffer items was returned
+            for data in serialized_recs.validated_data:
+                self.assertEqual(3, len(data["rmcb_list"]))
 
             return serialized_recs
 
