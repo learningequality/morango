@@ -117,7 +117,8 @@ class MorangoProfileController(object):
             # iterate through classes which are in foreign key dependency order
             for model_name, klass_model in iteritems(syncable_dict):
                 # handle cases where a class has a single FK reference to itself
-                if _self_referential_fk(klass_model):
+                self_ref_fk = _self_referential_fk(klass_model)
+                if self_ref_fk:
                     clean_parents = Store.objects.filter(dirty_bit=False, model_name=model_name, profile=self.profile).values_list("id", flat=True)
                     dirty_children = Store.objects.filter(dirty_bit=True, model_name=model_name, profile=self.profile) \
                                                   .filter(Q(_self_ref_fk__in=clean_parents) | Q(_self_ref_fk=''))
@@ -125,7 +126,7 @@ class MorangoProfileController(object):
                     # keep iterating until size of dirty_children is 0
                     while len(dirty_children) > 0:
                         for store_model in dirty_children:
-                            store_model._deserialize_store_model()
+                            store_model._deserialize_store_model(self_ref_fk=self_ref_fk)
                             # we update a store model after we have deserialized it
                             store_model.dirty_bit = False
                             store_model.save(update_fields=['dirty_bit'])

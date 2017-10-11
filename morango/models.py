@@ -235,7 +235,7 @@ class Store(AbstractStore):
     # used to know which store records need to be deserialized into the app layer models
     dirty_bit = models.BooleanField(default=False)
 
-    def _deserialize_store_model(self):
+    def _deserialize_store_model(self, self_ref_fk=None):
         klass_model = _profile_models[self.profile][self.model_name]
         # if store model marked as deleted, attempt to delete in app layer
         if self.deleted:
@@ -243,6 +243,12 @@ class Store(AbstractStore):
         # inflate model and attempt to save
         else:
             app_model = klass_model.deserialize(json.loads(self.serialized))
+            if self_ref_fk:
+                # if the field has a value, we put it on the actual self referencing fk field
+                if self._self_ref_fk:
+                    setattr(app_model, self_ref_fk, self._self_ref_fk)
+                else:
+                    setattr(app_model, self_ref_fk, None)
             try:
                 app_model.save(update_dirty_bit_to=False)
             # if unable to save due to missing FKs, mark model as deleted
