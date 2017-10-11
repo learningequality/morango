@@ -87,7 +87,7 @@ class SyncSessionPermissions(permissions.BasePermission):
             return True
 
         if request.method == "POST":
-            
+
             # verify and save the certificate chain to our cert store
             try:
                 client_cert = Certificate.save_certificate_chain(

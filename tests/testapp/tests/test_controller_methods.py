@@ -3,17 +3,15 @@ import json
 import mock
 import uuid
 
-from django.core.serializers.json import DjangoJSONEncoder
 from django.test import TestCase
+from morango.controller import MorangoProfileController
+from morango.controller import _self_referential_fk
 from facility_profile.models import Facility, MyUser, SummaryLog
 from morango.certificates import Filter
-from morango.controller import MorangoProfileController
+from morango.controller import MorangoProfileController, _self_referential_fk
 from morango.models import DeletedModels, InstanceIDModel, RecordMaxCounter, Store
 
-
-def serialized_facility_factory(identifier):
-    facility = Facility(name="Facility {}".format(identifier), id=identifier)
-    return DjangoJSONEncoder().encode(facility.serialize())
+from .helpers import serialized_facility_factory
 
 
 class FacilityModelFactory(factory.DjangoModelFactory):
@@ -185,6 +183,18 @@ class SerializeIntoStoreTestCase(TestCase):
         self.assertTrue(Store.objects.filter(id=user.id).exists())
         self.assertTrue(Store.objects.filter(id=log.id).exists())
 
+    def test_self_ref_fk_class_adds_value_to_store(self):
+        root = FacilityModelFactory()
+        child = FacilityModelFactory(parent=root)
+        self.mc.serialize_into_store()
+        self.assertEqual(Store.objects.get(id=child.id)._self_ref_fk, root.id)
+
+    def test_regular_class_leaves_value_blank_in_store(self):
+        log = SummaryLog.objects.create(user=MyUser.objects.create(username='user'))
+        self.mc.serialize_into_store()
+        self.assertEqual(Store.objects.get(id=log.id)._self_ref_fk, '')
+
+
 class RecordMaxCounterUpdatesDuringSerialization(TestCase):
 
     def setUp(self):
@@ -294,19 +304,6 @@ class DeserializationFromStoreIntoAppTestCase(TestCase):
         fac = Facility.objects.get(id=self.ident)
         self.assertNotIn('wacky', fac.__dict__)
 
-    def test_broken_foreign_key_deserialization(self):
-        # add fake foreign key
-        store_model = Store.objects.get(id=self.ident)
-        serialized = json.loads(store_model.serialized)
-        serialized.update({'parent_id': '4d53c8e72b8bea87a393910ff0dcb212'})
-        store_model.serialized = json.dumps(serialized)
-        store_model.save()
-
-        # deserialize records
-        self.mc.deserialize_from_store()
-
-        self.assertTrue(DeletedModels.objects.filter(id=store_model.id).exists())
-
     def test_store_dirty_bit_resets(self):
         self.assertTrue(Store.objects.filter(dirty_bit=True))
         self.mc.deserialize_from_store()
@@ -318,3 +315,60 @@ class DeserializationFromStoreIntoAppTestCase(TestCase):
         st.save()
         self.mc.deserialize_from_store()
         self.assertFalse(Facility.objects.filter(id=st.id).exists())
+
+    def test_broken_fk_adds_to_deleted_models(self):
+        serialized = """{"user_id": "40de9a3fded95d7198f200c78e559353"}"""
+        StoreModelFacilityFactory(id=uuid.uuid4().hex, serialized=serialized, model_name="contentsummarylog")
+        with mock.patch('morango.models.SyncableModel._update_deleted_models') as mock_update:
+            self.mc.deserialize_from_store()
+            self.assertTrue(mock_update.called)
+
+
+class SelfReferentialFKDeserializationTestCase(TestCase):
+
+    def setUp(self):
+        (self.current_id, _) = InstanceIDModel.get_or_create_current_instance()
+        self.mc = MorangoProfileController('facilitydata')
+
+    def test_self_ref_fk(self):
+        self.assertEqual(_self_referential_fk(Facility), 'parent_id')
+        self.assertEqual(_self_referential_fk(MyUser), None)
+
+    def test_delete_model_in_store_deletes_models_in_app(self):
+        root = FacilityModelFactory()
+        child1 = FacilityModelFactory(parent=root)
+        child2 = FacilityModelFactory(parent=root)
+        self.mc.serialize_into_store()
+        # simulate a node being deleted and synced
+        Store.objects.filter(id=child2.id).update(deleted=True)
+        Store.objects.update(dirty_bit=True)
+        grandchild1 = FacilityModelFactory(parent=child2)
+        grandchild2 = FacilityModelFactory(parent=child2)
+
+        self.mc.deserialize_from_store()
+        # ensure tree structure in app layer is correct
+        child1 = Facility.objects.filter(id=child1.id)
+        self.assertTrue(child1.exists())
+        self.assertEqual(child1[0].parent_id, root.id)
+        self.assertFalse(Facility.objects.filter(id=child2.id).exists())
+        self.assertFalse(Facility.objects.filter(id=grandchild1.id).exists())
+        self.assertFalse(Facility.objects.filter(id=grandchild2.id).exists())
+
+    def test_models_created_successfully(self):
+        root = FacilityModelFactory()
+        child1 = FacilityModelFactory(parent=root)
+        child2 = FacilityModelFactory(parent=root)
+        self.mc.serialize_into_store()
+        Facility.objects.all().delete()
+        DeletedModels.objects.all().delete()
+        Store.objects.update(dirty_bit=True, deleted=False)
+
+        self.mc.deserialize_from_store()
+        # ensure tree structure in app layer is correct
+        self.assertTrue(Facility.objects.filter(id=root.id).exists())
+        child1 = Facility.objects.filter(id=child1.id)
+        self.assertTrue(child1.exists())
+        self.assertEqual(child1[0].parent_id, root.id)
+        child2 = Facility.objects.filter(id=child2.id)
+        self.assertTrue(child2.exists())
+        self.assertEqual(child2[0].parent_id, root.id)

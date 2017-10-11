@@ -1,12 +1,15 @@
+import json
 import os
 import platform
 import sys
 import uuid
 
 from django.conf import settings
+from django.core.exceptions import ObjectDoesNotExist
 from django.db import connection, models, transaction
 from django.db.models import F
 from django.utils import timezone
+from morango.utils.register_models import _profile_models
 
 from .certificates import Certificate, ScopeDefinition, Nonce, Filter
 from .manager import SyncableModelManager
@@ -216,6 +219,8 @@ class AbstractStore(models.Model):
     # conflicting data that needs merge conflict resolution
     conflicting_serialized_data = models.TextField(blank=True)
 
+    _self_ref_fk = models.CharField(max_length=32, blank=True)
+
     class Meta:
         abstract = True
 
@@ -229,6 +234,20 @@ class Store(AbstractStore):
     id = UUIDField(primary_key=True)
     # used to know which store records need to be deserialized into the app layer models
     dirty_bit = models.BooleanField(default=False)
+
+    def _deserialize_store_model(self):
+        klass_model = _profile_models[self.profile][self.model_name]
+        # if store model marked as deleted, attempt to delete in app layer
+        if self.deleted:
+            klass_model.objects.filter(id=self.id).delete()
+        # inflate model and attempt to save
+        else:
+            app_model = klass_model.deserialize(json.loads(self.serialized))
+            try:
+                app_model.save(update_dirty_bit_to=False)
+            # if unable to save due to missing FKs, mark model as deleted
+            except ObjectDoesNotExist:
+                app_model._update_deleted_models()
 
 
 class Buffer(AbstractStore):

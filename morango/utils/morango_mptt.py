@@ -22,7 +22,7 @@ class MorangoMPTTModel(models.MPTTModel):
     Any model that inherits from ``SyncableModel`` that also wants to inherit from ``MPTTModel`` should instead inherit
     from ``MorangoMPTTModel``, which modifies some behavior to make it safe for the syncing system.
     """
-    _internal_mptt_fields_not_to_serialize = ('lft', 'rght', 'tree_id', 'parent_id', 'level')
+    _internal_mptt_fields_not_to_serialize = ('lft', 'rght', 'tree_id', 'level')
 
     objects = MorangoMPTTTreeManager()
 
