@@ -334,12 +334,6 @@ class SelfReferentialFKDeserializationTestCase(TestCase):
         self.assertEqual(_self_referential_fk(Facility), 'parent_id')
         self.assertEqual(_self_referential_fk(MyUser), None)
 
-    def test_self_ref_fk_not_set(self):
-        serialized = """{"name": "deadbeef", "parent_id": "abc"}"""
-        StoreModelFacilityFactory(id=uuid.uuid4().hex, serialized=serialized, _self_ref_fk='')
-        self.mc.deserialize_from_store()
-        self.assertEqual(Facility.objects.get().parent_id, None)
-
     def test_delete_model_in_store_deletes_models_in_app(self):
         root = FacilityModelFactory()
         child1 = FacilityModelFactory(parent=root)

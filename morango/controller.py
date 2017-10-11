@@ -126,7 +126,7 @@ class MorangoProfileController(object):
                     # keep iterating until size of dirty_children is 0
                     while len(dirty_children) > 0:
                         for store_model in dirty_children:
-                            store_model._deserialize_store_model(self_ref_fk=self_ref_fk)
+                            store_model._deserialize_store_model()
                             # we update a store model after we have deserialized it
                             store_model.dirty_bit = False
                             store_model.save(update_fields=['dirty_bit'])

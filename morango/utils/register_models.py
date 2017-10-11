@@ -19,6 +19,9 @@ def _get_foreign_key_classes(m):
     return set([field.rel.to for field in m._meta.fields if isinstance(field, ForeignKey)])
 
 def _multiple_self_ref_fk_check(class_model):
+    """
+    We check whether a class has more than 1 FK reference to itself.
+    """
     self_fk = []
     for f in class_model._meta.concrete_fields:
         if f.related_model in self_fk:
@@ -67,7 +70,7 @@ def add_syncable_models():
         if issubclass(model_class, SyncableModel):
             name = model_class.__name__
             if _multiple_self_ref_fk_check(model_class):
-                raise InvalidMorangoModelConfiguration("Syncing models with more than 1 self referential ForeignKey are not supported.")
+                raise InvalidMorangoModelConfiguration("Syncing models with more than 1 self referential ForeignKey is not supported.")
             try:
                 from mptt import models
                 from morango.utils.morango_mptt import MorangoMPTTModel, MorangoMPTTTreeManager, MorangoTreeQuerySet
