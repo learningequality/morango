@@ -295,7 +295,6 @@ class DatabaseMaxCounter(AbstractCounter):
     """
 
     partition = models.CharField(max_length=128, default="")
-    profile = models.CharField(max_length=40)
 
     class Meta:
         unique_together = ("instance_id", "partition")

@@ -90,12 +90,6 @@ class Migration(migrations.Migration):
             field=models.CharField(default=b'', max_length=128),
         ),
         migrations.AddField(
-            model_name='databasemaxcounter',
-            name='profile',
-            field=models.CharField(default=datetime.datetime(2017, 10, 18, 21, 15, 1, 282002, tzinfo=utc), max_length=40),
-            preserve_default=False,
-        ),
-        migrations.AddField(
             model_name='store',
             name='_self_ref_fk',
             field=models.CharField(blank=True, max_length=32),
