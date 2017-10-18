@@ -43,7 +43,7 @@ class TransferSessionSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = TransferSession
-        fields = ('id', 'start_timestamp', 'last_activity_timestamp', 'active', 'filter', 'push', 'records_transferred', 'records_total', 'sync_session',)
+        fields = ('id', 'start_timestamp', 'last_activity_timestamp', 'active', 'filter', 'push', 'records_transferred', 'records_total', 'sync_session', 'remote_fsic', 'local_fsic',)
         read_only_fields = ('start_timestamp', 'last_activity_timestamp', 'active', 'records_transferred',)
 
 
@@ -104,4 +104,4 @@ class BufferSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = Buffer
-        fields = ('serialized', 'deleted', 'last_saved_instance', 'last_saved_counter', 'partition', 'source_id', 'model_name', 'conflicting_serialized_data', 'model_uuid', 'transfer_session', 'rmcb_list')
+        fields = ('serialized', 'deleted', 'last_saved_instance', 'last_saved_counter', 'partition', 'source_id', 'model_name', 'conflicting_serialized_data', 'model_uuid', 'transfer_session', 'profile', 'rmcb_list', '_self_ref_fk')
