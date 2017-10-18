@@ -247,6 +247,8 @@ class Store(AbstractStore):
         # inflate model and attempt to save
         else:
             app_model = klass_model.deserialize(json.loads(self.serialized))
+            app_model._morango_source_id = self.source_id
+            app_model._morango_partition = self.partition
             try:
                 app_model.save(update_dirty_bit_to=False)
             # if unable to save due to missing FKs, mark model as deleted
@@ -293,6 +295,9 @@ class DatabaseMaxCounter(AbstractCounter):
     """
 
     partition = models.CharField(max_length=128, default="")
+
+    class Meta:
+        unique_together = ("instance_id", "partition")
 
     @classmethod
     def calculate_filter_max_counters(cls, filters):
@@ -353,6 +358,7 @@ class SyncableModel(UUIDModelMixin):
     ID_PLACEHOLDER = "${id}"
 
     _morango_internal_fields_not_to_serialize = ('_morango_dirty_bit',)
+    _morango_model_dependencies = ()
     morango_fields_not_to_serialize = ()
     morango_profile = None
 
