@@ -43,7 +43,7 @@ class TransferSessionSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = TransferSession
-        fields = ('id', 'start_timestamp', 'last_activity_timestamp', 'active', 'filter', 'incoming', 'records_transferred', 'records_total', 'sync_session',)
+        fields = ('id', 'start_timestamp', 'last_activity_timestamp', 'active', 'filter', 'push', 'records_transferred', 'records_total', 'sync_session',)
         read_only_fields = ('start_timestamp', 'last_activity_timestamp', 'active', 'records_transferred',)
 
 

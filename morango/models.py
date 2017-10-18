@@ -170,7 +170,7 @@ class TransferSession(models.Model):
 
     id = UUIDField(primary_key=True)
     filter = models.TextField()  # partition/filter to know what subset of data is to be synced
-    incoming = models.BooleanField()  # is session pushing or pulling data?
+    push = models.BooleanField()  # is session pushing or pulling data?
     active = models.BooleanField(default=True)  # is this transfer session still active?
     records_transferred = models.IntegerField(default=0)  # track how many records have already been transferred
     records_total = models.IntegerField(blank=True, null=True)  # total number of records to be synced across in this transfer
@@ -179,6 +179,10 @@ class TransferSession(models.Model):
     # track when the transfer session started and the last time there was activity on it
     start_timestamp = models.DateTimeField(default=timezone.now)
     last_activity_timestamp = models.DateTimeField(blank=True)
+
+    # we keep track of FSICs for both client and server
+    local_fsic = models.TextField(blank=True, default="{}")
+    remote_fsic = models.TextField(blank=True, default="{}")
 
     def get_filter(self):
         return Filter(self.filter)
@@ -404,8 +408,8 @@ class SyncableModel(UUIDModelMixin):
         return cls(**kwargs)
 
     @classmethod
-    def merge_conflict(cls, current, incoming):
-        return incoming
+    def merge_conflict(cls, current, push):
+        return push
 
     def calculate_source_id(self):
         """Should return a string that uniquely defines the model instance or `None` for a random uuid."""

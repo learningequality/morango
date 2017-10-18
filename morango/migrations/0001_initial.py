@@ -191,7 +191,7 @@ class Migration(migrations.Migration):
             fields=[
                 ('id', morango.utils.uuids.UUIDField(primary_key=True, serialize=False)),
                 ('filter', models.TextField()),
-                ('incoming', models.BooleanField()),
+                ('push', models.BooleanField()),
                 ('active', models.BooleanField(default=True)),
                 ('records_transferred', models.IntegerField(default=0)),
                 ('records_total', models.IntegerField(blank=True, null=True)),

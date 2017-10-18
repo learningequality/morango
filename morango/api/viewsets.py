@@ -1,10 +1,12 @@
 import json
+import socket
 import uuid
 
 from django.core.exceptions import ValidationError
 from django.http import Http404
 from django.utils import timezone
 from ipware.ip import get_ip
+from morango.models import Buffer, DatabaseMaxCounter, RecordMaxCounterBuffer
 from rest_framework import viewsets, response, status, generics, mixins, pagination
 
 from . import serializers, permissions
@@ -45,7 +47,7 @@ class CertificateViewSet(viewsets.ModelViewSet):
             except errors.MorangoCertificateError as e:
                 return response.Response(
                     {"error_class": e.__class__.__name__,
-                    "error_message": getattr(e, "message", (getattr(e, "args") or ("",))[0])},
+                     "error_message": getattr(e, "message", (getattr(e, "args") or ("",))[0])},
                     status=status.HTTP_400_BAD_REQUEST
                 )
 
@@ -192,7 +194,7 @@ class TransferSessionViewSet(viewsets.ModelViewSet):
         requested_filter = certificates.Filter(request.data.get("filter"))
         remote_scope = syncsession.remote_certificate.get_scope()
         local_scope = syncsession.local_certificate.get_scope()
-        if request.data.get("push"):
+        if is_a_push:
             if not requested_filter.is_subset_of(remote_scope.write_filter):
                 scope_error_msg = "Client certificate scope does not permit pushing for the requested filter."
             if not requested_filter.is_subset_of(local_scope.read_filter):
@@ -215,9 +217,11 @@ class TransferSessionViewSet(viewsets.ModelViewSet):
             "last_activity_timestamp": timezone.now(),
             "active": True,
             "filter": request.data.get("filter"),
-            "incoming": request.data.get("push"),
+            "push": is_a_push,
             "records_total": request.data.get("records_total") if is_a_push else None,
             "sync_session": syncsession,
+            "local_fsic": json.dumps(DatabaseMaxCounter.calculate_filter_max_counters(request.data.get("filter"))),
+            "remote_fsic": request.data.get('local_fsic') or '{}',
         }
 
         transfersession = models.TransferSession(**data)
@@ -248,7 +252,7 @@ class BufferViewSet(mixins.ListModelMixin, viewsets.GenericViewSet):
         if serial_data.is_valid():
 
             # ensure the transfer session allows pushes, and is same across records
-            if not serial_data.validated_data[0]["transfer_session"].incoming:
+            if not serial_data.validated_data[0]["transfer_session"].push:
                 return response.Response(
                     "Specified TransferSession does not allow pushes.",
                     status=status.HTTP_403_FORBIDDEN

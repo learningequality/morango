@@ -1,11 +1,13 @@
 import factory
+import uuid
 
 from django.db import connection
 from django.test import TestCase
+from django.utils import timezone
 from facility_profile.models import Facility
 from morango.controller import MorangoProfileController
 from morango.syncsession import SyncClient
-from morango.models import Buffer, DatabaseIDModel, InstanceIDModel, Store, RecordMaxCounter, RecordMaxCounterBuffer
+from morango.models import Buffer, DatabaseIDModel, InstanceIDModel, Store, RecordMaxCounter, RecordMaxCounterBuffer, TransferSession, SyncSession
 from .helpers import create_dummy_store_data, create_buffer_and_store_dummy_data
 
 class FacilityModelFactory(factory.DjangoModelFactory):
@@ -114,9 +116,10 @@ class BufferIntoStoreTestCase(TestCase):
 
         # create controllers for app/store/buffer operations
         self.data['mc'] = MorangoProfileController('facilitydata')
-        self.data['sc'] = SyncClient('host', 'facilitydata')
-
-        self.data.update(create_buffer_and_store_dummy_data(self.data['sc'].transfer_session_id))
+        self.data['sc'] = SyncClient('host', 'host')
+        session = SyncSession.objects.create(id=uuid.uuid4().hex, profile="", last_activity_timestamp=timezone.now())
+        self.data['sc'].current_transfer_session = TransferSession.objects.create(id=uuid.uuid4().hex, sync_session=session, push=True, last_activity_timestamp=timezone.now())
+        self.data.update(create_buffer_and_store_dummy_data(self.data['sc'].current_transfer_session.id))
 
     def test_dequeuing_delete_rmcb_records(self):
         for i in self.data['model1_rmcb_ids']:
@@ -227,19 +230,19 @@ class BufferIntoStoreTestCase(TestCase):
             self.assertTrue(RecordMaxCounter.objects.filter(instance_id=i, store_model_id=self.data['model4']).exists())
 
     def test_dequeuing_delete_remaining_rmcb(self):
-        self.assertTrue(RecordMaxCounterBuffer.objects.filter(transfer_session_id=self.data['sc'].transfer_session_id).exists())
+        self.assertTrue(RecordMaxCounterBuffer.objects.filter(transfer_session_id=self.data['sc'].current_transfer_session.id).exists())
         with connection.cursor() as cursor:
             self.data['sc']._dequeuing_delete_remaining_rmcb(cursor)
-        self.assertFalse(RecordMaxCounterBuffer.objects.filter(transfer_session_id=self.data['sc'].transfer_session_id).exists())
+        self.assertFalse(RecordMaxCounterBuffer.objects.filter(transfer_session_id=self.data['sc'].current_transfer_session.id).exists())
 
     def test_dequeuing_delete_remaining_buffer(self):
-        self.assertTrue(Buffer.objects.filter(transfer_session_id=self.data['sc'].transfer_session_id).exists())
+        self.assertTrue(Buffer.objects.filter(transfer_session_id=self.data['sc'].current_transfer_session.id).exists())
         with connection.cursor() as cursor:
             self.data['sc']._dequeuing_delete_remaining_buffer(cursor)
-        self.assertFalse(Buffer.objects.filter(transfer_session_id=self.data['sc'].transfer_session_id).exists())
+        self.assertFalse(Buffer.objects.filter(transfer_session_id=self.data['sc'].current_transfer_session.id).exists())
 
-    def test_integrate_into_store(self):
-        self.data['sc']._integrate_into_store()
+    def test_dequeue_into_store(self):
+        self.data['sc']._dequeue_into_store()
         # ensure a record with different transfer session id is not affected
         self.assertTrue(Buffer.objects.filter(transfer_session_id=self.data['tfs_id']).exists())
         self.assertFalse(Store.objects.filter(id=self.data['model6']).exists())
@@ -264,5 +267,5 @@ class BufferIntoStoreTestCase(TestCase):
         self.assertEqual(RecordMaxCounter.objects.get(instance_id=self.data['model3_rmcb_ids'][0], store_model_id=self.data['model3']).counter, 3)
 
         # ensure all buffer and rmcb records were deleted for this transfer session id
-        self.assertFalse(Buffer.objects.filter(transfer_session_id=self.data['sc'].transfer_session_id).exists())
-        self.assertFalse(RecordMaxCounterBuffer.objects.filter(transfer_session_id=self.data['sc'].transfer_session_id).exists())
+        self.assertFalse(Buffer.objects.filter(transfer_session_id=self.data['sc'].current_transfer_session.id).exists())
+        self.assertFalse(RecordMaxCounterBuffer.objects.filter(transfer_session_id=self.data['sc'].current_transfer_session.id).exists())
