@@ -668,7 +668,7 @@ class BufferEndpointTestCase(CertificateTestCaseMixin, APITestCase):
 
     def test_push_with_invalid_model_uuid(self):
         rec_1 = self.build_buffer_item(push=True, filter=self.default_push_filter)
-        rec_2 = self.build_buffer_item(transfer_session=rec_1.transfer_session, model_uuid=uuid.uuid4().hex)
+        rec_2 = self.build_buffer_item(transfer_session=rec_1.transfer_session, model_uuid=uuid.uuid4().hex, model_name='facility')
         rec_3 = self.build_buffer_item(transfer_session=rec_1.transfer_session)
         self.make_buffer_post_request([rec_1, rec_2, rec_3], expected_status=400)
 

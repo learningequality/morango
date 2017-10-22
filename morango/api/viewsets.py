@@ -3,11 +3,11 @@ import socket
 import uuid
 
 from django.core.exceptions import ValidationError
-from django.http import Http404
 from django.utils import timezone
 from ipware.ip import get_ip
 from morango.models import Buffer, DatabaseMaxCounter, RecordMaxCounterBuffer
-from rest_framework import viewsets, response, status, generics, mixins, pagination
+from morango.utils.sync_utils import _queue_into_buffer, _dequeue_into_store
+from rest_framework import viewsets, response, status, mixins, pagination, decorators
 
 from . import serializers, permissions
 from .. import models, errors, certificates
@@ -18,6 +18,7 @@ class CertificateViewSet(viewsets.ModelViewSet):
     serializer_class = serializers.CertificateSerializer
     authentication_classes = (permissions.BasicMultiArgumentAuthentication,)
 
+    # @decorators.authentication_classes(permissions.BasicMultiArgumentAuthentication,)
     def create(self, request):
 
         serialized_cert = serializers.CertificateSerializer(data=request.data)
@@ -121,6 +122,18 @@ class SyncSessionViewSet(viewsets.ModelViewSet):
         except:
             pass
 
+        # verify and save the certificate chain to our cert store
+        try:
+            models.Certificate.save_certificate_chain(
+                request.data.get("certificate_chain"),
+                expected_last_id=request.data.get("client_certificate_id")
+            )
+        except (AssertionError, errors.MorangoCertificateError):
+            return response.Response(
+                "Saving certificate chain has failed",
+                status=status.HTTP_403_FORBIDDEN
+            )
+
         # attempt to load the requested certificates
         try:
             local_cert = models.Certificate.objects.get(id=request.data.get("server_certificate_id"))
@@ -135,6 +148,23 @@ class SyncSessionViewSet(viewsets.ModelViewSet):
             return response.Response(
                 "Certificates must both be associated with the same profile",
                 status=status.HTTP_400_BAD_REQUEST
+            )
+
+        # check that the nonce/id were properly signed
+        message = "{nonce}:{id}".format(nonce=request.data.get('nonce'), id=request.data.get('id'))
+        if not remote_cert.verify(message, request.data["signature"]):
+            return response.Response(
+                "Client certificate failed to verify signature",
+                status=status.HTTP_403_FORBIDDEN
+            )
+
+        # check that the nonce is valid, and consume it so it can't be used again
+        try:
+            certificates.Nonce.use_nonce(request.data["nonce"])
+        except errors.MorangoNonceError:
+            return response.Response(
+                "Nonce is not valid",
+                status=status.HTTP_403_FORBIDDEN
             )
 
         # build the data to be used for creation the syncsession
@@ -156,10 +186,17 @@ class SyncSessionViewSet(viewsets.ModelViewSet):
         }
 
         syncsession = models.SyncSession(**data)
+        syncsession.full_clean()
         syncsession.save()
 
+        resp_data = {
+            "signature": local_cert.sign(message),
+            "local_instance": data["local_instance"]
+        }
+
         return response.Response(
-            serializers.SyncSessionSerializer(syncsession).data,
+            # serializers.SyncSessionSerializer(syncsession).data,
+            resp_data,
             status=status.HTTP_201_CREATED,
         )
 
@@ -216,11 +253,11 @@ class TransferSessionViewSet(viewsets.ModelViewSet):
             "start_timestamp": timezone.now(),
             "last_activity_timestamp": timezone.now(),
             "active": True,
-            "filter": request.data.get("filter"),
+            "filter": requested_filter,
             "push": is_a_push,
             "records_total": request.data.get("records_total") if is_a_push else None,
             "sync_session": syncsession,
-            "local_fsic": json.dumps(DatabaseMaxCounter.calculate_filter_max_counters(request.data.get("filter"))),
+            "local_fsic": '{}',
             "remote_fsic": request.data.get('local_fsic') or '{}',
         }
 
@@ -228,12 +265,29 @@ class TransferSessionViewSet(viewsets.ModelViewSet):
         transfersession.full_clean()
         transfersession.save()
 
+        if not is_a_push:
+            # queue records to get ready for pulling
+            _queue_into_buffer(transfersession)
+
+            # update records_total on transfer session object
+            records_total = Buffer.objects.filter(transfer_session=transfersession).count()
+            transfersession.records_total = records_total
+
+        fsics = DatabaseMaxCounter.calculate_filter_max_counters(requested_filter)
+        transfersession.local_fsic = json.dumps(fsics)
+        transfersession.save()
         return response.Response(
             serializers.TransferSessionSerializer(transfersession).data,
             status=status.HTTP_201_CREATED,
         )
 
     def perform_destroy(self, transfersession):
+        if transfersession.push:
+            # dequeue into store and then delete records
+            _dequeue_into_store(transfersession)
+        else:
+            Buffer.objects.filter(transfer_session=transfersession).delete()
+            RecordMaxCounterBuffer.objects.filter(transfer_session=transfersession).delete()
         transfersession.active = False
         transfersession.save()
 
@@ -252,7 +306,8 @@ class BufferViewSet(mixins.ListModelMixin, viewsets.GenericViewSet):
         if serial_data.is_valid():
 
             # ensure the transfer session allows pushes, and is same across records
-            if not serial_data.validated_data[0]["transfer_session"].push:
+            transfer_session = serial_data.validated_data[0]["transfer_session"]
+            if not transfer_session.push:
                 return response.Response(
                     "Specified TransferSession does not allow pushes.",
                     status=status.HTTP_403_FORBIDDEN
@@ -264,6 +319,8 @@ class BufferViewSet(mixins.ListModelMixin, viewsets.GenericViewSet):
                 )
 
             serial_data.save()
+            transfer_session.records_transferred += len(data)
+            transfer_session.save()
             return response.Response(status=status.HTTP_201_CREATED)
 
         else:

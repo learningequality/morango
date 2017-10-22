@@ -32,7 +32,7 @@ class MorangoProfileController(object):
         _deserialize_from_store(self.profile)
 
     def create_network_connection(self, base_url):
-        return NetworkSyncConnection(base_url=base_url, profile=self.profile)
+        return NetworkSyncConnection(base_url=base_url)
 
     def create_disk_connection(path):
         raise NotImplementedError("Coming soon...")

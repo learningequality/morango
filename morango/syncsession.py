@@ -21,6 +21,14 @@ def _join_with_logical_operator(lst, operator):
     return "(({items}))".format(items=op.join(lst))
 
 
+def _get_ip(url):
+    try:
+        o = urlparse(url)
+        return socket.gethostbyname(o.netloc.split(":")[0])
+    except:
+        return ""
+
+
 class Connection(object):
     """
     Abstraction around a connection with a syncing peer (network or disk),
@@ -32,15 +40,14 @@ class Connection(object):
     and the necessary methods overridden.
     """
 
-    def __init__(self, profile):
-        self.profile = profile
+    def __init__(self):
+        pass
 
 
 class NetworkSyncConnection(Connection):
 
-    def __init__(self, base_url='', profile=''):
+    def __init__(self, base_url=''):
         self.base_url = base_url
-        super(NetworkSyncConnection, self).__init__(profile)
 
     def _request(self, endpoint, method="GET", lookup=None, data={}, params={}, userargs=None, password=None):
         """
@@ -61,7 +68,10 @@ class NetworkSyncConnection(Connection):
 
         # build up url and send request
         url = urljoin(urljoin(self.base_url, endpoint), lookup)
-        resp = requests.request(method, url, data=data, params=params, auth=(userargs, password))
+        auth = (userargs, password)
+        if userargs is None:
+            auth = None
+        resp = requests.request(method, url, json=data, params=params, auth=auth)
         resp.raise_for_status()
         return resp
 
@@ -94,7 +104,7 @@ class NetworkSyncConnection(Connection):
         session_resp = self._request(api_urls.SYNCSESSION, method="POST", data=data)
 
         # check that the nonce/id were properly signed by the server cert
-        if not server_cert.verify(message, session_resp.data.pop("signature")):
+        if not server_cert.verify(message, session_resp.json().get("signature")):
             raise CertificateSignatureInvalid()
 
         # build the data to be used for creating our own syncsession
@@ -110,37 +120,46 @@ class NetworkSyncConnection(Connection):
             "connection_kind": "network",
             "connection_path": self.base_url,
             "local_ip": socket.gethostbyname(socket.gethostname()),
-            "remote_ip": socket.gethostbyname(self.base_url),
+            "remote_ip": _get_ip(self.base_url),
             "local_instance": json.dumps(InstanceIDSerializer(InstanceIDModel.get_or_create_current_instance()[0]).data),
-            "remote_instance": session_resp.data.get("instance") or "{}",
+            "remote_instance": session_resp.json().get("instance") or "{}",
         }
         sync_session = SyncSession.objects.create(**data)
 
-        return SyncClient(self, sync_session, profile=self.profile)
+        return SyncClient(self, sync_session)
 
-    def get_remote_certificates(self, primary_partition):
+    def get_remote_certificates(self, primary_partition, scope_def_id=None):
         remote_certs = []
         # request certs for this primary partition, where the server also has a private key for
         remote_certs_resp = self._request(api_urls.CERTIFICATE, params={'primary_partition': primary_partition})
 
         # inflate remote certs into a list of unsaved models
-        for cert in json.loads(remote_certs_resp.data):
+        for cert in remote_certs_resp.json():
             remote_certs.append(Certificate.deserialize(cert["serialized"], cert["signature"]))
+
+        # filter certs by scope definition id, if provided
+        if scope_def_id:
+            remote_certs = [cert for cert in remote_certs if cert.scope_definition_id == scope_def_id]
+
         return remote_certs
 
     def certificate_signing_request(self, parent_cert, scope_definition_id, scope_params, userargs=None, password=None):
+        # if server cert does not exist locally, retrieve it from server
+        if not Certificate.objects.filter(id=parent_cert.id).exists():
+            self._get_certificate_chain(parent_cert)
+
         csr_key = Key()
         # build up data for csr
         data = {
             "parent": parent_cert.id,
-            "profile": self.profile,
+            "profile": parent_cert.profile,
             "scope_definition": scope_definition_id,
             "scope_version": parent_cert.scope_version,
-            "scope_params": scope_params,
+            "scope_params": json.dumps(scope_params),
             "public_key": csr_key.get_public_key_string()
         }
         csr_resp = self._request(api_urls.CERTIFICATE, method="POST", data=data, userargs=userargs, password=password)
-        csr_data = json.loads(csr_resp.data)
+        csr_data = csr_resp.json()
 
         # verify cert returned from server, and proceed to save into our records
         csr_cert = Certificate.deserialize(csr_data["serialized"], csr_data["signature"])
@@ -154,7 +173,7 @@ class NetworkSyncConnection(Connection):
         cert_chain_resp = self._request(api_urls.CERTIFICATE, params={'ancestors_of': server_cert.id})
 
         # upon receiving cert chain from server, we attempt to save the chain into our records
-        Certificate.save_certificate_chain(cert_chain_resp.data, expected_last_id=server_cert.id)
+        Certificate.save_certificate_chain(cert_chain_resp.json(), expected_last_id=server_cert.id)
 
     def _create_transfer_session(self, data):
         # create transfer session on server
@@ -172,16 +191,98 @@ class NetworkSyncConnection(Connection):
         # "delete" sync session on server side
         return self._request(api_urls.SYNCSESSION, method="DELETE", lookup=sync_session.id)
 
+    def _push_record_chunk(self, serialized_recs):
+        # push a chunk of records to the server side
+        return self._request(api_urls.BUFFER, method="POST", data=serialized_recs)
+
+    def _pull_record_chunk(self, chunk_size, transfer_session):
+        # pull records from server for given transfer session
+        params = {'limit': chunk_size, 'offset': transfer_session.records_transferred, 'transfer_session_id': transfer_session.id}
+        return self._request(api_urls.BUFFER, params=params)
+
 
 class SyncClient(object):
     """
     Controller to support client in initiating syncing and performing related operations.
     """
-    def __init__(self, sync_connection, sync_session, profile=''):
+    def __init__(self, sync_connection, sync_session):
         self.sync_connection = sync_connection
         self.sync_session = sync_session
         self.current_transfer_session = None
-        self.profile = profile
+
+    def initiate_push(self, sync_filter):
+        self._create_transfer_session(True, sync_filter)
+        self._queue_into_buffer(sync_filter, self.sync_connection.current_transfer_session.remote_fsic)
+
+        # update the records_total for client and server transfer session
+        records_total = Buffer.objects.filter(transfer_session=self.sync_connection.current_transfer_session)
+        self.current_transfer_session.records_total = records_total
+        self.current_transfer_session.save()
+        self.sync_connection._update_transfer_session({'records_total': records_total}, self.current_transfer_session)
+
+        # push records to server
+        self._push_records(sync_filter)
+
+        # upon successful completion of pushing records, proceed to delete buffered records
+        Buffer.objects.filter(transfer_session=self.current_transfer_session).delete()
+        RecordMaxCounterBuffer.objects.filter(transfer_session=self.current_transfer_session).delete()
+
+        # close client and server transfer session
+        self._close_transfer_session()
+
+    def initiate_pull(self, sync_filter):
+        transfer_resp = self._create_transfer_session(False, sync_filter)
+
+        # update records_total from response
+        self.current_transfer_session.records_total = transfer_resp.json().get('records_total')
+        self.current_transfer_session.save()
+
+        # pull records and close transfer session upon completion
+        self._pull_records()
+        self._dequeue_into_store()
+
+        # load database max counters
+        for (key, value) in iteritems(json.loads(self.current_transfer_session.remote_fsic)):
+            for f in sync_filter:
+                DatabaseMaxCounter.objects.update_or_create(instance_id=key, partition=f, defaults={'counter': value})
+
+        self._close_transfer_session()
+
+    def _pull_records(self, chunk_size=500, callback=None):
+        while self.current_transfer_session.records_transferred < self.current_transfer_session.records_total:
+            buffers_resp = self.sync_connection._pull_record_chunk(chunk_size, self.current_transfer_session)
+
+            # load the returned data from JSON
+            data = json.loads(buffers_resp.content.decode())
+
+            # parse out the results from a paginated set, if needed
+            if isinstance(data, dict) and "results" in data:
+                data = data["results"]
+
+            # deserialize the records
+            serialized_recs = BufferSerializer(data=data, many=True)
+
+            # validate records
+            if serialized_recs.is_valid(raise_exception=True):
+                serialized_recs.save()
+
+            # update the size of the records transferred
+            self.current_transfer_session.records_transferred += chunk_size
+            self.current_transfer_session.save()
+
+    def _push_records(self, chunk_size=500, callback=None):
+        # paginate buffered records so we do not load them all into memory
+        buffered_records = Buffer.objects.filter(transfer_session=self.current_transfer_session)
+        buffered_pages = Paginator(buffered_records, chunk_size)
+        for count in buffered_pages.page_range:
+
+            # serialize and send records to server
+            serialized_recs = BufferSerializer(buffered_pages.page(count).object_list, many=True)
+            self.sync_connection._push_record_chunk(serialized_recs.data)
+
+            # update records_transferred upon successful request
+            self.current_transfer_session.records_transferred += chunk_size
+            self.current_transfer_session.save()
 
     def close_sync_session(self):
 
@@ -189,42 +290,35 @@ class SyncClient(object):
         self.sync_connection._close_sync_session(self.sync_session)
 
         # "delete" our own local sync session
-        self.sync_connection.sync_session.active = False
-        self.sync_connection.sync_session.save()
-        self.sync_connection.sync_session = None
-        self = None
+        self.sync_session.active = False
+        self.sync_session.save()
+        self.sync_session = None
 
     def _create_transfer_session(self, push, filter):
 
         # build data for creating transfer session on server side
         data = {
             'id': uuid.uuid4().hex,
-            'filter': filter,
+            'filter': filter.__str__(),
             'push': push,
             'sync_session_id': self.sync_session.id,
-            'local_fsic': DatabaseMaxCounter.calculate_filter_max_counters(filter)
+            'local_fsic': json.dumps(DatabaseMaxCounter.calculate_filter_max_counters(filter))
         }
-        data['start_timestamp'] = timezone.now()
+
         data['last_activity_timestamp'] = timezone.now()
         self.current_transfer_session = TransferSession.objects.create(**data)
+        data.pop('last_activity_timestamp')
 
         # create transfer session on server side
         transfer_resp = self.sync_connection._create_transfer_session(data)
 
-        self.current_transfer_session.remote_fsic = transfer_resp.data.get('local_fsic')
-        if not push:
-            self.current_transfer_session.records_total = transfer_resp.data.get('records_total')
-        self.current_transfer_session.save()
+        self.current_transfer_session.remote_fsic = transfer_resp.json().get('local_fsic')
+        return transfer_resp
 
     def _close_transfer_session(self):
 
         # "delete" transfer session on server side
         self.sync_connection._close_transfer_session(self.current_transfer_session)
-
-        # delete local buffered objects if pushing records
-        if self.current_transfer_session.push:
-            Buffer.objects.filter(transfer_session=self.current_transfer_session).delete()
-            RecordMaxCounterBuffer.objects.filter(transfer_session=self.current_transfer_session).delete()
 
         # "delete" our own local transfer session
         self.current_transfer_session.active = False
