@@ -62,7 +62,7 @@ def create_dummy_store_data():
 
     # create controllers for app/store/buffer operations
     data['mc'] = MorangoProfileController('facilitydata')
-    data['sc'] = SyncClient('host', 'host', profile='facilitydata')
+    data['sc'] = SyncClient(None, 'host')
     session = SyncSession.objects.create(id=uuid.uuid4().hex, profile="facilitydata", last_activity_timestamp=timezone.now())
     data['sc'].current_transfer_session = TransferSession.objects.create(id=uuid.uuid4().hex, sync_session=session, push=True, last_activity_timestamp=timezone.now())
 

@@ -4,19 +4,18 @@ import uuid
 
 from django.test import TestCase
 from django.utils import timezone
-from morango.api.serializers import CertificateSerializer
+from facility_profile.models import SummaryLog
+from morango.api.serializers import CertificateSerializer, BufferSerializer
 from morango.certificates import Certificate, ScopeDefinition, Key
 from morango.controller import MorangoProfileController
 from morango.errors import CertificateSignatureInvalid
-from morango.models import SyncSession, TransferSession
-from morango.syncsession import NetworkSyncConnection
-from rest_framework import status
-
+from morango.models import Buffer, SyncSession, TransferSession
+from morango.syncsession import NetworkSyncConnection, SyncClient
 
 def mock_patch_decorator(func):
 
     def wrapper(*args, **kwargs):
-        mock_object = mock.Mock(content=b"""{"id": "abc"}""", data={'signature': 'sig', 'local_fsic': '{}'})
+        mock_object = mock.Mock(content=b"""{"id": "abc"}""")
         with mock.patch.object(NetworkSyncConnection, '_request', return_value=mock_object):
             with mock.patch.object(Certificate, 'verify', return_value=True):
                     return func(*args, **kwargs)
@@ -69,6 +68,7 @@ class NetworkSyncConnectionTestCase(TestCase):
     @mock_patch_decorator
     def test_creating_sync_session_successful(self):
         self.assertEqual(SyncSession.objects.filter(active=True).count(), 0)
+        NetworkSyncConnection._request.return_value.json.return_value = {'signature': 'sig', 'local_fsic': '{}'}
         self.network_connection.create_sync_session(self.subset_cert, self.root_cert)
         self.assertEqual(SyncSession.objects.filter(active=True).count(), 1)
 
@@ -83,7 +83,7 @@ class NetworkSyncConnectionTestCase(TestCase):
         # mock certs being returned by server
         certs = self.subset_cert.get_ancestors(include_self=True)
         cert_serialized = json.dumps(CertificateSerializer(certs, many=True).data)
-        NetworkSyncConnection._request.return_value = mock.Mock(data=cert_serialized)
+        NetworkSyncConnection._request.return_value.json.return_value = json.loads(cert_serialized)
 
         # we want to see if the models are created (not saved) successfully
         remote_certs = self.network_connection.get_remote_certificates('abc')
@@ -93,7 +93,7 @@ class NetworkSyncConnectionTestCase(TestCase):
     def test_csr(self):
         # mock a "signed" cert being returned by server
         cert_serialized = json.dumps(CertificateSerializer(self.subset_cert).data)
-        NetworkSyncConnection._request.return_value = mock.Mock(data=cert_serialized)
+        NetworkSyncConnection._request.return_value.json.return_value = json.loads(cert_serialized)
         self.subset_cert.delete()
 
         # we only want to make sure the "signed" cert is saved
@@ -107,7 +107,7 @@ class NetworkSyncConnectionTestCase(TestCase):
         certs = self.subset_cert.get_ancestors(include_self=True)
         original_cert_count = certs.count()
         cert_serialized = json.dumps(CertificateSerializer(certs, many=True).data)
-        NetworkSyncConnection._request.return_value = mock.Mock(data=cert_serialized)
+        NetworkSyncConnection._request.return_value.json.return_value = json.loads(cert_serialized)
         Certificate.objects.all().delete()
 
         # we only want to make sure the cert chain is saved
