@@ -149,13 +149,13 @@ def _deserialize_from_store(profile):
         # clear dirty bit for all store models for this profile
         Store.objects.filter(profile=profile, dirty_bit=True).update(dirty_bit=False)
 
-@transaction.atomic
 def _queue_into_buffer(transfersession):
     """
     Takes a chunk of data from the store to be put into the buffer to be sent to another morango instance.
     """
     if getattr(settings, 'SERIALIZE_BEFORE_QUEUING', True):
-        _serialize_into_store(transfersession.sync_session.profile, filter=transfersession.filter)
+        _serialize_into_store(transfersession.sync_session.profile, filter=Filter(transfersession.filter))
+
     last_saved_by_conditions = []
     filter_prefixes = Filter(transfersession.filter)
     if transfersession.push:
