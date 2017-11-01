@@ -158,10 +158,10 @@ def _queue_into_buffer(transfersession):
 
     last_saved_by_conditions = []
     filter_prefixes = Filter(transfersession.filter)
-    if transfersession.push:
-        fsics = json.loads(transfersession.local_fsic)
-    else:
-        fsics = json.loads(transfersession.remote_fsic)
+    remote_fsic = json.loads(transfersession.remote_fsic)
+    local_fsic = json.loads(transfersession.local_fsic)
+    fsics = {k: 0 for k in set(local_fsic) - set(remote_fsic)}
+    fsics.update(remote_fsic)
     # create condition for all push FSICs where instance_ids are equal, but internal counters are higher than FSICs counters
     for instance, counter in iteritems(fsics):
         last_saved_by_conditions += ["(last_saved_instance = '{0}' AND last_saved_counter > {1})".format(instance, counter)]

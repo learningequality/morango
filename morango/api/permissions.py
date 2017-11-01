@@ -100,6 +100,9 @@ class TransferSessionPermissions(permissions.BasePermission):
         if request.method == "POST":
             return True  # we'll be doing some additional permission checks in the viewset
 
+        if request.method == "PATCH":
+            return True
+
         return False
 
 

@@ -4,6 +4,7 @@ import uuid
 
 from django.core.exceptions import ValidationError
 from django.utils import timezone
+from django.utils.six import iteritems
 from ipware.ip import get_ip
 from morango.models import Buffer, DatabaseMaxCounter, RecordMaxCounterBuffer
 from morango.utils.sync_utils import _queue_into_buffer, _dequeue_into_store
@@ -285,6 +286,10 @@ class TransferSessionViewSet(viewsets.ModelViewSet):
         if transfersession.push:
             # dequeue into store and then delete records
             _dequeue_into_store(transfersession)
+            # load database max counters
+            for (key, value) in iteritems(json.loads(transfersession.remote_fsic)):
+                for f in certificates.Filter(transfersession.filter):
+                    DatabaseMaxCounter.objects.update_or_create(instance_id=key, partition=f, defaults={'counter': value})
         else:
             Buffer.objects.filter(transfer_session=transfersession).delete()
             RecordMaxCounterBuffer.objects.filter(transfer_session=transfersession).delete()

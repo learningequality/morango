@@ -67,6 +67,8 @@ class NetworkSyncConnection(Connection):
             userargs = "&".join(["{}={}".format(key, val) for (key, val) in iteritems(userargs)])
 
         # build up url and send request
+        if lookup:
+            lookup = lookup + '/'
         url = urljoin(urljoin(self.base_url, endpoint), lookup)
         auth = (userargs, password)
         if userargs is None:
@@ -212,16 +214,19 @@ class SyncClient(object):
 
     def initiate_push(self, sync_filter):
         self._create_transfer_session(True, sync_filter)
-        self._queue_into_buffer(sync_filter, self.sync_connection.current_transfer_session.remote_fsic)
+        _queue_into_buffer(self.current_transfer_session)
 
         # update the records_total for client and server transfer session
-        records_total = Buffer.objects.filter(transfer_session=self.sync_connection.current_transfer_session)
+        records_total = Buffer.objects.filter(transfer_session=self.current_transfer_session).count()
+        if records_total == 0:
+            self._close_transfer_session()
+            return
         self.current_transfer_session.records_total = records_total
         self.current_transfer_session.save()
         self.sync_connection._update_transfer_session({'records_total': records_total}, self.current_transfer_session)
 
         # push records to server
-        self._push_records(sync_filter)
+        self._push_records()
 
         # upon successful completion of pushing records, proceed to delete buffered records
         Buffer.objects.filter(transfer_session=self.current_transfer_session).delete()
@@ -236,6 +241,10 @@ class SyncClient(object):
         # update records_total from response
         self.current_transfer_session.records_total = transfer_resp.json().get('records_total')
         self.current_transfer_session.save()
+
+        if self.current_transfer_session.records_total == 0:
+            self._close_transfer_session()
+            return
 
         # pull records and close transfer session upon completion
         self._pull_records()
