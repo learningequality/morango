@@ -9,6 +9,7 @@ from django.core.exceptions import ObjectDoesNotExist
 from django.db import connection, models, transaction
 from django.db.models import F
 from django.utils import timezone
+from django.utils.six import iteritems
 from morango.utils.register_models import _profile_models
 
 from .certificates import Certificate, ScopeDefinition, Nonce, Filter
@@ -298,6 +299,23 @@ class DatabaseMaxCounter(AbstractCounter):
 
     class Meta:
         unique_together = ("instance_id", "partition")
+
+    @classmethod
+    def update_fsics(cls, fsic1, fsic2, sync_filter):
+        updated_fsic = {}
+        for key, value in iteritems(fsic1):
+            if key in fsic2:
+                # if same instance id, update fsic with larger value
+                if fsic1[key] > fsic2[key]:
+                    updated_fsic[key] = fsic2[key]
+            else:
+                # if instance id is not present, add it to updated fsics
+                updated_fsic[key] = fsic1[key]
+
+        # load database max counters
+        for (key, value) in iteritems(updated_fsic):
+            for f in sync_filter:
+                DatabaseMaxCounter.objects.update_or_create(instance_id=key, partition=f, defaults={'counter': value})
 
     @classmethod
     def calculate_filter_max_counters(cls, filters):

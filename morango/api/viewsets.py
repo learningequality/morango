@@ -2,16 +2,20 @@ import json
 import socket
 import uuid
 
+from django.conf import settings
 from django.core.exceptions import ValidationError
 from django.utils import timezone
 from django.utils.six import iteritems
 from ipware.ip import get_ip
+from morango.certificates import Filter
 from morango.models import Buffer, DatabaseMaxCounter, RecordMaxCounterBuffer
-from morango.utils.sync_utils import _queue_into_buffer, _dequeue_into_store
-from rest_framework import viewsets, response, status, mixins, pagination, decorators
+from morango.utils.sync_utils import (_dequeue_into_store, _queue_into_buffer,
+                                      _serialize_into_store)
+from rest_framework import (decorators, mixins, pagination, response, status,
+                            viewsets)
 
-from . import serializers, permissions
-from .. import models, errors, certificates
+from . import permissions, serializers
+from .. import certificates, errors, models
 
 
 class CertificateViewSet(viewsets.ModelViewSet):
@@ -19,7 +23,6 @@ class CertificateViewSet(viewsets.ModelViewSet):
     serializer_class = serializers.CertificateSerializer
     authentication_classes = (permissions.BasicMultiArgumentAuthentication,)
 
-    # @decorators.authentication_classes(permissions.BasicMultiArgumentAuthentication,)
     def create(self, request):
 
         serialized_cert = serializers.CertificateSerializer(data=request.data)
@@ -258,15 +261,25 @@ class TransferSessionViewSet(viewsets.ModelViewSet):
             "push": is_a_push,
             "records_total": request.data.get("records_total") if is_a_push else None,
             "sync_session": syncsession,
-            "local_fsic": '{}',
-            "remote_fsic": request.data.get('local_fsic') or '{}',
+            "client_fsic": request.data.get('client_fsic') or '{}',
+            "server_fsic": '{}',
         }
 
         transfersession = models.TransferSession(**data)
         transfersession.full_clean()
         transfersession.save()
 
+        # must update database max counters before calculating fsics
         if not is_a_push:
+
+            if getattr(settings, 'SERIALIZE_BEFORE_QUEUING', True):
+                _serialize_into_store(transfersession.sync_session.profile, filter=requested_filter)
+
+        transfersession.server_fsic = json.dumps(DatabaseMaxCounter.calculate_filter_max_counters(requested_filter))
+        transfersession.save()
+
+        if not is_a_push:
+
             # queue records to get ready for pulling
             _queue_into_buffer(transfersession)
 
@@ -286,11 +299,12 @@ class TransferSessionViewSet(viewsets.ModelViewSet):
         if transfersession.push:
             # dequeue into store and then delete records
             _dequeue_into_store(transfersession)
-            # load database max counters
-            for (key, value) in iteritems(json.loads(transfersession.remote_fsic)):
-                for f in certificates.Filter(transfersession.filter):
-                    DatabaseMaxCounter.objects.update_or_create(instance_id=key, partition=f, defaults={'counter': value})
+            # update database max counters
+            DatabaseMaxCounter.update_fsics(json.loads(transfersession.client_fsic),
+                                            json.loads(transfersession.server_fsic),
+                                            certificates.Filter(transfersession.filter))
         else:
+            # if pull, then delete records that were queued
             Buffer.objects.filter(transfer_session=transfersession).delete()
             RecordMaxCounterBuffer.objects.filter(transfer_session=transfersession).delete()
         transfersession.active = False

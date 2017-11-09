@@ -25,6 +25,21 @@ def _self_referential_fk(klass_model):
                 return f.attname
     return None
 
+def _fsic_queuing_calc(fsic1, fsic2):
+    fsic_copy = dict(fsic1)
+    # fsic_copy = dict(fsic2)
+    for k, v in iteritems(fsic1):
+        if k in fsic2:
+            # we remove a (instance id, value) pair if the value is greater in the other fsic
+            if fsic2[k] >= fsic1[k]:
+                del fsic_copy[k]
+            else:
+                fsic_copy[k] = fsic2[k]
+        else:
+            # if instance id is not in other fsic, then zero out value
+            fsic_copy[k] = 0
+    return fsic_copy
+
 def _serialize_into_store(profile, filter=None):
     """
     Takes data from app layer and serializes the models into the store.
@@ -162,15 +177,20 @@ def _queue_into_buffer(transfersession):
     """
     Takes a chunk of data from the store to be put into the buffer to be sent to another morango instance.
     """
-    if getattr(settings, 'SERIALIZE_BEFORE_QUEUING', True):
-        _serialize_into_store(transfersession.sync_session.profile, filter=Filter(transfersession.filter))
-
     last_saved_by_conditions = []
     filter_prefixes = Filter(transfersession.filter)
-    remote_fsic = json.loads(transfersession.remote_fsic)
-    local_fsic = json.loads(transfersession.local_fsic)
-    fsics = {k: 0 for k in set(local_fsic) - set(remote_fsic)}
-    fsics.update(remote_fsic)
+    server_fsic = json.loads(transfersession.server_fsic)
+    client_fsic = json.loads(transfersession.client_fsic)
+
+    if transfersession.push:
+        fsics = _fsic_queuing_calc(client_fsic, server_fsic)
+    else:
+        fsics = _fsic_queuing_calc(server_fsic, client_fsic)
+
+    # if fsics are identical, then there is nothing to queue
+    if not fsics:
+        return
+
     # create condition for all push FSICs where instance_ids are equal, but internal counters are higher than FSICs counters
     for instance, counter in iteritems(fsics):
         last_saved_by_conditions += ["(last_saved_instance = '{0}' AND last_saved_counter > {1})".format(instance, counter)]
@@ -207,11 +227,9 @@ def _queue_into_buffer(transfersession):
         queue_rmc_buffer = """INSERT INTO {outgoing_rmcb}
                             (instance_id, counter, transfer_session_id, model_uuid)
                             SELECT instance_id, counter, '{transfer_session_id}', store_model_id
-                            FROM {record_max_counter} AS rmc, {outgoing_buffer} AS buffer
-                            WHERE EXISTS (SELECT 1
-                                          FROM {outgoing_buffer}
-                                          WHERE buffer.model_uuid = rmc.store_model_id)
-                                          AND buffer.transfer_session_id = '{transfer_session_id}'
+                            FROM {record_max_counter} AS rmc LEFT JOIN {outgoing_buffer} AS buffer
+                            WHERE buffer.model_uuid = rmc.store_model_id
+                            AND buffer.transfer_session_id = '{transfer_session_id}'
                             """.format(outgoing_rmcb=RecordMaxCounterBuffer._meta.db_table,
                                        transfer_session_id=transfersession.id,
                                        record_max_counter=RecordMaxCounter._meta.db_table,
