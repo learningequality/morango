@@ -56,3 +56,47 @@ class FilterMaxCounterTestCase(TestCase):
         fmcs = DatabaseMaxCounter.calculate_filter_max_counters(Filter(self.user_prefix_a + "\n" + self.user2_prefix_b))
         self.assertEqual(fmcs[self.instance_a], 17)
         self.assertEqual(fmcs[self.instance_b], 10)
+
+
+class DatabaseMaxCounterUpdateCalculation(TestCase):
+
+    def setUp(self):
+        pass
+
+    def test_update_all_fsics_on_push(self):
+        client_fsic = {'a'*32: 2, 'b'*32: 2, 'c'*32: 2}
+        server_fsic = {'a'*32: 1, 'b'*32: 1, 'c'*32: 1}
+        DatabaseMaxCounter.update_fsics(client_fsic, server_fsic, Filter('filter'))
+        self.assertEqual(DatabaseMaxCounter.objects.all().count(), len(client_fsic))
+
+    def test_update_some_fsics_on_push(self):
+        client_fsic = {'a'*32: 1, 'e'*32: 2, 'c'*32: 1}
+        server_fsic = {'a'*32: 2, 'b'*32: 1, 'c'*32: 2}
+        DatabaseMaxCounter.update_fsics(client_fsic, server_fsic, Filter('filter'))
+        self.assertEqual(DatabaseMaxCounter.objects.get().instance_id, 'e'*32)
+        self.assertEqual(DatabaseMaxCounter.objects.get().counter, client_fsic['e'*32])
+
+    def test_no_fsics_get_updated_on_push(self):
+        client_fsic = {'a'*32: 1, 'b'*32: 1, 'c'*32: 1}
+        server_fsic = {'a'*32: 2, 'b'*32: 2, 'c'*32: 2}
+        DatabaseMaxCounter.update_fsics(client_fsic, server_fsic, Filter('filter'))
+        self.assertEqual(DatabaseMaxCounter.objects.all().count(), 0)
+
+    def test_update_all_fsics_on_pull(self):
+        client_fsic = {'a'*32: 1, 'b'*32: 1, 'c'*32: 1}
+        server_fsic = {'a'*32: 2, 'b'*32: 2, 'c'*32: 2}
+        DatabaseMaxCounter.update_fsics(server_fsic, client_fsic, Filter('filter'))
+        self.assertEqual(DatabaseMaxCounter.objects.all().count(), len(server_fsic))
+
+    def test_update_some_fsics_on_pull(self):
+        client_fsic = {'a'*32: 2, 'b'*32: 2, 'c'*32: 2}
+        server_fsic = {'a'*32: 2, 'e'*32: 1, 'c'*32: 2}
+        DatabaseMaxCounter.update_fsics(server_fsic, client_fsic, Filter('filter'))
+        self.assertEqual(DatabaseMaxCounter.objects.get().instance_id, 'e'*32)
+        self.assertEqual(DatabaseMaxCounter.objects.get().counter, server_fsic['e'*32])
+
+    def test_no_fsics_get_updated_on_pull(self):
+        client_fsic = {'a'*32: 2, 'b'*32: 2, 'c'*32: 2}
+        server_fsic = {'a'*32: 1, 'b'*32: 1, 'c'*32: 1}
+        DatabaseMaxCounter.update_fsics(server_fsic, client_fsic, Filter('filter'))
+        self.assertEqual(DatabaseMaxCounter.objects.all().count(), 0)
