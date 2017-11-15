@@ -36,15 +36,15 @@ class SyncSessionSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = SyncSession
-        fields = ('id', 'start_timestamp', 'last_activity_timestamp', 'active', 'local_certificate', 'remote_certificate', 'profile', 'connection_kind', 'connection_path', 'local_ip', 'remote_ip', 'local_instance', 'remote_instance')
-        read_only_fields = ('start_timestamp', 'last_activity_timestamp', 'active', 'local_certificate', 'connection_kind', 'local_ip', 'remote_ip', 'local_instance',)
+        fields = ('id', 'start_timestamp', 'last_activity_timestamp', 'active', 'client_certificate', 'server_certificate', 'profile', 'connection_kind', 'connection_path', 'client_ip', 'server_ip', 'client_instance', 'server_instance')
+        read_only_fields = ('start_timestamp', 'last_activity_timestamp', 'active', 'client_certificate', 'connection_kind', 'client_ip', 'server_ip', 'client_instance',)
 
 
 class TransferSessionSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = TransferSession
-        fields = ('id', 'start_timestamp', 'last_activity_timestamp', 'active', 'filter', 'push', 'records_transferred', 'records_total', 'sync_session', 'remote_fsic', 'local_fsic',)
+        fields = ('id', 'start_timestamp', 'last_activity_timestamp', 'active', 'filter', 'push', 'records_transferred', 'records_total', 'sync_session', 'server_fsic', 'client_fsic',)
         read_only_fields = ('start_timestamp', 'last_activity_timestamp', 'active', 'records_transferred',)
 
 

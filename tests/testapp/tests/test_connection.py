@@ -12,10 +12,11 @@ from morango.errors import CertificateSignatureInvalid
 from morango.models import Buffer, SyncSession, TransferSession
 from morango.syncsession import NetworkSyncConnection, SyncClient
 
+
 def mock_patch_decorator(func):
 
     def wrapper(*args, **kwargs):
-        mock_object = mock.Mock(content=b"""{"id": "abc"}""")
+        mock_object = mock.Mock(content=b"""{"id": "abc"}""", data={'signature': 'sig', 'client_fsic': '{}'})
         with mock.patch.object(NetworkSyncConnection, '_request', return_value=mock_object):
             with mock.patch.object(Certificate, 'verify', return_value=True):
                     return func(*args, **kwargs)
@@ -113,6 +114,7 @@ class NetworkSyncConnectionTestCase(TestCase):
         # we only want to make sure the cert chain is saved
         self.network_connection._get_certificate_chain(certs[1])
         self.assertEqual(Certificate.objects.count(), original_cert_count)
+
 
 class SyncClientTestCase(TestCase):
 

@@ -113,8 +113,8 @@ class NetworkSyncConnection(Connection):
             "last_activity_timestamp": timezone.now(),
             "active": True,
             "is_server": False,
-            "local_certificate": client_cert,
-            "remote_certificate": server_cert,
+            "client_certificate": client_cert,
+            "server_certificate": server_cert,
             "profile": client_cert.profile,
             "connection_kind": "network",
             "connection_path": self.base_url,
@@ -323,9 +323,9 @@ class SyncClient(object):
         # create transfer session on server side
         transfer_resp = self.sync_connection._create_transfer_session(data)
 
-        self.current_transfer_session.server_fsic = transfer_resp.json().get('server_fsic') or '{}'
+        self.current_transfer_session.server_fsic = transfer_resp.data.get('server_fsic') or '{}'
         if not push:
-            self.current_transfer_session.records_total = transfer_resp.json().get('records_total')
+            self.current_transfer_session.records_total = transfer_resp.data.get('records_total')
         self.current_transfer_session.save()
 
     def _close_transfer_session(self):

@@ -16,6 +16,7 @@ from morango.utils.sync_utils import (_dequeue_into_store, _queue_into_buffer, _
                                       _dequeuing_insert_remaining_rmcb, _dequeuing_delete_remaining_rmcb, _dequeuing_delete_remaining_buffer)
 from .helpers import create_dummy_store_data, create_buffer_and_store_dummy_data
 
+
 class FacilityModelFactory(factory.DjangoModelFactory):
 
     class Meta:
@@ -48,7 +49,7 @@ class QueueStoreIntoBufferTestCase(TestCase):
 
     def test_all_fsics(self):
         fsics = {self.data['group1_id'].id: 0, self.data['group2_id'].id: 0}
-        self.data['sc'].current_transfer_session.remote_fsic = json.dumps(fsics)
+        self.data['sc'].current_transfer_session.client_fsic = json.dumps(fsics)
         _queue_into_buffer(self.data['sc'].current_transfer_session)
         # ensure all store and buffer records are buffered
         self.assertRecordsBuffered(self.data['group1_c1'])
@@ -57,7 +58,7 @@ class QueueStoreIntoBufferTestCase(TestCase):
 
     def test_fsic_specific_id(self):
         fsics = {self.data['group2_id'].id: 0}
-        self.data['sc'].current_transfer_session.remote_fsic = json.dumps(fsics)
+        self.data['sc'].current_transfer_session.client_fsic = json.dumps(fsics)
         _queue_into_buffer(self.data['sc'].current_transfer_session)
         # ensure only records modified with 2nd instance id are buffered
         self.assertRecordsNotBuffered(self.data['group1_c1'])
@@ -67,7 +68,9 @@ class QueueStoreIntoBufferTestCase(TestCase):
     def test_fsic_counters(self):
         counter = InstanceIDModel.objects.get(id=self.data['group1_id'].id).counter
         fsics = {self.data['group1_id'].id: counter - 1}
-        self.data['sc'].current_transfer_session.remote_fsic = json.dumps(fsics)
+        self.data['sc'].current_transfer_session.client_fsic = json.dumps(fsics)
+        fsics[self.data['group1_id'].id] = 0
+        self.data['sc'].current_transfer_session.server_fsic = json.dumps(fsics)
         _queue_into_buffer(self.data['sc'].current_transfer_session)
         # ensure only records with updated 1st instance id are buffered
         self.assertRecordsNotBuffered(self.data['group1_c1'])
@@ -76,15 +79,18 @@ class QueueStoreIntoBufferTestCase(TestCase):
 
     def test_fsic_counters_too_high(self):
         fsics = {self.data['group1_id'].id: 100, self.data['group2_id'].id: 100}
-        self.data['sc'].current_transfer_session.remote_fsic = json.dumps(fsics)
+        self.data['sc'].current_transfer_session.client_fsic = json.dumps(fsics)
+        self.data['sc'].current_transfer_session.server_fsic = json.dumps(fsics)
         _queue_into_buffer(self.data['sc'].current_transfer_session)
         # ensure no records are buffered
         self.assertFalse(Buffer.objects.all())
         self.assertFalse(RecordMaxCounterBuffer.objects.all())
 
     def test_partition_filter_buffering(self):
+        fsics = {self.data['group2_id'].id: 0}
         filter_prefixes = '{}:user:summary\n{}:user:interaction'.format(self.data['user3'].id, self.data['user3'].id)
         self.data['sc'].current_transfer_session.filter = filter_prefixes
+        self.data['sc'].current_transfer_session.client_fsic = json.dumps(fsics)
         _queue_into_buffer(self.data['sc'].current_transfer_session)
         # ensure records with different partition values are buffered
         self.assertRecordsNotBuffered([self.data['user2']])
@@ -92,8 +98,10 @@ class QueueStoreIntoBufferTestCase(TestCase):
         self.assertRecordsBuffered(self.data['user3_interlogs'])
 
     def test_partition_prefix_buffering(self):
+        fsics = {self.data['group2_id'].id: 0}
         filter_prefixes = '{}'.format(self.data['user2'].id)
         self.data['sc'].current_transfer_session.filter = filter_prefixes
+        self.data['sc'].current_transfer_session.client_fsic = json.dumps(fsics)
         _queue_into_buffer(self.data['sc'].current_transfer_session)
         # ensure only records with user2 partition are buffered
         self.assertRecordsBuffered([self.data['user2']])
@@ -105,7 +113,7 @@ class QueueStoreIntoBufferTestCase(TestCase):
         filter_prefixes = '{}:user:summary'.format(self.data['user1'].id)
         fsics = {self.data['group1_id'].id: 1}
         self.data['sc'].current_transfer_session.filter = filter_prefixes
-        self.data['sc'].current_transfer_session.remote_fsic = json.dumps(fsics)
+        self.data['sc'].current_transfer_session.client_fsic = json.dumps(fsics)
         _queue_into_buffer(self.data['sc'].current_transfer_session)
         # ensure records updated with 1st instance id and summarylog partition are buffered
         self.assertRecordsBuffered(self.data['user1_sumlogs'])
@@ -116,7 +124,7 @@ class QueueStoreIntoBufferTestCase(TestCase):
         filter_prefixes = '{}:user:summary'.format(self.data['user1'].id)
         fsics = {self.data['group2_id'].id: 1}
         self.data['sc'].current_transfer_session.filter = filter_prefixes
-        self.data['sc'].current_transfer_session.remote_fsic = json.dumps(fsics)
+        self.data['sc'].current_transfer_session.client_fsic = json.dumps(fsics)
         _queue_into_buffer(self.data['sc'].current_transfer_session)
         # ensure that record with valid fsic but invalid partition is not buffered
         self.assertRecordsNotBuffered([self.data['user4']])

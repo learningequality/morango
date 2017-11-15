@@ -120,9 +120,9 @@ class SyncSessionViewSet(viewsets.ModelViewSet):
         instance_id, _ = models.InstanceIDModel.get_or_create_current_instance()
 
         # attempt to extract the local IP from the request host
-        local_ip = request.META.get('SERVER_NAME', '')
+        server_ip = request.META.get('SERVER_NAME', '')
         try:
-            local_ip = socket.gethostbyname(local_ip)
+            server_ip = socket.gethostbyname(server_ip)
         except:
             pass
 
@@ -140,15 +140,15 @@ class SyncSessionViewSet(viewsets.ModelViewSet):
 
         # attempt to load the requested certificates
         try:
-            local_cert = models.Certificate.objects.get(id=request.data.get("server_certificate_id"))
-            remote_cert = models.Certificate.objects.get(id=request.data.get("client_certificate_id"))
+            server_cert = models.Certificate.objects.get(id=request.data.get("server_certificate_id"))
+            client_cert = models.Certificate.objects.get(id=request.data.get("client_certificate_id"))
         except models.Certificate.DoesNotExist:
             return response.Response(
                 "Requested certificate does not exist!",
                 status=status.HTTP_400_BAD_REQUEST
             )
 
-        if local_cert.profile != remote_cert.profile:
+        if server_cert.profile != client_cert.profile:
             return response.Response(
                 "Certificates must both be associated with the same profile",
                 status=status.HTTP_400_BAD_REQUEST
@@ -156,7 +156,7 @@ class SyncSessionViewSet(viewsets.ModelViewSet):
 
         # check that the nonce/id were properly signed
         message = "{nonce}:{id}".format(nonce=request.data.get('nonce'), id=request.data.get('id'))
-        if not remote_cert.verify(message, request.data["signature"]):
+        if not client_cert.verify(message, request.data["signature"]):
             return response.Response(
                 "Client certificate failed to verify signature",
                 status=status.HTTP_403_FORBIDDEN
@@ -178,15 +178,15 @@ class SyncSessionViewSet(viewsets.ModelViewSet):
             "last_activity_timestamp": timezone.now(),
             "active": True,
             "is_server": True,
-            "local_certificate": local_cert,
-            "remote_certificate": remote_cert,
-            "profile": local_cert.profile,
+            "client_certificate": client_cert,
+            "server_certificate": server_cert,
+            "profile": server_cert.profile,
             "connection_kind": "network",
             "connection_path": request.data.get("connection_path"),
-            "local_ip": local_ip,
-            "remote_ip": get_ip(request),
-            "local_instance": json.dumps(serializers.InstanceIDSerializer(instance_id).data),
-            "remote_instance": request.data.get("instance"),
+            "client_ip": get_ip(request),
+            "server_ip": server_ip,
+            "client_instance": request.data.get("instance"),
+            "server_instance": json.dumps(serializers.InstanceIDSerializer(instance_id).data),
         }
 
         syncsession = models.SyncSession(**data)
@@ -194,12 +194,11 @@ class SyncSessionViewSet(viewsets.ModelViewSet):
         syncsession.save()
 
         resp_data = {
-            "signature": local_cert.sign(message),
-            "local_instance": data["local_instance"]
+            "signature": server_cert.sign(message),
+            "server_instance": data["server_instance"]
         }
 
         return response.Response(
-            # serializers.SyncSessionSerializer(syncsession).data,
             resp_data,
             status=status.HTTP_201_CREATED,
         )
@@ -233,17 +232,17 @@ class TransferSessionViewSet(viewsets.ModelViewSet):
         # check that the requested filter is within the appropriate certificate scopes
         scope_error_msg = None
         requested_filter = certificates.Filter(request.data.get("filter"))
-        remote_scope = syncsession.remote_certificate.get_scope()
-        local_scope = syncsession.local_certificate.get_scope()
+        server_scope = syncsession.server_certificate.get_scope()
+        client_scope = syncsession.client_certificate.get_scope()
         if is_a_push:
-            if not requested_filter.is_subset_of(remote_scope.write_filter):
+            if not requested_filter.is_subset_of(client_scope.write_filter):
                 scope_error_msg = "Client certificate scope does not permit pushing for the requested filter."
-            if not requested_filter.is_subset_of(local_scope.read_filter):
+            if not requested_filter.is_subset_of(server_scope.read_filter):
                 scope_error_msg = "Server certificate scope does not permit receiving pushes for the requested filter."
         else:
-            if not requested_filter.is_subset_of(remote_scope.read_filter):
+            if not requested_filter.is_subset_of(client_scope.read_filter):
                 scope_error_msg = "Client certificate scope does not permit pulling for the requested filter."
-            if not requested_filter.is_subset_of(local_scope.write_filter):
+            if not requested_filter.is_subset_of(server_scope.write_filter):
                 scope_error_msg = "Server certificate scope does not permit responding to pulls for the requested filter."
         if scope_error_msg:
             return response.Response(
@@ -286,10 +285,8 @@ class TransferSessionViewSet(viewsets.ModelViewSet):
             # update records_total on transfer session object
             records_total = Buffer.objects.filter(transfer_session=transfersession).count()
             transfersession.records_total = records_total
+            transfersession.save()
 
-        fsics = DatabaseMaxCounter.calculate_filter_max_counters(requested_filter)
-        transfersession.local_fsic = json.dumps(fsics)
-        transfersession.save()
         return response.Response(
             serializers.TransferSessionSerializer(transfersession).data,
             status=status.HTTP_201_CREATED,

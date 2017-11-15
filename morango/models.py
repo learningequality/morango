@@ -144,8 +144,8 @@ class SyncSession(models.Model):
     is_server = models.BooleanField(default=False)
 
     # track the certificates being used by each side for this session
-    local_certificate = models.ForeignKey(Certificate, blank=True, null=True, related_name="syncsessions_local")
-    remote_certificate = models.ForeignKey(Certificate, blank=True, null=True, related_name="syncsessions_remote")
+    client_certificate = models.ForeignKey(Certificate, blank=True, null=True, related_name="syncsessions_client")
+    server_certificate = models.ForeignKey(Certificate, blank=True, null=True, related_name="syncsessions_server")
 
     # track the morango profile this sync session is happening for
     profile = models.CharField(max_length=40)
@@ -155,12 +155,12 @@ class SyncSession(models.Model):
     connection_path = models.CharField(max_length=1000)  # file path if kind=disk, and base URL of server if kind=network
 
     # for network connections, keep track of the IPs on either end
-    local_ip = models.CharField(max_length=100, blank=True)
-    remote_ip = models.CharField(max_length=100, blank=True)
+    client_ip = models.CharField(max_length=100, blank=True)
+    server_ip = models.CharField(max_length=100, blank=True)
 
     # serialized copies of the client and server instance model fields, for debugging/tracking purposes
-    local_instance = models.TextField(default=u"{}")
-    remote_instance = models.TextField(default=u"{}")
+    client_instance = models.TextField(default=u"{}")
+    server_instance = models.TextField(default=u"{}")
 
 
 class TransferSession(models.Model):
@@ -182,8 +182,8 @@ class TransferSession(models.Model):
     last_activity_timestamp = models.DateTimeField(blank=True)
 
     # we keep track of FSICs for both client and server
-    local_fsic = models.TextField(blank=True, default="{}")
-    remote_fsic = models.TextField(blank=True, default="{}")
+    client_fsic = models.TextField(blank=True, default="{}")
+    server_fsic = models.TextField(blank=True, default="{}")
 
     def get_filter(self):
         return Filter(self.filter)
