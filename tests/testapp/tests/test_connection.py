@@ -9,14 +9,15 @@ from morango.api.serializers import CertificateSerializer, BufferSerializer
 from morango.certificates import Certificate, ScopeDefinition, Key
 from morango.controller import MorangoProfileController
 from morango.errors import CertificateSignatureInvalid
-from morango.models import Buffer, SyncSession, TransferSession
+from morango.models import Buffer, SyncSession, TransferSession, InstanceIDModel
 from morango.syncsession import NetworkSyncConnection, SyncClient
 
 
 def mock_patch_decorator(func):
 
     def wrapper(*args, **kwargs):
-        mock_object = mock.Mock(content=b"""{"id": "abc"}""", data={'signature': 'sig', 'client_fsic': '{}'})
+        mock_object = mock.Mock(content=b"""{"id": "abc"}""", data={'signature': 'sig', 'client_fsic': '{}', 'server_fsic': '{}'})
+        mock_object.json.return_value = {}
         with mock.patch.object(NetworkSyncConnection, '_request', return_value=mock_object):
             with mock.patch.object(Certificate, 'verify', return_value=True):
                     return func(*args, **kwargs)
@@ -126,6 +127,7 @@ class SyncClientTestCase(TestCase):
         self.syncclient = SyncClient(conn, session)
         self.syncclient.current_transfer_session = transfer_session
         self.chunk_size = 3
+        InstanceIDModel.get_or_create_current_instance()
 
     def build_buffer_items(self, transfer_session, **kwargs):
 
@@ -162,7 +164,7 @@ class SyncClientTestCase(TestCase):
     @mock_patch_decorator
     def test_pull_records(self):
         resp = self.build_buffer_items(self.syncclient.current_transfer_session)
-        NetworkSyncConnection._request.return_value = mock.Mock(content=resp.encode())
+        NetworkSyncConnection._request.return_value.json.return_value = json.loads(resp)
         Buffer.objects.filter(transfer_session=self.syncclient.current_transfer_session).delete()
         self.assertEqual(Buffer.objects.filter(transfer_session=self.syncclient.current_transfer_session).count(), 0)
         self.assertEqual(self.syncclient.current_transfer_session.records_transferred, 0)
@@ -187,5 +189,6 @@ class SyncClientTestCase(TestCase):
     @mock_patch_decorator
     def test_close_sync_session(self):
         self.assertEqual(SyncSession.objects.filter(active=True).count(), 1)
+        self.syncclient._close_transfer_session()
         self.syncclient.close_sync_session()
         self.assertEqual(SyncSession.objects.filter(active=True).count(), 0)

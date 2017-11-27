@@ -4,4 +4,4 @@ recursive-include requirements *.txt
 recursive-exclude * __pycache__
 recursive-exclude * *.py[co]
 
-recursive-include conf.py Makefile make.bat *.jpg *.png *.gif
+recursive-include conf.py *.jpg *.png *.gif

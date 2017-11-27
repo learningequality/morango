@@ -294,6 +294,8 @@ class SyncClient(object):
         self.sync_connection._close_sync_session(self.sync_session)
 
         # "delete" our own local sync session
+        if self.current_transfer_session is not None:
+            raise MorangoError('Transfer Session must be closed before closing sync session.')
         self.sync_session.active = False
         self.sync_session.save()
         self.sync_session = None
@@ -303,7 +305,7 @@ class SyncClient(object):
         # build data for creating transfer session on server side
         data = {
             'id': uuid.uuid4().hex,
-            'filter': filter.__str__(),
+            'filter': str(filter),
             'push': push,
             'sync_session_id': self.sync_session.id,
         }

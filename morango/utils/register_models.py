@@ -39,8 +39,8 @@ def _insert_model_into_profile_dict(model, profile):
     foreign_key_classes = _get_foreign_key_classes(model)
 
     # add any more specified dependencies
-    if hasattr(model, '_morango_model_dependencies'):
-        foreign_key_classes = foreign_key_classes | set(model._morango_model_dependencies)
+    if hasattr(model, 'morango_model_dependencies'):
+        foreign_key_classes = foreign_key_classes | set(model.morango_model_dependencies)
 
     # Find all the existing models that this new model refers to.
     class_indices = [_profile_models[profile].index(cls) for cls in foreign_key_classes if cls in _profile_models[profile]]

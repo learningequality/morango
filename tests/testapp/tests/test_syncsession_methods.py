@@ -73,7 +73,7 @@ class QueueStoreIntoBufferTestCase(TestCase):
         self.data['sc'].current_transfer_session.server_fsic = json.dumps(fsics)
         _queue_into_buffer(self.data['sc'].current_transfer_session)
         # ensure only records with updated 1st instance id are buffered
-        self.assertRecordsNotBuffered(self.data['group1_c1'])
+        self.assertRecordsBuffered(self.data['group1_c1'])
         self.assertRecordsBuffered(self.data['group1_c2'])
         self.assertRecordsNotBuffered(self.data['group2_c1'])
 
