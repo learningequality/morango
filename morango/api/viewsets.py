@@ -1,5 +1,4 @@
 import json
-import socket
 import uuid
 
 from django.conf import settings
@@ -119,13 +118,6 @@ class SyncSessionViewSet(viewsets.ModelViewSet):
 
         instance_id, _ = models.InstanceIDModel.get_or_create_current_instance()
 
-        # attempt to extract the local IP from the request host
-        server_ip = request.META.get('SERVER_NAME', '')
-        try:
-            server_ip = socket.gethostbyname(server_ip)
-        except:
-            pass
-
         # verify and save the certificate chain to our cert store
         try:
             models.Certificate.save_certificate_chain(
@@ -183,8 +175,8 @@ class SyncSessionViewSet(viewsets.ModelViewSet):
             "profile": server_cert.profile,
             "connection_kind": "network",
             "connection_path": request.data.get("connection_path"),
-            "client_ip": get_ip(request),
-            "server_ip": server_ip,
+            "client_ip": get_ip(request) or '',
+            "server_ip": request.data.get('server_ip') or '',
             "client_instance": request.data.get("instance"),
             "server_instance": json.dumps(serializers.InstanceIDSerializer(instance_id).data),
         }

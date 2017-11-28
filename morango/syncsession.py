@@ -21,13 +21,23 @@ def _join_with_logical_operator(lst, operator):
     op = ") {operator} (".format(operator=operator)
     return "(({items}))".format(items=op.join(lst))
 
-
-def _get_ip(url):
+def _get_server_ip(url):
     try:
-        o = urlparse(url)
-        return socket.gethostbyname(o.netloc.split(":")[0])
+        return socket.gethostbyname(url)
     except:
-        return ""
+        return ''
+
+def _get_client_ip_for_server(server_host, server_port):
+    server_port = server_port if server_port else 80
+    s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    try:
+        s.connect((server_host, server_port))
+        IP = s.getsockname()[0]
+    except:
+        IP = '127.0.0.1'
+    finally:
+        s.close()
+    return IP
 
 
 class Connection(object):
@@ -83,6 +93,9 @@ class NetworkSyncConnection(Connection):
         nonce_resp = self._request(api_urls.NONCE, method="POST")
         nonce = json.loads(nonce_resp.content.decode())["id"]
 
+        # if no hostname then url is actually an ip
+        url = urlparse(self.base_url)
+        hostname = url.hostname or self.base_url
         # prepare the data to send in the syncsession creation request
         data = {
             "id": uuid.uuid4().hex,
@@ -93,6 +106,8 @@ class NetworkSyncConnection(Connection):
             "connection_path": self.base_url,
             "instance": json.dumps(InstanceIDSerializer(InstanceIDModel.get_or_create_current_instance()[0]).data),
             "nonce": nonce,
+            "client_ip": _get_client_ip_for_server(hostname, url.port),
+            "server_ip": _get_server_ip(self.base_url),
         }
 
         # sign the nonce/ID combo to attach to the request
@@ -118,8 +133,8 @@ class NetworkSyncConnection(Connection):
             "profile": client_cert.profile,
             "connection_kind": "network",
             "connection_path": self.base_url,
-            "client_ip": _get_ip(socket.gethostname()),
-            "server_ip": _get_ip(self.base_url),
+            "client_ip": data['client_ip'],
+            "server_ip": data['server_ip'],
             "client_instance": json.dumps(InstanceIDSerializer(InstanceIDModel.get_or_create_current_instance()[0]).data),
             "server_instance": session_resp.json().get("server_instance") or "{}",
         }
@@ -322,6 +337,8 @@ class SyncClient(object):
         data['client_fsic'] = json.dumps(DatabaseMaxCounter.calculate_filter_max_counters(filter))
         self.current_transfer_session.client_fsic = data['client_fsic']
 
+        # save transfersession locally before creating transfersession server side
+        self.current_transfer_session.save()
         # create transfer session on server side
         transfer_resp = self.sync_connection._create_transfer_session(data)
 
