@@ -3,6 +3,7 @@ import uuid
 
 from django.conf import settings
 from django.core.exceptions import ValidationError
+from django.db import transaction
 from django.utils import timezone
 from django.utils.six import iteritems
 from ipware.ip import get_ip
@@ -263,7 +264,7 @@ class TransferSessionViewSet(viewsets.ModelViewSet):
         # must update database max counters before calculating fsics
         if not is_a_push:
 
-            if getattr(settings, 'SERIALIZE_BEFORE_QUEUING', True):
+            if getattr(settings, 'MORANGO_SERIALIZE_BEFORE_QUEUING', True):
                 _serialize_into_store(transfersession.sync_session.profile, filter=requested_filter)
 
         transfersession.server_fsic = json.dumps(DatabaseMaxCounter.calculate_filter_max_counters(requested_filter))
@@ -288,10 +289,12 @@ class TransferSessionViewSet(viewsets.ModelViewSet):
         if transfersession.push:
             # dequeue into store and then delete records
             _dequeue_into_store(transfersession)
-            # update database max counters
-            DatabaseMaxCounter.update_fsics(json.loads(transfersession.client_fsic),
-                                            json.loads(transfersession.server_fsic),
-                                            certificates.Filter(transfersession.filter))
+            # update database max counters but use latest fsics on server
+            with transaction.atomic():
+                server_fsic = DatabaseMaxCounter.calculate_filter_max_counters(Filter(transfersession.filter))
+                DatabaseMaxCounter.update_fsics(json.loads(transfersession.client_fsic),
+                                                server_fsic,
+                                                certificates.Filter(transfersession.filter))
         else:
             # if pull, then delete records that were queued
             Buffer.objects.filter(transfer_session=transfersession).delete()

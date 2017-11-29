@@ -28,7 +28,7 @@ class FacilityModelFactory(factory.DjangoModelFactory):
 class QueueStoreIntoBufferTestCase(TestCase):
 
     def setUp(self):
-        settings.SERIALIZE_BEFORE_QUEUING = False
+        settings.MORANGO_SERIALIZE_BEFORE_QUEUING = False
         self.data = create_dummy_store_data()
 
     def assertRecordsBuffered(self, records):
@@ -133,7 +133,7 @@ class QueueStoreIntoBufferTestCase(TestCase):
 class BufferIntoStoreTestCase(TestCase):
 
     def setUp(self):
-        settings.DESERIALIZE_AFTER_DEQUEUING = False
+        settings.MORANGO_DESERIALIZE_AFTER_DEQUEUING = False
         self.data = {}
         DatabaseIDModel.objects.create()
         (self.current_id, _) = InstanceIDModel.get_or_create_current_instance()

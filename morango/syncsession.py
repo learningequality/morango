@@ -4,6 +4,7 @@ import socket
 import uuid
 
 from django.conf import settings
+from django.db import transaction
 from django.utils import timezone
 from django.utils.six import iteritems
 from morango.api.serializers import BufferSerializer, CertificateSerializer, InstanceIDSerializer
@@ -260,10 +261,12 @@ class SyncClient(object):
         self._pull_records()
         self._dequeue_into_store()
 
-        # update database max counters
-        DatabaseMaxCounter.update_fsics(json.loads(self.current_transfer_session.server_fsic),
-                                        json.loads(self.current_transfer_session.client_fsic),
-                                        sync_filter)
+        with transaction.atomic():
+            client_fsic = DatabaseMaxCounter.calculate_filter_max_counters(sync_filter)
+            # update database max counters but use latest fsics on client
+            DatabaseMaxCounter.update_fsics(json.loads(self.current_transfer_session.server_fsic),
+                                            client_fsic,
+                                            sync_filter)
 
         self._close_transfer_session()
 
@@ -331,7 +334,7 @@ class SyncClient(object):
 
         if push:
             # before pushing, we want to serialize the most recent data and update database max counters
-            if getattr(settings, 'SERIALIZE_BEFORE_QUEUING', True):
+            if getattr(settings, 'MORANGO_SERIALIZE_BEFORE_QUEUING', True):
                 _serialize_into_store(self.current_transfer_session.sync_session.profile, filter=Filter(self.current_transfer_session.filter))
 
         data['client_fsic'] = json.dumps(DatabaseMaxCounter.calculate_filter_max_counters(filter))

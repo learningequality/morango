@@ -26,19 +26,15 @@ def _self_referential_fk(klass_model):
     return None
 
 def _fsic_queuing_calc(fsic1, fsic2):
-    fsic_copy = dict(fsic1)
-    # fsic_copy = dict(fsic2)
-    for k, v in iteritems(fsic1):
-        if k in fsic2:
-            # we remove a (instance id, value) pair if the value is greater in the other fsic
-            if fsic2[k] >= fsic1[k]:
-                del fsic_copy[k]
-            else:
-                fsic_copy[k] = fsic2[k]
-        else:
-            # if instance id is not in other fsic, then zero out value
-            fsic_copy[k] = 0
-    return fsic_copy
+    """
+    We set the lower counter between two same instance ids.
+    If an instance_id exists in one fsic but not the other we want to give that counter a value of 0.
+
+    :param fsic1: dictionary containing (instance_id, counter) pairs
+    :param fsic2: dictionary containing (instance_id, counter) pairs
+    :return ``dict`` of fsics to be used in queueing the correct records to the buffer
+    """
+    return {instance: fsic2.get(instance, -1) for instance, counter in iteritems(fsic1) if fsic2.get(instance, -1) < counter}
 
 def _serialize_into_store(profile, filter=None):
     """
@@ -187,7 +183,7 @@ def _queue_into_buffer(transfersession):
     else:
         fsics = _fsic_queuing_calc(server_fsic, client_fsic)
 
-    # if fsics are identical, then there is nothing to queue
+    # if fsics are identical or receiving end has newer data, then there is nothing to queue
     if not fsics:
         return
 
@@ -454,5 +450,5 @@ def _dequeue_into_store(transfersession):
         _dequeuing_insert_remaining_rmcb(cursor, transfersession.id)
         _dequeuing_delete_remaining_rmcb(cursor, transfersession.id)
         _dequeuing_delete_remaining_buffer(cursor, transfersession.id)
-    if getattr(settings, 'DESERIALIZE_AFTER_DEQUEUING', True):
+    if getattr(settings, 'MORANGO_DESERIALIZE_AFTER_DEQUEUING', True):
         _deserialize_from_store(transfersession.sync_session.profile)
