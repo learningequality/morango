@@ -301,16 +301,18 @@ class DatabaseMaxCounter(AbstractCounter):
         unique_together = ("instance_id", "partition")
 
     @classmethod
-    def update_fsics(cls, fsic1, fsic2, sync_filter):
+    @transaction.atomic
+    def update_fsics(cls, fsics, sync_filter):
+        internal_fsic = DatabaseMaxCounter.calculate_filter_max_counters(sync_filter)
         updated_fsic = {}
-        for key, value in iteritems(fsic1):
-            if key in fsic2:
+        for key, value in iteritems(fsics):
+            if key in internal_fsic:
                 # if same instance id, update fsic with larger value
-                if fsic1[key] > fsic2[key]:
-                    updated_fsic[key] = fsic2[key]
+                if fsics[key] > internal_fsic[key]:
+                    updated_fsic[key] = fsics[key]
             else:
                 # if instance id is not present, add it to updated fsics
-                updated_fsic[key] = fsic1[key]
+                updated_fsic[key] = fsics[key]
 
         # load database max counters
         for (key, value) in iteritems(updated_fsic):

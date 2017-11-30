@@ -261,12 +261,9 @@ class SyncClient(object):
         self._pull_records()
         self._dequeue_into_store()
 
-        with transaction.atomic():
-            client_fsic = DatabaseMaxCounter.calculate_filter_max_counters(sync_filter)
-            # update database max counters but use latest fsics on client
-            DatabaseMaxCounter.update_fsics(json.loads(self.current_transfer_session.server_fsic),
-                                            client_fsic,
-                                            sync_filter)
+        # update database max counters but use latest fsics on client
+        DatabaseMaxCounter.update_fsics(json.loads(self.current_transfer_session.server_fsic),
+                                        sync_filter)
 
         self._close_transfer_session()
 

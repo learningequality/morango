@@ -290,11 +290,8 @@ class TransferSessionViewSet(viewsets.ModelViewSet):
             # dequeue into store and then delete records
             _dequeue_into_store(transfersession)
             # update database max counters but use latest fsics on server
-            with transaction.atomic():
-                server_fsic = DatabaseMaxCounter.calculate_filter_max_counters(Filter(transfersession.filter))
-                DatabaseMaxCounter.update_fsics(json.loads(transfersession.client_fsic),
-                                                server_fsic,
-                                                certificates.Filter(transfersession.filter))
+            DatabaseMaxCounter.update_fsics(json.loads(transfersession.client_fsic),
+                                            certificates.Filter(transfersession.filter))
         else:
             # if pull, then delete records that were queued
             Buffer.objects.filter(transfer_session=transfersession).delete()
