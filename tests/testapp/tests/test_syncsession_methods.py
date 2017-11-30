@@ -48,7 +48,7 @@ class QueueStoreIntoBufferTestCase(TestCase):
             self.assertNotIn(i.id, rmcb_ids)
 
     def test_all_fsics(self):
-        fsics = {self.data['group1_id'].id: 0, self.data['group2_id'].id: 0}
+        fsics = {self.data['group1_id'].id: 1, self.data['group2_id'].id: 1}
         self.data['sc'].current_transfer_session.client_fsic = json.dumps(fsics)
         _queue_into_buffer(self.data['sc'].current_transfer_session)
         # ensure all store and buffer records are buffered
@@ -57,7 +57,7 @@ class QueueStoreIntoBufferTestCase(TestCase):
         self.assertRecordsBuffered(self.data['group2_c1'])
 
     def test_fsic_specific_id(self):
-        fsics = {self.data['group2_id'].id: 0}
+        fsics = {self.data['group2_id'].id: 1}
         self.data['sc'].current_transfer_session.client_fsic = json.dumps(fsics)
         _queue_into_buffer(self.data['sc'].current_transfer_session)
         # ensure only records modified with 2nd instance id are buffered
@@ -87,7 +87,7 @@ class QueueStoreIntoBufferTestCase(TestCase):
         self.assertFalse(RecordMaxCounterBuffer.objects.all())
 
     def test_partition_filter_buffering(self):
-        fsics = {self.data['group2_id'].id: 0}
+        fsics = {self.data['group2_id'].id: 1}
         filter_prefixes = '{}:user:summary\n{}:user:interaction'.format(self.data['user3'].id, self.data['user3'].id)
         self.data['sc'].current_transfer_session.filter = filter_prefixes
         self.data['sc'].current_transfer_session.client_fsic = json.dumps(fsics)
@@ -98,7 +98,7 @@ class QueueStoreIntoBufferTestCase(TestCase):
         self.assertRecordsBuffered(self.data['user3_interlogs'])
 
     def test_partition_prefix_buffering(self):
-        fsics = {self.data['group2_id'].id: 0}
+        fsics = {self.data['group2_id'].id: 1}
         filter_prefixes = '{}'.format(self.data['user2'].id)
         self.data['sc'].current_transfer_session.filter = filter_prefixes
         self.data['sc'].current_transfer_session.client_fsic = json.dumps(fsics)

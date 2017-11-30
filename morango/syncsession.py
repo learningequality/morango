@@ -22,14 +22,13 @@ def _join_with_logical_operator(lst, operator):
     op = ") {operator} (".format(operator=operator)
     return "(({items}))".format(items=op.join(lst))
 
-def _get_server_ip(url):
+def _get_server_ip(hostname):
     try:
-        return socket.gethostbyname(url)
+        return socket.gethostbyname(hostname)
     except:
         return ''
 
 def _get_client_ip_for_server(server_host, server_port):
-    server_port = server_port if server_port else 80
     s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     try:
         s.connect((server_host, server_port))
@@ -97,6 +96,7 @@ class NetworkSyncConnection(Connection):
         # if no hostname then url is actually an ip
         url = urlparse(self.base_url)
         hostname = url.hostname or self.base_url
+        port = url.port or (80 if url.scheme == 'http' else 443)
         # prepare the data to send in the syncsession creation request
         data = {
             "id": uuid.uuid4().hex,
@@ -107,8 +107,8 @@ class NetworkSyncConnection(Connection):
             "connection_path": self.base_url,
             "instance": json.dumps(InstanceIDSerializer(InstanceIDModel.get_or_create_current_instance()[0]).data),
             "nonce": nonce,
-            "client_ip": _get_client_ip_for_server(hostname, url.port),
-            "server_ip": _get_server_ip(self.base_url),
+            "client_ip": _get_client_ip_for_server(hostname, port),
+            "server_ip": _get_server_ip(hostname),
         }
 
         # sign the nonce/ID combo to attach to the request

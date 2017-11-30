@@ -34,7 +34,7 @@ def _fsic_queuing_calc(fsic1, fsic2):
     :param fsic2: dictionary containing (instance_id, counter) pairs
     :return ``dict`` of fsics to be used in queueing the correct records to the buffer
     """
-    return {instance: fsic2.get(instance, -1) for instance, counter in iteritems(fsic1) if fsic2.get(instance, -1) < counter}
+    return {instance: fsic2.get(instance, 0) for instance, counter in iteritems(fsic1) if fsic2.get(instance, 0) < counter}
 
 def _serialize_into_store(profile, filter=None):
     """

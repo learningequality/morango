@@ -66,9 +66,10 @@ def create_dummy_store_data():
     session = SyncSession.objects.create(id=uuid.uuid4().hex, profile="facilitydata", last_activity_timestamp=timezone.now())
     data['sc'].current_transfer_session = TransferSession.objects.create(id=uuid.uuid4().hex, sync_session=session, push=True, last_activity_timestamp=timezone.now())
 
+    data['mc'].serialize_into_store()  # counter is at 1
     # create group of facilities and first serialization
     data['group1_c1'] = [FacilityFactory() for _ in range(5)]
-    data['mc'].serialize_into_store()  # counter is at 1
+    data['mc'].serialize_into_store()  # counter is at 2
 
     # create group of facilities and second serialization
     data['group1_c2'] = [FacilityFactory() for _ in range(5)]
@@ -77,11 +78,13 @@ def create_dummy_store_data():
     data['user1'] = MyUser.objects.create(username='bob')
     data['user1_sumlogs'] = [SummaryLog.objects.create(user=data['user1']) for _ in range(5)]
 
-    data['mc'].serialize_into_store()  # counter is at 2
+    data['mc'].serialize_into_store()  # counter is at 3
 
     # create new instance id and group of facilities
     with mock.patch('platform.platform', return_value='plataforma'):
         (data['group2_id'], _) = InstanceIDModel.get_or_create_current_instance()  # new counter is at 0
+
+    data['mc'].serialize_into_store()  # new counter is at 1
     data['group2_c1'] = [FacilityFactory() for _ in range(5)]
 
     # create users and logs associated with user
@@ -93,10 +96,10 @@ def create_dummy_store_data():
     data['user3_sumlogs'] = [SummaryLog.objects.create(user=data['user3']) for _ in range(5)]
     data['user3_interlogs'] = [InteractionLog.objects.create(user=data['user3']) for _ in range(5)]
 
-    data['mc'].serialize_into_store()  # new counter is at 1
+    data['mc'].serialize_into_store()  # new counter is at 2
 
     data['user4'] = MyUser.objects.create(username='invalid', _morango_partition='badpartition')
-    data['mc'].serialize_into_store()  # new counter is at 2
+    data['mc'].serialize_into_store()  # new counter is at 3
 
     return data
 
