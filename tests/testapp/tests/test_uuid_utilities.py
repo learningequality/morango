@@ -62,6 +62,20 @@ class InstanceIDModelTestCase(TestCase):
             InstanceIDModel.get_or_create_current_instance()
         self.assertEqual(len(InstanceIDModel.objects.filter(current=True)), 1)
 
+    def test_same_node_id(self):
+        with mock.patch('uuid.getnode', return_value=67002173923623):  # fake (random) address
+            (IDModel, _) = InstanceIDModel.get_or_create_current_instance()
+            ident = IDModel.id
+
+        with mock.patch('uuid.getnode', return_value=69002173923623):  # fake (random) address
+            (IDModel, _) = InstanceIDModel.get_or_create_current_instance()
+
+        with mock.patch('uuid.getnode', return_value=67002173923623):  # fake (random) address
+            (IDModel, _) = InstanceIDModel.get_or_create_current_instance()
+
+        self.assertFalse(InstanceIDModel.objects.exclude(id=ident).filter(current=True).exists())
+        self.assertTrue(InstanceIDModel.objects.get(id=ident).current)
+
 
 class DatabaseIDModelTestCase(TestCase):
 
