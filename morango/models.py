@@ -378,7 +378,7 @@ class SyncableModel(UUIDModelMixin):
     ID_PLACEHOLDER = "${id}"
 
     _morango_internal_fields_not_to_serialize = ('_morango_dirty_bit',)
-    _morango_model_dependencies = ()
+    morango_model_dependencies = ()
     morango_fields_not_to_serialize = ()
     morango_profile = None
 
@@ -407,11 +407,12 @@ class SyncableModel(UUIDModelMixin):
             self._morango_dirty_bit = False
         super(SyncableModel, self).save(*args, **kwargs)
 
-    def serialize(self):
+    def serialize(self, data={}):
         """All concrete fields of the ``SyncableModel`` subclass, except for those specifically blacklisted, are returned in a dict."""
         # NOTE: code adapted from https://github.com/django/django/blob/master/django/forms/models.py#L75
         opts = self._meta
-        data = {}
+        if not data:
+            data = {}
 
         for f in opts.concrete_fields:
             if f.attname in self.morango_fields_not_to_serialize:
@@ -421,15 +422,16 @@ class SyncableModel(UUIDModelMixin):
             # case if model is morango mptt
             if f.attname in getattr(self, '_internal_mptt_fields_not_to_serialize', '_internal_fields_not_to_serialize'):
                 continue
+            if f.attname in data:
+                continue
             data[f.attname] = f.value_from_object(self)
         return data
 
     @classmethod
-    def deserialize(cls, dict_model):
+    def deserialize(cls, dict_model, **kwargs):
         """Returns an unsaved class object based on the valid properties passed in."""
-        kwargs = {}
         for f in cls._meta.concrete_fields:
-            if f.attname in dict_model:
+            if f.attname in dict_model and f.attname not in kwargs:
                 kwargs[f.attname] = dict_model[f.attname]
         return cls(**kwargs)
 

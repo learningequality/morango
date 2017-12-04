@@ -79,7 +79,7 @@ class NetworkSyncConnection(Connection):
         if lookup:
             lookup = lookup + '/'
         url = urljoin(urljoin(self.base_url, endpoint), lookup)
-        auth = (userargs, password) if userargs is None else None
+        auth = (userargs, password) if userargs else None
         resp = requests.request(method, url, json=data, params=params, auth=auth)
         resp.raise_for_status()
         return resp
@@ -342,9 +342,9 @@ class SyncClient(object):
         # create transfer session on server side
         transfer_resp = self.sync_connection._create_transfer_session(data)
 
-        self.current_transfer_session.server_fsic = transfer_resp.data.get('server_fsic') or '{}'
+        self.current_transfer_session.server_fsic = transfer_resp.json().get('server_fsic') or '{}'
         if not push:
-            self.current_transfer_session.records_total = transfer_resp.data.get('records_total')
+            self.current_transfer_session.records_total = transfer_resp.json().get('records_total')
         self.current_transfer_session.save()
 
     def _close_transfer_session(self):
