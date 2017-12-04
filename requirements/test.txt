@@ -6,4 +6,3 @@ mock
 pytest
 pytest-cov
 pytest-django
-cryptography
