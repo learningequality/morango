@@ -113,7 +113,7 @@ class Migration(migrations.Migration):
         migrations.AddField(
             model_name='syncsession',
             name='connection_kind',
-            field=models.CharField(choices=[('network', 'Network'), ('disk', 'Disk')], default=datetime.datetime(2017, 10, 18, 21, 15, 12, 858664, tzinfo=utc), max_length=10),
+            field=models.CharField(choices=[('network', 'Network'), ('disk', 'Disk')], default='', max_length=10),
             preserve_default=False,
         ),
         migrations.AddField(
