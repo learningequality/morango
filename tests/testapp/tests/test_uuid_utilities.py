@@ -53,7 +53,7 @@ class InstanceIDModelTestCase(TestCase):
             with mock.patch('uuid.getnode', return_value=9999999999999):  # fake (random) address
                 (IDModel, _) = InstanceIDModel.get_or_create_current_instance()
         self.assertEqual(InstanceIDModel.objects.count(), 2)
-        self.assertEqual(IDModel.macaddress, '')  # assert that macaddress was not added
+        self.assertEqual(IDModel.node_id, '')  # assert that node id was not added
         self.assertEqual(IDModel.id, InstanceIDModel.objects.get(current=True).id)
 
     def test_only_one_current_instance_ID(self):

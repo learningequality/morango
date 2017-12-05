@@ -1,4 +1,5 @@
 import json
+import hashlib
 import os
 import platform
 import sys
@@ -73,12 +74,12 @@ class InstanceIDModel(UUIDModelMixin):
     as well as its counter with all the records that were serialized at the time.
     """
 
-    uuid_input_fields = ("platform", "hostname", "sysversion", "macaddress", "database_id", "db_path", "system_id")
+    uuid_input_fields = ("platform", "hostname", "sysversion", "node_id", "database_id", "db_path", "system_id")
 
     platform = models.TextField()
     hostname = models.TextField()
     sysversion = models.TextField()
-    macaddress = models.CharField(max_length=20, blank=True)
+    node_id = models.CharField(max_length=20, blank=True)
     database = models.ForeignKey(DatabaseIDModel)
     counter = models.IntegerField(default=0)
     current = models.BooleanField(default=True)
@@ -108,9 +109,10 @@ class InstanceIDModel(UUIDModelMixin):
         # try to get the MAC address, but exclude it if it was a fake (random) address
         mac = uuid.getnode()
         if (mac >> 40) % 2 == 0:  # 8th bit (of 48 bits, from left) is 1 if MAC is fake
-            kwargs["macaddress"] = mac
+            hashable_identifier = "{}:{}".format(kwargs['database'].id, mac)
+            kwargs["node_id"] = hashlib.sha1(hashable_identifier).hexdigest()[:20]
         else:
-            kwargs["macaddress"] = ""
+            kwargs["node_id"] = ""
 
         # do within transaction so we only ever have 1 current instance ID
         with transaction.atomic():

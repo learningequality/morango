@@ -52,7 +52,7 @@ class InstanceIDSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = InstanceIDModel
-        fields = ('id', 'platform', 'hostname', 'sysversion', 'macaddress', 'database', 'db_path', 'system_id')
+        fields = ('id', 'platform', 'hostname', 'sysversion', 'node_id', 'database', 'db_path', 'system_id')
         read_only_fields = fields
 
 
