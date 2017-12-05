@@ -401,8 +401,8 @@ class SyncSessionEndpointTestCase(CertificateTestCaseMixin, APITestCase):
         # check that the syncsession was created
         syncsession = SyncSession.objects.get()
         self.assertEqual(syncsession.id, data["id"])
-        self.assertEqual(syncsession.remote_certificate_id, data["client_certificate_id"])
-        self.assertEqual(syncsession.local_certificate_id, data["server_certificate_id"])
+        self.assertEqual(syncsession.server_certificate_id, data["server_certificate_id"])
+        self.assertEqual(syncsession.client_certificate_id, data["client_certificate_id"])
         self.assertTrue(syncsession.active)
 
     def test_syncsession_creation_fails_with_bad_signature(self):
@@ -604,11 +604,11 @@ class BufferEndpointTestCase(CertificateTestCaseMixin, APITestCase):
             t_sess_id = json.loads(t_sess_req.content.decode())["id"]
             kwargs["transfer_session"] = TransferSession.objects.get(id=t_sess_id)
 
-        client_cert = kwargs["transfer_session"].sync_session.remote_certificate
-        server_cert = kwargs["transfer_session"].sync_session.local_certificate
+        client_cert = kwargs["transfer_session"].sync_session.server_certificate
+        server_cert = kwargs["transfer_session"].sync_session.client_certificate
         push = kwargs["transfer_session"].push
 
-        filt = client_cert.get_scope().write_filter if push else client_cert.get_scope().read_filter
+        filt = server_cert.get_scope().write_filter if push else server_cert.get_scope().read_filter
         partition = filt._filter_tuple[0] + ":furthersubpart"
 
         data = {
@@ -668,7 +668,7 @@ class BufferEndpointTestCase(CertificateTestCaseMixin, APITestCase):
 
     def test_push_with_invalid_model_uuid(self):
         rec_1 = self.build_buffer_item(push=True, filter=self.default_push_filter)
-        rec_2 = self.build_buffer_item(transfer_session=rec_1.transfer_session, model_uuid=uuid.uuid4().hex)
+        rec_2 = self.build_buffer_item(transfer_session=rec_1.transfer_session, model_uuid=uuid.uuid4().hex, model_name='facility')
         rec_3 = self.build_buffer_item(transfer_session=rec_1.transfer_session)
         self.make_buffer_post_request([rec_1, rec_2, rec_3], expected_status=400)
 

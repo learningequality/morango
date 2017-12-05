@@ -1,11 +1,9 @@
 import json
 
-from django.contrib.auth import authenticate
+from django.contrib.auth import authenticate, get_user_model
 from rest_framework import permissions, authentication, exceptions
 
-from ..crypto import Key
-from ..models import Certificate, Nonce, TransferSession, Buffer
-from ..errors import MorangoCertificateError, MorangoNonceError
+from ..models import TransferSession
 
 
 class BasicMultiArgumentAuthentication(authentication.BasicAuthentication):
@@ -87,28 +85,7 @@ class SyncSessionPermissions(permissions.BasePermission):
             return True
 
         if request.method == "POST":
-
-            # verify and save the certificate chain to our cert store
-            try:
-                client_cert = Certificate.save_certificate_chain(
-                    request.data.pop("certificate_chain"),
-                    expected_last_id=request.data.get("client_certificate_id")
-                )
-            except (AssertionError, MorangoCertificateError):
-                return False
-
-            # check that the nonce/id were properly signed
-            message = "{nonce}:{id}".format(**request.data)
-            if not client_cert.verify(message, request.data.pop("signature")):
-                return False
-
-            # check that the nonce is valid, and consume it so it can't be used again
-            try:
-                Nonce.use_nonce(request.data.pop("nonce"))
-            except MorangoNonceError:
-                return False
-
-            return True
+            return True   # we'll be doing some additional permission checks in the viewset
 
         return False
 
@@ -122,6 +99,9 @@ class TransferSessionPermissions(permissions.BasePermission):
 
         if request.method == "POST":
             return True  # we'll be doing some additional permission checks in the viewset
+
+        if request.method == "PATCH":
+            return True
 
         return False
 

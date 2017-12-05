@@ -3,16 +3,17 @@ import requests
 import socket
 import uuid
 
-from django.db import connection, transaction
-from rest_framework import status
+from django.conf import settings
+from django.db import transaction
 from django.utils import timezone
 from django.utils.six import iteritems
 from morango.api.serializers import BufferSerializer, CertificateSerializer, InstanceIDSerializer
-from morango.certificates import Certificate, Key
+from morango.certificates import Certificate, Key, Filter
 from morango.constants import api_urls
-from morango.errors import CertificateSignatureInvalid
-from morango.models import Buffer, InstanceIDModel, RecordMaxCounter, RecordMaxCounterBuffer, Store, SyncSession, TransferSession, DatabaseMaxCounter
-from six.moves.urllib.parse import urljoin
+from morango.errors import CertificateSignatureInvalid, MorangoError
+from morango.models import Buffer, InstanceIDModel, RecordMaxCounterBuffer, SyncSession, TransferSession, DatabaseMaxCounter
+from morango.utils.sync_utils import _serialize_into_store, _queue_into_buffer, _dequeue_into_store
+from six.moves.urllib.parse import urljoin, urlparse
 
 from django.core.paginator import Paginator
 
@@ -20,6 +21,23 @@ from django.core.paginator import Paginator
 def _join_with_logical_operator(lst, operator):
     op = ") {operator} (".format(operator=operator)
     return "(({items}))".format(items=op.join(lst))
+
+def _get_server_ip(hostname):
+    try:
+        return socket.gethostbyname(hostname)
+    except:
+        return ''
+
+def _get_client_ip_for_server(server_host, server_port):
+    s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    try:
+        s.connect((server_host, server_port))
+        IP = s.getsockname()[0]
+    except:
+        IP = '127.0.0.1'
+    finally:
+        s.close()
+    return IP
 
 
 class Connection(object):
@@ -32,16 +50,13 @@ class Connection(object):
     This class should be subclassed for particular transport mechanisms,
     and the necessary methods overridden.
     """
-
-    def __init__(self, profile):
-        self.profile = profile
+    pass
 
 
 class NetworkSyncConnection(Connection):
 
-    def __init__(self, base_url='', profile=''):
+    def __init__(self, base_url=''):
         self.base_url = base_url
-        super(NetworkSyncConnection, self).__init__(profile)
 
     def _request(self, endpoint, method="GET", lookup=None, data={}, params={}, userargs=None, password=None):
         """
@@ -61,8 +76,11 @@ class NetworkSyncConnection(Connection):
             userargs = "&".join(["{}={}".format(key, val) for (key, val) in iteritems(userargs)])
 
         # build up url and send request
+        if lookup:
+            lookup = lookup + '/'
         url = urljoin(urljoin(self.base_url, endpoint), lookup)
-        resp = requests.request(method, url, data=data, params=params, auth=(userargs, password))
+        auth = (userargs, password) if userargs else None
+        resp = requests.request(method, url, json=data, params=params, auth=auth)
         resp.raise_for_status()
         return resp
 
@@ -75,6 +93,10 @@ class NetworkSyncConnection(Connection):
         nonce_resp = self._request(api_urls.NONCE, method="POST")
         nonce = json.loads(nonce_resp.content.decode())["id"]
 
+        # if no hostname then url is actually an ip
+        url = urlparse(self.base_url)
+        hostname = url.hostname or self.base_url
+        port = url.port or (80 if url.scheme == 'http' else 443)
         # prepare the data to send in the syncsession creation request
         data = {
             "id": uuid.uuid4().hex,
@@ -85,6 +107,8 @@ class NetworkSyncConnection(Connection):
             "connection_path": self.base_url,
             "instance": json.dumps(InstanceIDSerializer(InstanceIDModel.get_or_create_current_instance()[0]).data),
             "nonce": nonce,
+            "client_ip": _get_client_ip_for_server(hostname, port),
+            "server_ip": _get_server_ip(hostname),
         }
 
         # sign the nonce/ID combo to attach to the request
@@ -95,7 +119,7 @@ class NetworkSyncConnection(Connection):
         session_resp = self._request(api_urls.SYNCSESSION, method="POST", data=data)
 
         # check that the nonce/id were properly signed by the server cert
-        if not server_cert.verify(message, session_resp.data.pop("signature")):
+        if not server_cert.verify(message, session_resp.json().get("signature")):
             raise CertificateSignatureInvalid()
 
         # build the data to be used for creating our own syncsession
@@ -105,43 +129,52 @@ class NetworkSyncConnection(Connection):
             "last_activity_timestamp": timezone.now(),
             "active": True,
             "is_server": False,
-            "local_certificate": client_cert,
-            "remote_certificate": server_cert,
+            "client_certificate": client_cert,
+            "server_certificate": server_cert,
             "profile": client_cert.profile,
             "connection_kind": "network",
             "connection_path": self.base_url,
-            "local_ip": socket.gethostbyname(socket.gethostname()),
-            "remote_ip": socket.gethostbyname(self.base_url),
-            "local_instance": json.dumps(InstanceIDSerializer(InstanceIDModel.get_or_create_current_instance()[0]).data),
-            "remote_instance": session_resp.data.get("instance") or "{}",
+            "client_ip": data['client_ip'],
+            "server_ip": data['server_ip'],
+            "client_instance": json.dumps(InstanceIDSerializer(InstanceIDModel.get_or_create_current_instance()[0]).data),
+            "server_instance": session_resp.json().get("server_instance") or "{}",
         }
         sync_session = SyncSession.objects.create(**data)
 
-        return SyncClient(self, sync_session, profile=self.profile)
+        return SyncClient(self, sync_session)
 
-    def get_remote_certificates(self, primary_partition):
+    def get_remote_certificates(self, primary_partition, scope_def_id=None):
         remote_certs = []
         # request certs for this primary partition, where the server also has a private key for
         remote_certs_resp = self._request(api_urls.CERTIFICATE, params={'primary_partition': primary_partition})
 
         # inflate remote certs into a list of unsaved models
-        for cert in json.loads(remote_certs_resp.data):
+        for cert in remote_certs_resp.json():
             remote_certs.append(Certificate.deserialize(cert["serialized"], cert["signature"]))
+
+        # filter certs by scope definition id, if provided
+        if scope_def_id:
+            remote_certs = [cert for cert in remote_certs if cert.scope_definition_id == scope_def_id]
+
         return remote_certs
 
     def certificate_signing_request(self, parent_cert, scope_definition_id, scope_params, userargs=None, password=None):
+        # if server cert does not exist locally, retrieve it from server
+        if not Certificate.objects.filter(id=parent_cert.id).exists():
+            self._get_certificate_chain(parent_cert)
+
         csr_key = Key()
         # build up data for csr
         data = {
             "parent": parent_cert.id,
-            "profile": self.profile,
+            "profile": parent_cert.profile,
             "scope_definition": scope_definition_id,
             "scope_version": parent_cert.scope_version,
-            "scope_params": scope_params,
+            "scope_params": json.dumps(scope_params),
             "public_key": csr_key.get_public_key_string()
         }
         csr_resp = self._request(api_urls.CERTIFICATE, method="POST", data=data, userargs=userargs, password=password)
-        csr_data = json.loads(csr_resp.data)
+        csr_data = csr_resp.json()
 
         # verify cert returned from server, and proceed to save into our records
         csr_cert = Certificate.deserialize(csr_data["serialized"], csr_data["signature"])
@@ -155,7 +188,7 @@ class NetworkSyncConnection(Connection):
         cert_chain_resp = self._request(api_urls.CERTIFICATE, params={'ancestors_of': server_cert.id})
 
         # upon receiving cert chain from server, we attempt to save the chain into our records
-        Certificate.save_certificate_chain(cert_chain_resp.data, expected_last_id=server_cert.id)
+        Certificate.save_certificate_chain(cert_chain_resp.json(), expected_last_id=server_cert.id)
 
     def _create_transfer_session(self, data):
         # create transfer session on server
@@ -173,16 +206,102 @@ class NetworkSyncConnection(Connection):
         # "delete" sync session on server side
         return self._request(api_urls.SYNCSESSION, method="DELETE", lookup=sync_session.id)
 
+    def _push_record_chunk(self, serialized_recs):
+        # push a chunk of records to the server side
+        return self._request(api_urls.BUFFER, method="POST", data=serialized_recs)
+
+    def _pull_record_chunk(self, chunk_size, transfer_session):
+        # pull records from server for given transfer session
+        params = {'limit': chunk_size, 'offset': transfer_session.records_transferred, 'transfer_session_id': transfer_session.id}
+        return self._request(api_urls.BUFFER, params=params)
+
 
 class SyncClient(object):
     """
     Controller to support client in initiating syncing and performing related operations.
     """
-    def __init__(self, sync_connection, sync_session, profile=''):
+    def __init__(self, sync_connection, sync_session):
         self.sync_connection = sync_connection
         self.sync_session = sync_session
         self.current_transfer_session = None
-        self.profile = profile
+
+    def initiate_push(self, sync_filter):
+
+        self._create_transfer_session(True, sync_filter)
+
+        _queue_into_buffer(self.current_transfer_session)
+
+        # update the records_total for client and server transfer session
+        records_total = Buffer.objects.filter(transfer_session=self.current_transfer_session).count()
+        if records_total == 0:
+            self._close_transfer_session()
+            return
+        self.current_transfer_session.records_total = records_total
+        self.current_transfer_session.save()
+        self.sync_connection._update_transfer_session({'records_total': records_total}, self.current_transfer_session)
+
+        # push records to server
+        self._push_records()
+
+        # upon successful completion of pushing records, proceed to delete buffered records
+        Buffer.objects.filter(transfer_session=self.current_transfer_session).delete()
+        RecordMaxCounterBuffer.objects.filter(transfer_session=self.current_transfer_session).delete()
+
+        # close client and server transfer session
+        self._close_transfer_session()
+
+    def initiate_pull(self, sync_filter):
+        self._create_transfer_session(False, sync_filter)
+
+        if self.current_transfer_session.records_total == 0:
+            self._close_transfer_session()
+            return
+
+        # pull records and close transfer session upon completion
+        self._pull_records()
+        self._dequeue_into_store()
+
+        # update database max counters but use latest fsics on client
+        DatabaseMaxCounter.update_fsics(json.loads(self.current_transfer_session.server_fsic),
+                                        sync_filter)
+
+        self._close_transfer_session()
+
+    def _pull_records(self, chunk_size=500, callback=None):
+        while self.current_transfer_session.records_transferred < self.current_transfer_session.records_total:
+            buffers_resp = self.sync_connection._pull_record_chunk(chunk_size, self.current_transfer_session)
+
+            # load the returned data from JSON
+            data = buffers_resp.json()
+
+            # parse out the results from a paginated set, if needed
+            if isinstance(data, dict) and "results" in data:
+                data = data["results"]
+
+            # deserialize the records
+            serialized_recs = BufferSerializer(data=data, many=True)
+
+            # validate records
+            if serialized_recs.is_valid(raise_exception=True):
+                serialized_recs.save()
+
+            # update the size of the records transferred
+            self.current_transfer_session.records_transferred += chunk_size
+            self.current_transfer_session.save()
+
+    def _push_records(self, chunk_size=500, callback=None):
+        # paginate buffered records so we do not load them all into memory
+        buffered_records = Buffer.objects.filter(transfer_session=self.current_transfer_session)
+        buffered_pages = Paginator(buffered_records, chunk_size)
+        for count in buffered_pages.page_range:
+
+            # serialize and send records to server
+            serialized_recs = BufferSerializer(buffered_pages.page(count).object_list, many=True)
+            self.sync_connection._push_record_chunk(serialized_recs.data)
+
+            # update records_transferred upon successful request
+            self.current_transfer_session.records_transferred += chunk_size
+            self.current_transfer_session.save()
 
     def close_sync_session(self):
 
@@ -190,31 +309,42 @@ class SyncClient(object):
         self.sync_connection._close_sync_session(self.sync_session)
 
         # "delete" our own local sync session
-        self.sync_connection.sync_session.active = False
-        self.sync_connection.sync_session.save()
-        self.sync_connection.sync_session = None
-        self = None
+        if self.current_transfer_session is not None:
+            raise MorangoError('Transfer Session must be closed before closing sync session.')
+        self.sync_session.active = False
+        self.sync_session.save()
+        self.sync_session = None
 
     def _create_transfer_session(self, push, filter):
 
         # build data for creating transfer session on server side
         data = {
             'id': uuid.uuid4().hex,
-            'filter': filter,
+            'filter': str(filter),
             'push': push,
             'sync_session_id': self.sync_session.id,
-            'local_fsic': DatabaseMaxCounter.calculate_filter_max_counters(filter)
         }
-        data['start_timestamp'] = timezone.now()
+
         data['last_activity_timestamp'] = timezone.now()
         self.current_transfer_session = TransferSession.objects.create(**data)
+        data.pop('last_activity_timestamp')
 
+        if push:
+            # before pushing, we want to serialize the most recent data and update database max counters
+            if getattr(settings, 'MORANGO_SERIALIZE_BEFORE_QUEUING', True):
+                _serialize_into_store(self.current_transfer_session.sync_session.profile, filter=Filter(self.current_transfer_session.filter))
+
+        data['client_fsic'] = json.dumps(DatabaseMaxCounter.calculate_filter_max_counters(filter))
+        self.current_transfer_session.client_fsic = data['client_fsic']
+
+        # save transfersession locally before creating transfersession server side
+        self.current_transfer_session.save()
         # create transfer session on server side
         transfer_resp = self.sync_connection._create_transfer_session(data)
 
-        self.current_transfer_session.remote_fsic = transfer_resp.data.get('local_fsic')
+        self.current_transfer_session.server_fsic = transfer_resp.json().get('server_fsic') or '{}'
         if not push:
-            self.current_transfer_session.records_total = transfer_resp.data.get('records_total')
+            self.current_transfer_session.records_total = transfer_resp.json().get('records_total')
         self.current_transfer_session.save()
 
     def _close_transfer_session(self):
@@ -222,285 +352,16 @@ class SyncClient(object):
         # "delete" transfer session on server side
         self.sync_connection._close_transfer_session(self.current_transfer_session)
 
-        # delete local buffered objects if pushing records
-        if self.current_transfer_session.push:
-            Buffer.objects.filter(transfer_session=self.current_transfer_session).delete()
-            RecordMaxCounterBuffer.objects.filter(transfer_session=self.current_transfer_session).delete()
-
         # "delete" our own local transfer session
         self.current_transfer_session.active = False
         self.current_transfer_session.save()
         self.current_transfer_session = None
 
-    @transaction.atomic
-    def _queue_into_buffer(self, filter_prefixes, fsics):
-        """
-        Takes a chunk of data from the store to be put into the buffer to be sent to another morango instance.
-        """
-        last_saved_by_conditions = []
-        # create condition for all push FSICs where instance_ids are equal, but internal counters are higher than FSICs counters
-        for instance, counter in iteritems(fsics):
-            last_saved_by_conditions += ["(last_saved_instance = '{0}' AND last_saved_counter > {1})".format(instance, counter)]
-        if fsics:
-            last_saved_by_conditions = [_join_with_logical_operator(last_saved_by_conditions, 'OR')]
+    def _queue_into_buffer(self):
+        _queue_into_buffer(self.current_transfer_session)
 
-        partition_conditions = []
-        # create condition for filtering by partitions
-        for prefix in filter_prefixes:
-            partition_conditions += ["partition LIKE '{}%'".format(prefix)]
-        if filter_prefixes:
-            partition_conditions = [_join_with_logical_operator(partition_conditions, 'OR')]
-
-        # combine conditions
-        fsic_and_partition_conditions = _join_with_logical_operator(last_saved_by_conditions + partition_conditions, 'AND')
-
-        # filter by profile
-        where_condition = _join_with_logical_operator([fsic_and_partition_conditions, "profile = '{}'".format(self.profile)], 'AND')
-
-        # execute raw sql to take all records that match condition, to be put into buffer for transfer
-        with connection.cursor() as cursor:
-            queue_buffer = """INSERT INTO {outgoing_buffer}
-                            (model_uuid, serialized, deleted, last_saved_instance, last_saved_counter,
-                             model_name, profile, partition, source_id, conflicting_serialized_data, transfer_session_id, _self_ref_fk)
-                            SELECT id, serialized, deleted, last_saved_instance, last_saved_counter,
-                            model_name, profile, partition, source_id, conflicting_serialized_data, '{transfer_session_id}', _self_ref_fk
-                            FROM {store}
-                            WHERE {condition}""".format(outgoing_buffer=Buffer._meta.db_table,
-                                                        transfer_session_id=self.current_transfer_session.id,
-                                                        condition=where_condition,
-                                                        store=Store._meta.db_table)
-            cursor.execute(queue_buffer)
-            # take all record max counters that are foreign keyed onto store models, which were queued into the buffer
-            queue_rmc_buffer = """INSERT INTO {outgoing_rmcb}
-                                (instance_id, counter, transfer_session_id, model_uuid)
-                                SELECT instance_id, counter, '{transfer_session_id}', store_model_id
-                                FROM {record_max_counter} AS rmc, {outgoing_buffer} AS buffer
-                                WHERE EXISTS (SELECT 1
-                                              FROM {outgoing_buffer}
-                                              WHERE buffer.model_uuid = rmc.store_model_id)
-                                              AND buffer.transfer_session_id = '{transfer_session_id}'
-                                """.format(outgoing_rmcb=RecordMaxCounterBuffer._meta.db_table,
-                                           transfer_session_id=self.current_transfer_session.id,
-                                           record_max_counter=RecordMaxCounter._meta.db_table,
-                                           outgoing_buffer=Buffer._meta.db_table)
-            cursor.execute(queue_rmc_buffer)
-
-    # START of dequeuing methods
-    def _dequeuing_delete_rmcb_records(self, cursor):
-        # delete all RMCBs which are a reverse FF (store version newer than buffer version)
-        delete_rmcb_records = """DELETE FROM {rmcb}
-                                 WHERE model_uuid IN
-                                 (SELECT rmcb.model_uuid FROM {store} as store, {buffer} as buffer, {rmc} as rmc, {rmcb} as rmcb
-                                 /*Scope to a single record*/
-                                 WHERE store.id = buffer.model_uuid
-                                 AND  store.id = rmc.store_model_id
-                                 AND  store.id = rmcb.model_uuid
-                                 /*Checks whether LSB of buffer or less is in RMC of store*/
-                                 AND buffer.last_saved_instance = rmc.instance_id
-                                 AND buffer.last_saved_counter <= rmc.counter
-                                 AND rmcb.transfer_session_id = '{transfer_session_id}'
-                                 AND buffer.transfer_session_id = '{transfer_session_id}')
-                                  """.format(buffer=Buffer._meta.db_table,
-                                             store=Store._meta.db_table,
-                                             rmc=RecordMaxCounter._meta.db_table,
-                                             rmcb=RecordMaxCounterBuffer._meta.db_table,
-                                             transfer_session_id=self.current_transfer_session.id)
-
-        cursor.execute(delete_rmcb_records)
-
-    def _dequeuing_delete_buffered_records(self, cursor):
-        # delete all buffer records which are a reverse FF (store version newer than buffer version)
-        delete_buffered_records = """DELETE FROM {buffer}
-                                     WHERE model_uuid in
-                                     (SELECT buffer.model_uuid FROM {store} as store, {buffer} as buffer, {rmc} as rmc
-                                     /*Scope to a single record*/
-                                     WHERE store.id = buffer.model_uuid
-                                     AND rmc.store_model_id = buffer.model_uuid
-                                     /*Checks whether LSB of buffer or less is in RMC of store*/
-                                     AND buffer.last_saved_instance = rmc.instance_id
-                                     AND buffer.last_saved_counter <= rmc.counter
-                                     AND buffer.transfer_session_id = '{transfer_session_id}')
-                                  """.format(buffer=Buffer._meta.db_table,
-                                             store=Store._meta.db_table,
-                                             rmc=RecordMaxCounter._meta.db_table,
-                                             rmcb=RecordMaxCounterBuffer._meta.db_table,
-                                             transfer_session_id=self.current_transfer_session.id)
-        cursor.execute(delete_buffered_records)
-
-    def _dequeuing_merge_conflict_rmcb(self, cursor):
-        # transfer record max counters for records with merge conflicts + perform max
-        merge_conflict_rmc = """REPLACE INTO {rmc} (instance_id, counter, store_model_id)
-                                    SELECT rmcb.instance_id, rmcb.counter, rmcb.model_uuid
-                                    FROM {rmcb} AS rmcb, {store} AS store, {rmc} AS rmc, {buffer} AS buffer
-                                    /*Scope to a single record.*/
-                                    WHERE store.id = rmcb.model_uuid
-                                    AND store.id = rmc.store_model_id
-                                    AND store.id = buffer.model_uuid
-                                    /*Where buffer rmc is greater than store rmc*/
-                                    AND rmcb.instance_id = rmc.instance_id
-                                    AND rmcb.counter > rmc.counter
-                                    AND rmcb.transfer_session_id = '{transfer_session_id}'
-                                    /*Exclude fast-forwards*/
-                                    AND NOT EXISTS (SELECT 1 FROM {rmcb} AS rmcb2 WHERE store.id = rmcb2.model_uuid
-                                                                                  AND store.last_saved_instance = rmcb2.instance_id
-                                                                                  AND store.last_saved_counter <= rmcb2.counter
-                                                                                  AND rmcb2.transfer_session_id = '{transfer_session_id}')
-                               """.format(buffer=Buffer._meta.db_table,
-                                          store=Store._meta.db_table,
-                                          rmc=RecordMaxCounter._meta.db_table,
-                                          rmcb=RecordMaxCounterBuffer._meta.db_table,
-                                          transfer_session_id=self.current_transfer_session.id)
-        cursor.execute(merge_conflict_rmc)
-
-    def _dequeuing_merge_conflict_buffer(self, cursor, current_id):
-        # transfer buffer serialized into conflicting store
-        merge_conflict_store = """REPLACE INTO {store} (id, serialized, deleted, last_saved_instance, last_saved_counter, model_name,
-                                                        profile, partition, source_id, conflicting_serialized_data, dirty_bit, _self_ref_fk)
-                                            SELECT store.id, store.serialized, store.deleted OR buffer.deleted, '{current_instance_id}',
-                                                   {current_instance_counter}, store.model_name, store.profile, store.partition, store.source_id,
-                                                   buffer.serialized || '\n' || store.conflicting_serialized_data, 1, store._self_ref_fk
-                                            FROM {buffer} AS buffer, {store} AS store
-                                            /*Scope to a single record.*/
-                                            WHERE store.id = buffer.model_uuid
-                                            AND buffer.transfer_session_id = '{transfer_session_id}'
-                                            /*Exclude fast-forwards*/
-                                            AND NOT EXISTS (SELECT 1 FROM {rmcb} AS rmcb2 WHERE store.id = rmcb2.model_uuid
-                                                                                          AND store.last_saved_instance = rmcb2.instance_id
-                                                                                          AND store.last_saved_counter <= rmcb2.counter
-                                                                                          AND rmcb2.transfer_session_id = '{transfer_session_id}')
-                                      """.format(buffer=Buffer._meta.db_table,
-                                                 rmcb=RecordMaxCounterBuffer._meta.db_table,
-                                                 store=Store._meta.db_table,
-                                                 rmc=RecordMaxCounter._meta.db_table,
-                                                 transfer_session_id=self.current_transfer_session.id,
-                                                 current_instance_id=current_id.id,
-                                                 current_instance_counter=current_id.counter)
-        cursor.execute(merge_conflict_store)
-
-    def _dequeuing_update_rmcs_last_saved_by(self, cursor, current_id):
-        # update or create rmc for merge conflicts with local instance id
-        merge_conflict_store = """REPLACE INTO {rmc} (instance_id, counter, store_model_id)
-                                SELECT '{current_instance_id}', {current_instance_counter}, store.id
-                                FROM {store} as store, {buffer} as buffer
-                                /*Scope to a single record.*/
-                                WHERE store.id = buffer.model_uuid
-                                AND buffer.transfer_session_id = '{transfer_session_id}'
-                                /*Exclude fast-forwards*/
-                                AND NOT EXISTS (SELECT 1 FROM {rmcb} AS rmcb2 WHERE store.id = rmcb2.model_uuid
-                                                                              AND store.last_saved_instance = rmcb2.instance_id
-                                                                              AND store.last_saved_counter <= rmcb2.counter
-                                                                              AND rmcb2.transfer_session_id = '{transfer_session_id}')
-                                      """.format(buffer=Buffer._meta.db_table,
-                                                 rmcb=RecordMaxCounterBuffer._meta.db_table,
-                                                 store=Store._meta.db_table,
-                                                 rmc=RecordMaxCounter._meta.db_table,
-                                                 transfer_session_id=self.current_transfer_session.id,
-                                                 current_instance_id=current_id.id,
-                                                 current_instance_counter=current_id.counter)
-        cursor.execute(merge_conflict_store)
-
-    def _dequeuing_delete_mc_buffer(self, cursor):
-        # delete records with merge conflicts from buffer
-        delete_mc_buffer = """DELETE FROM {buffer}
-                                    WHERE EXISTS
-                                    (SELECT 1 FROM {store} AS store, {buffer} AS buffer
-                                    /*Scope to a single record.*/
-                                    WHERE store.id = {buffer}.model_uuid
-                                    AND {buffer}.transfer_session_id = '{transfer_session_id}'
-                                    /*Exclude fast-forwards*/
-                                    AND NOT EXISTS (SELECT 1 FROM {rmcb} AS rmcb2 WHERE store.id = rmcb2.model_uuid
-                                                                                  AND store.last_saved_instance = rmcb2.instance_id
-                                                                                  AND store.last_saved_counter <= rmcb2.counter
-                                                                                  AND rmcb2.transfer_session_id = '{transfer_session_id}'))
-                               """.format(buffer=Buffer._meta.db_table,
-                                          store=Store._meta.db_table,
-                                          rmc=RecordMaxCounter._meta.db_table,
-                                          rmcb=RecordMaxCounterBuffer._meta.db_table,
-                                          transfer_session_id=self.current_transfer_session.id)
-        cursor.execute(delete_mc_buffer)
-
-    def _dequeuing_delete_mc_rmcb(self, cursor):
-        # delete rmcb records with merge conflicts
-        delete_mc_rmc = """DELETE FROM {rmcb}
-                                    WHERE EXISTS
-                                    (SELECT 1 FROM {store} AS store, {rmc} AS rmc
-                                    /*Scope to a single record.*/
-                                    WHERE store.id = {rmcb}.model_uuid
-                                    AND store.id = rmc.store_model_id
-                                    /*Where buffer rmc is greater than store rmc*/
-                                    AND {rmcb}.instance_id = rmc.instance_id
-                                    AND {rmcb}.transfer_session_id = '{transfer_session_id}'
-                                    /*Exclude fast fast-forwards*/
-                                    AND NOT EXISTS (SELECT 1 FROM {rmcb} AS rmcb2 WHERE store.id = rmcb2.model_uuid
-                                                                                  AND store.last_saved_instance = rmcb2.instance_id
-                                                                                  AND store.last_saved_counter <= rmcb2.counter
-                                                                                  AND rmcb2.transfer_session_id = '{transfer_session_id}'))
-                               """.format(buffer=Buffer._meta.db_table,
-                                          store=Store._meta.db_table,
-                                          rmc=RecordMaxCounter._meta.db_table,
-                                          rmcb=RecordMaxCounterBuffer._meta.db_table,
-                                          transfer_session_id=self.current_transfer_session.id)
-        cursor.execute(delete_mc_rmc)
-
-    def _dequeuing_insert_remaining_buffer(self, cursor):
-        # insert remaining records into store
-        insert_remaining_buffer = """REPLACE INTO {store} (id, serialized, deleted, last_saved_instance, last_saved_counter,
-                                                               model_name, profile, partition, source_id, conflicting_serialized_data, dirty_bit, _self_ref_fk)
-                                    SELECT buffer.model_uuid, buffer.serialized, buffer.deleted, buffer.last_saved_instance, buffer.last_saved_counter,
-                                           buffer.model_name, buffer.profile, buffer.partition, buffer.source_id, buffer.conflicting_serialized_data, 1,
-                                           buffer._self_ref_fk
-                                    FROM {buffer} AS buffer
-                                    WHERE buffer.transfer_session_id = '{transfer_session_id}'
-                           """.format(buffer=Buffer._meta.db_table,
-                                      store=Store._meta.db_table,
-                                      transfer_session_id=self.current_transfer_session.id)
-
-        cursor.execute(insert_remaining_buffer)
-
-    def _dequeuing_insert_remaining_rmcb(self, cursor):
-        # insert remaining records into rmc
-        insert_remaining_rmcb = """REPLACE INTO {rmc} (instance_id, counter, store_model_id)
-                                    SELECT rmcb.instance_id, rmcb.counter, rmcb.model_uuid
-                                    FROM {rmcb} AS rmcb
-                                    WHERE rmcb.transfer_session_id = '{transfer_session_id}'
-                           """.format(rmc=RecordMaxCounter._meta.db_table,
-                                      rmcb=RecordMaxCounterBuffer._meta.db_table,
-                                      transfer_session_id=self.current_transfer_session.id)
-
-        cursor.execute(insert_remaining_rmcb)
-
-    def _dequeuing_delete_remaining_rmcb(self, cursor):
-        # delete the rest for this transfer session
-        delete_remaining_rmcb = """DELETE FROM {rmcb}
-                                  WHERE {rmcb}.transfer_session_id = '{transfer_session_id}'
-                               """.format(rmcb=RecordMaxCounterBuffer._meta.db_table,
-                                          transfer_session_id=self.current_transfer_session.id)
-
-        cursor.execute(delete_remaining_rmcb)
-
-    def _dequeuing_delete_remaining_buffer(self, cursor):
-        delete_remaining_buffer = """DELETE FROM {buffer}
-                                 WHERE {buffer}.transfer_session_id = '{transfer_session_id}'
-                              """.format(buffer=Buffer._meta.db_table,
-                                         transfer_session_id=self.current_transfer_session.id)
-
-        cursor.execute(delete_remaining_buffer)
-
-    @transaction.atomic
     def _dequeue_into_store(self):
         """
         Takes data from the buffers and merges into the store and record max counters.
         """
-        with connection.cursor() as cursor:
-            self._dequeuing_delete_rmcb_records(cursor)
-            self._dequeuing_delete_buffered_records(cursor)
-            current_id = InstanceIDModel.get_current_instance_and_increment_counter()
-            self._dequeuing_merge_conflict_buffer(cursor, current_id)
-            self._dequeuing_merge_conflict_rmcb(cursor)
-            self._dequeuing_update_rmcs_last_saved_by(cursor, current_id)
-            self._dequeuing_delete_mc_rmcb(cursor)
-            self._dequeuing_delete_mc_buffer(cursor)
-            self._dequeuing_insert_remaining_buffer(cursor)
-            self._dequeuing_insert_remaining_rmcb(cursor)
-            self._dequeuing_delete_remaining_rmcb(cursor)
-            self._dequeuing_delete_remaining_buffer(cursor)
+        _dequeue_into_store(self.current_transfer_session)

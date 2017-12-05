@@ -4,19 +4,20 @@ import uuid
 
 from django.test import TestCase
 from django.utils import timezone
-from morango.api.serializers import CertificateSerializer
+from facility_profile.models import SummaryLog
+from morango.api.serializers import CertificateSerializer, BufferSerializer
 from morango.certificates import Certificate, ScopeDefinition, Key
 from morango.controller import MorangoProfileController
 from morango.errors import CertificateSignatureInvalid
-from morango.models import SyncSession, TransferSession
-from morango.syncsession import NetworkSyncConnection
-from rest_framework import status
+from morango.models import Buffer, SyncSession, TransferSession, InstanceIDModel
+from morango.syncsession import NetworkSyncConnection, SyncClient
 
 
 def mock_patch_decorator(func):
 
     def wrapper(*args, **kwargs):
-        mock_object = mock.Mock(content=b"""{"id": "abc"}""", data={'signature': 'sig', 'local_fsic': '{}'})
+        mock_object = mock.Mock(content=b"""{"id": "abc"}""", data={'signature': 'sig', 'client_fsic': '{}', 'server_fsic': '{}'})
+        mock_object.json.return_value = {}
         with mock.patch.object(NetworkSyncConnection, '_request', return_value=mock_object):
             with mock.patch.object(Certificate, 'verify', return_value=True):
                     return func(*args, **kwargs)
@@ -69,6 +70,7 @@ class NetworkSyncConnectionTestCase(TestCase):
     @mock_patch_decorator
     def test_creating_sync_session_successful(self):
         self.assertEqual(SyncSession.objects.filter(active=True).count(), 0)
+        NetworkSyncConnection._request.return_value.json.return_value = {'signature': 'sig', 'local_fsic': '{}'}
         self.network_connection.create_sync_session(self.subset_cert, self.root_cert)
         self.assertEqual(SyncSession.objects.filter(active=True).count(), 1)
 
@@ -83,7 +85,7 @@ class NetworkSyncConnectionTestCase(TestCase):
         # mock certs being returned by server
         certs = self.subset_cert.get_ancestors(include_self=True)
         cert_serialized = json.dumps(CertificateSerializer(certs, many=True).data)
-        NetworkSyncConnection._request.return_value = mock.Mock(data=cert_serialized)
+        NetworkSyncConnection._request.return_value.json.return_value = json.loads(cert_serialized)
 
         # we want to see if the models are created (not saved) successfully
         remote_certs = self.network_connection.get_remote_certificates('abc')
@@ -93,7 +95,7 @@ class NetworkSyncConnectionTestCase(TestCase):
     def test_csr(self):
         # mock a "signed" cert being returned by server
         cert_serialized = json.dumps(CertificateSerializer(self.subset_cert).data)
-        NetworkSyncConnection._request.return_value = mock.Mock(data=cert_serialized)
+        NetworkSyncConnection._request.return_value.json.return_value = json.loads(cert_serialized)
         self.subset_cert.delete()
 
         # we only want to make sure the "signed" cert is saved
@@ -107,9 +109,86 @@ class NetworkSyncConnectionTestCase(TestCase):
         certs = self.subset_cert.get_ancestors(include_self=True)
         original_cert_count = certs.count()
         cert_serialized = json.dumps(CertificateSerializer(certs, many=True).data)
-        NetworkSyncConnection._request.return_value = mock.Mock(data=cert_serialized)
+        NetworkSyncConnection._request.return_value.json.return_value = json.loads(cert_serialized)
         Certificate.objects.all().delete()
 
         # we only want to make sure the cert chain is saved
         self.network_connection._get_certificate_chain(certs[1])
         self.assertEqual(Certificate.objects.count(), original_cert_count)
+
+
+class SyncClientTestCase(TestCase):
+
+    def setUp(self):
+        session = SyncSession.objects.create(id=uuid.uuid4().hex, profile="facilitydata", last_activity_timestamp=timezone.now())
+        transfer_session = TransferSession.objects.create(id=uuid.uuid4().hex, sync_session=session, filter='partition',
+                                                          push=True, last_activity_timestamp=timezone.now(), records_total=3)
+        conn = NetworkSyncConnection()
+        self.syncclient = SyncClient(conn, session)
+        self.syncclient.current_transfer_session = transfer_session
+        self.chunk_size = 3
+        InstanceIDModel.get_or_create_current_instance()
+
+    def build_buffer_items(self, transfer_session, **kwargs):
+
+        data = {
+            "profile": kwargs.get("profile", 'facilitydata'),
+            "serialized": kwargs.get("serialized", '{"test": 99}'),
+            "deleted": kwargs.get("deleted", False),
+            "last_saved_instance": kwargs.get("last_saved_instance", uuid.uuid4().hex),
+            "last_saved_counter": kwargs.get("last_saved_counter", 179),
+            "partition": kwargs.get("partition", 'partition'),
+            "source_id": kwargs.get("source_id", uuid.uuid4().hex),
+            "model_name": kwargs.get("model_name", "contentsummarylog"),
+            "conflicting_serialized_data": kwargs.get("conflicting_serialized_data", ""),
+            "model_uuid": kwargs.get("model_uuid", None),
+            "transfer_session": transfer_session,
+        }
+
+        for i in range(self.chunk_size):
+            data['source_id'] = uuid.uuid4().hex
+            data["model_uuid"] = SummaryLog.compute_namespaced_id(data["partition"], data["source_id"], data["model_name"])
+            Buffer.objects.create(**data)
+
+        buffered_items = Buffer.objects.filter(transfer_session=self.syncclient.current_transfer_session)
+        serialized_records = BufferSerializer(buffered_items, many=True)
+        return json.dumps(serialized_records.data)
+
+    @mock_patch_decorator
+    def test_push_records(self):
+        self.build_buffer_items(self.syncclient.current_transfer_session)
+        self.assertEqual(self.syncclient.current_transfer_session.records_transferred, 0)
+        self.syncclient._push_records(chunk_size=self.chunk_size)
+        self.assertEqual(self.syncclient.current_transfer_session.records_transferred, self.chunk_size)
+
+    @mock_patch_decorator
+    def test_pull_records(self):
+        resp = self.build_buffer_items(self.syncclient.current_transfer_session)
+        NetworkSyncConnection._request.return_value.json.return_value = json.loads(resp)
+        Buffer.objects.filter(transfer_session=self.syncclient.current_transfer_session).delete()
+        self.assertEqual(Buffer.objects.filter(transfer_session=self.syncclient.current_transfer_session).count(), 0)
+        self.assertEqual(self.syncclient.current_transfer_session.records_transferred, 0)
+        self.syncclient._pull_records(chunk_size=self.chunk_size)
+        self.assertEqual(Buffer.objects.filter(transfer_session=self.syncclient.current_transfer_session).count(), self.chunk_size)
+        self.assertEqual(self.syncclient.current_transfer_session.records_transferred, self.chunk_size)
+
+    @mock_patch_decorator
+    def test_create_transfer_session_push(self):
+        self.syncclient.current_transfer_session.active = False
+        self.syncclient.current_transfer_session.save()
+        self.assertEqual(TransferSession.objects.filter(active=True).count(), 0)
+        self.syncclient._create_transfer_session(True, 'filter')
+        self.assertEqual(TransferSession.objects.filter(active=True).count(), 1)
+
+    @mock_patch_decorator
+    def test_close_transfer_session_push(self):
+        self.assertEqual(TransferSession.objects.filter(active=True).count(), 1)
+        self.syncclient._close_transfer_session()
+        self.assertEqual(TransferSession.objects.filter(active=True).count(), 0)
+
+    @mock_patch_decorator
+    def test_close_sync_session(self):
+        self.assertEqual(SyncSession.objects.filter(active=True).count(), 1)
+        self.syncclient._close_transfer_session()
+        self.syncclient.close_sync_session()
+        self.assertEqual(SyncSession.objects.filter(active=True).count(), 0)

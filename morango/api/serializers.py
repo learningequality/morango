@@ -1,5 +1,6 @@
 from django.db import transaction
 from rest_framework import serializers, exceptions
+import json
 
 from .fields import PublicKeyField
 from ..models import Certificate, Nonce, SyncSession, TransferSession, InstanceIDModel, Buffer, SyncableModel, RecordMaxCounterBuffer
@@ -35,15 +36,15 @@ class SyncSessionSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = SyncSession
-        fields = ('id', 'start_timestamp', 'last_activity_timestamp', 'active', 'local_certificate', 'remote_certificate', 'profile', 'connection_kind', 'connection_path', 'local_ip', 'remote_ip', 'local_instance', 'remote_instance')
-        read_only_fields = ('start_timestamp', 'last_activity_timestamp', 'active', 'local_certificate', 'connection_kind', 'local_ip', 'remote_ip', 'local_instance',)
+        fields = ('id', 'start_timestamp', 'last_activity_timestamp', 'active', 'client_certificate', 'server_certificate', 'profile', 'connection_kind', 'connection_path', 'client_ip', 'server_ip', 'client_instance', 'server_instance')
+        read_only_fields = ('start_timestamp', 'last_activity_timestamp', 'active', 'client_certificate', 'connection_kind', 'client_ip', 'server_ip', 'client_instance',)
 
 
 class TransferSessionSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = TransferSession
-        fields = ('id', 'start_timestamp', 'last_activity_timestamp', 'active', 'filter', 'push', 'records_transferred', 'records_total', 'sync_session', 'remote_fsic', 'local_fsic',)
+        fields = ('id', 'start_timestamp', 'last_activity_timestamp', 'active', 'filter', 'push', 'records_transferred', 'records_total', 'sync_session', 'server_fsic', 'client_fsic',)
         read_only_fields = ('start_timestamp', 'last_activity_timestamp', 'active', 'records_transferred',)
 
 
@@ -77,7 +78,11 @@ class BufferSerializer(serializers.ModelSerializer):
             Model = SyncableModel
         expected_model_uuid = Model.compute_namespaced_id(data["partition"], data["source_id"], data["model_name"])
         if expected_model_uuid != data["model_uuid"]:
-            raise serializers.ValidationError({"model_uuid": "Does not match results of calling {}.compute_namespaced_id".format(Model.__class__.__name__)})
+            # we sometimes calculate ids based on placeholders, so we recompute ids with those parameters
+            model = Model.deserialize(json.loads(data['serialized']))
+            expected_model_uuid = model.compute_namespaced_id(model.calculate_partition(), data['source_id'], data['model_name'])
+            if expected_model_uuid != data['model_uuid']:
+                raise serializers.ValidationError({"model_uuid": "Does not match results of calling {}.compute_namespaced_id".format(Model.__class__.__name__)})
 
         # ensure the profile is marked onto the buffer record
         data["profile"] = transfer_session.sync_session.profile

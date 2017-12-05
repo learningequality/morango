@@ -1,7 +1,7 @@
 import json
 import mptt
 import mptt.models
-import six
+from django.utils.six import string_types
 import string
 
 from django.core.management import call_command
@@ -99,6 +99,7 @@ class Certificate(mptt.models.MPTTModel, UUIDModelMixin):
             "id": self.id,
             "parent_id": self.parent_id,
             "profile": self.profile,
+            "salt": self.salt,
             "scope_definition_id": self.scope_definition_id,
             "scope_version": self.scope_version,
             "scope_params": self.scope_params,
@@ -113,6 +114,7 @@ class Certificate(mptt.models.MPTTModel, UUIDModelMixin):
             id=data["id"],
             parent_id=data["parent_id"],
             profile=data["profile"],
+            salt=data.get('salt') or '',
             scope_definition_id=data["scope_definition_id"],
             scope_version=data["scope_version"],
             scope_params=data["scope_params"],
@@ -161,7 +163,7 @@ class Certificate(mptt.models.MPTTModel, UUIDModelMixin):
     def save_certificate_chain(cls, cert_chain, expected_last_id=None):
 
         # parse the chain from json if needed
-        if isinstance(cert_chain, six.string_types):
+        if isinstance(cert_chain, string_types):
             cert_chain = json.loads(cert_chain)
 
         # start from the bottom of the chain
@@ -281,7 +283,7 @@ class ScopeDefinition(models.Model):
         return Scope(definition=self, params=params)
 
     def get_description(self, params):
-        if isinstance(params, six.string_types):
+        if isinstance(params, string_types):
             params = json.loads(params)
         return string.Template(self.description).safe_substitute(params)
 
@@ -291,7 +293,7 @@ class Filter(object):
 
     def __init__(self, template, params={}):
         # ensure params have been deserialized
-        if isinstance(params, six.string_types):
+        if isinstance(params, string_types):
             params = json.loads(params)
         self._template = template
         self._params = params

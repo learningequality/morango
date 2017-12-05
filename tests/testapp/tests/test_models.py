@@ -3,6 +3,7 @@ import factory
 from django.test import TestCase
 from morango.models import DatabaseMaxCounter
 from morango.certificates import Filter
+from django.utils.six import iteritems
 
 
 class DatabaseMaxCounterFactory(factory.DjangoModelFactory):
@@ -56,3 +57,37 @@ class FilterMaxCounterTestCase(TestCase):
         fmcs = DatabaseMaxCounter.calculate_filter_max_counters(Filter(self.user_prefix_a + "\n" + self.user2_prefix_b))
         self.assertEqual(fmcs[self.instance_a], 17)
         self.assertEqual(fmcs[self.instance_b], 10)
+
+
+class DatabaseMaxCounterUpdateCalculation(TestCase):
+
+    def setUp(self):
+        self.filter = "filter"
+
+    def test_update_all_fsics(self):
+        client_fsic = {'a'*32: 2, 'b'*32: 2, 'c'*32: 2}
+        server_fsic = {'a'*32: 1, 'b'*32: 1, 'c'*32: 1}
+        self.assertFalse(DatabaseMaxCounter.objects.filter(counter=2).exists())
+        for instance_id, counter in iteritems(server_fsic):
+            DatabaseMaxCounter.objects.create(instance_id=instance_id, counter=counter, partition=self.filter)
+        DatabaseMaxCounter.update_fsics(client_fsic, Filter(self.filter))
+        self.assertTrue(DatabaseMaxCounter.objects.filter(counter=2).exists())
+        self.assertFalse(DatabaseMaxCounter.objects.filter(counter=1).exists())
+
+    def test_update_some_fsics(self):
+        client_fsic = {'a'*32: 1, 'e'*32: 2, 'c'*32: 1}
+        server_fsic = {'a'*32: 2, 'b'*32: 1, 'c'*32: 2}
+        self.assertFalse(DatabaseMaxCounter.objects.filter(instance_id='e'*32).exists())
+        for instance_id, counter in iteritems(server_fsic):
+            DatabaseMaxCounter.objects.create(instance_id=instance_id, counter=counter, partition=self.filter)
+        DatabaseMaxCounter.update_fsics(client_fsic, Filter(self.filter))
+        self.assertTrue(DatabaseMaxCounter.objects.filter(instance_id='e'*32).exists())
+
+    def test_no_fsics_get_updated(self):
+        client_fsic = {'a'*32: 1, 'b'*32: 1, 'c'*32: 1}
+        server_fsic = {'a'*32: 2, 'b'*32: 2, 'c'*32: 2}
+        self.assertFalse(DatabaseMaxCounter.objects.filter(counter=1).exists())
+        for instance_id, counter in iteritems(server_fsic):
+            DatabaseMaxCounter.objects.create(instance_id=instance_id, counter=counter, partition=self.filter)
+        DatabaseMaxCounter.update_fsics(client_fsic, Filter(self.filter))
+        self.assertFalse(DatabaseMaxCounter.objects.filter(counter=1).exists())

@@ -9,6 +9,7 @@ from django.core.exceptions import ObjectDoesNotExist
 from django.db import connection, models, transaction
 from django.db.models import F
 from django.utils import timezone
+from django.utils.six import iteritems
 from morango.utils.register_models import _profile_models
 
 from .certificates import Certificate, ScopeDefinition, Nonce, Filter
@@ -143,8 +144,8 @@ class SyncSession(models.Model):
     is_server = models.BooleanField(default=False)
 
     # track the certificates being used by each side for this session
-    local_certificate = models.ForeignKey(Certificate, blank=True, null=True, related_name="syncsessions_local")
-    remote_certificate = models.ForeignKey(Certificate, blank=True, null=True, related_name="syncsessions_remote")
+    client_certificate = models.ForeignKey(Certificate, blank=True, null=True, related_name="syncsessions_client")
+    server_certificate = models.ForeignKey(Certificate, blank=True, null=True, related_name="syncsessions_server")
 
     # track the morango profile this sync session is happening for
     profile = models.CharField(max_length=40)
@@ -154,12 +155,12 @@ class SyncSession(models.Model):
     connection_path = models.CharField(max_length=1000)  # file path if kind=disk, and base URL of server if kind=network
 
     # for network connections, keep track of the IPs on either end
-    local_ip = models.CharField(max_length=100, blank=True)
-    remote_ip = models.CharField(max_length=100, blank=True)
+    client_ip = models.CharField(max_length=100, blank=True)
+    server_ip = models.CharField(max_length=100, blank=True)
 
     # serialized copies of the client and server instance model fields, for debugging/tracking purposes
-    local_instance = models.TextField(default=u"{}")
-    remote_instance = models.TextField(default=u"{}")
+    client_instance = models.TextField(default=u"{}")
+    server_instance = models.TextField(default=u"{}")
 
 
 class TransferSession(models.Model):
@@ -181,8 +182,8 @@ class TransferSession(models.Model):
     last_activity_timestamp = models.DateTimeField(blank=True)
 
     # we keep track of FSICs for both client and server
-    local_fsic = models.TextField(blank=True, default="{}")
-    remote_fsic = models.TextField(blank=True, default="{}")
+    client_fsic = models.TextField(blank=True, default="{}")
+    server_fsic = models.TextField(blank=True, default="{}")
 
     def get_filter(self):
         return Filter(self.filter)
@@ -300,6 +301,25 @@ class DatabaseMaxCounter(AbstractCounter):
         unique_together = ("instance_id", "partition")
 
     @classmethod
+    @transaction.atomic
+    def update_fsics(cls, fsics, sync_filter):
+        internal_fsic = DatabaseMaxCounter.calculate_filter_max_counters(sync_filter)
+        updated_fsic = {}
+        for key, value in iteritems(fsics):
+            if key in internal_fsic:
+                # if same instance id, update fsic with larger value
+                if fsics[key] > internal_fsic[key]:
+                    updated_fsic[key] = fsics[key]
+            else:
+                # if instance id is not present, add it to updated fsics
+                updated_fsic[key] = fsics[key]
+
+        # load database max counters
+        for (key, value) in iteritems(updated_fsic):
+            for f in sync_filter:
+                DatabaseMaxCounter.objects.update_or_create(instance_id=key, partition=f, defaults={'counter': value})
+
+    @classmethod
     def calculate_filter_max_counters(cls, filters):
 
         # create string of prefixes to place into sql statement
@@ -358,7 +378,7 @@ class SyncableModel(UUIDModelMixin):
     ID_PLACEHOLDER = "${id}"
 
     _morango_internal_fields_not_to_serialize = ('_morango_dirty_bit',)
-    _morango_model_dependencies = ()
+    morango_model_dependencies = ()
     morango_fields_not_to_serialize = ()
     morango_profile = None
 
@@ -387,11 +407,12 @@ class SyncableModel(UUIDModelMixin):
             self._morango_dirty_bit = False
         super(SyncableModel, self).save(*args, **kwargs)
 
-    def serialize(self):
+    def serialize(self, data={}):
         """All concrete fields of the ``SyncableModel`` subclass, except for those specifically blacklisted, are returned in a dict."""
         # NOTE: code adapted from https://github.com/django/django/blob/master/django/forms/models.py#L75
         opts = self._meta
-        data = {}
+        if not data:
+            data = {}
 
         for f in opts.concrete_fields:
             if f.attname in self.morango_fields_not_to_serialize:
@@ -401,15 +422,16 @@ class SyncableModel(UUIDModelMixin):
             # case if model is morango mptt
             if f.attname in getattr(self, '_internal_mptt_fields_not_to_serialize', '_internal_fields_not_to_serialize'):
                 continue
+            if f.attname in data:
+                continue
             data[f.attname] = f.value_from_object(self)
         return data
 
     @classmethod
-    def deserialize(cls, dict_model):
+    def deserialize(cls, dict_model, **kwargs):
         """Returns an unsaved class object based on the valid properties passed in."""
-        kwargs = {}
         for f in cls._meta.concrete_fields:
-            if f.attname in dict_model:
+            if f.attname in dict_model and f.attname not in kwargs:
                 kwargs[f.attname] = dict_model[f.attname]
         return cls(**kwargs)
 
