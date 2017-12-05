@@ -110,7 +110,7 @@ class InstanceIDModel(UUIDModelMixin):
         mac = uuid.getnode()
         if (mac >> 40) % 2 == 0:  # 8th bit (of 48 bits, from left) is 1 if MAC is fake
             hashable_identifier = "{}:{}".format(kwargs['database'].id, mac)
-            kwargs["node_id"] = hashlib.sha1(hashable_identifier).hexdigest()[:20]
+            kwargs["node_id"] = hashlib.sha1(hashable_identifier.encode('utf-8')).hexdigest()[:20]
         else:
             kwargs["node_id"] = ""
 
