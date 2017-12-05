@@ -114,9 +114,10 @@ class InstanceIDModel(UUIDModelMixin):
 
         # do within transaction so we only ever have 1 current instance ID
         with transaction.atomic():
-            obj, created = cls.objects.get_or_create(**kwargs)
-            if created:
-                cls.objects.exclude(id=obj.id).update(current=False)
+            InstanceIDModel.objects.filter(current=True).update(current=False)
+            obj, created = InstanceIDModel.objects.get_or_create(**kwargs)
+            obj.current = True
+            obj.save()
 
         return obj, created
 
