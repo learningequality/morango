@@ -1,3 +1,5 @@
+from __future__ import unicode_literals
+
 import json
 import mptt
 import mptt.models
@@ -331,7 +333,7 @@ class Filter(object):
         return iter(self._filter_tuple)
 
     def __str__(self):
-        return u"\n".join(self._filter_tuple)
+        return "\n".join(self._filter_tuple)
 
     def __len__(self):
         return len(self._filter_tuple)

@@ -1,3 +1,5 @@
+from __future__ import unicode_literals
+
 import json
 import hashlib
 import os
@@ -154,7 +156,7 @@ class SyncSession(models.Model):
     profile = models.CharField(max_length=40)
 
     # information about the connection over which this sync session is happening
-    connection_kind = models.CharField(max_length=10, choices=[(u"network", u"Network"), (u"disk", u"Disk")])
+    connection_kind = models.CharField(max_length=10, choices=[("network", "Network"), ("disk", "Disk")])
     connection_path = models.CharField(max_length=1000)  # file path if kind=disk, and base URL of server if kind=network
 
     # for network connections, keep track of the IPs on either end
@@ -162,8 +164,8 @@ class SyncSession(models.Model):
     server_ip = models.CharField(max_length=100, blank=True)
 
     # serialized copies of the client and server instance model fields, for debugging/tracking purposes
-    client_instance = models.TextField(default=u"{}")
-    server_instance = models.TextField(default=u"{}")
+    client_instance = models.TextField(default="{}")
+    server_instance = models.TextField(default="{}")
 
 
 class TransferSession(models.Model):
@@ -410,13 +412,12 @@ class SyncableModel(UUIDModelMixin):
             self._morango_dirty_bit = False
         super(SyncableModel, self).save(*args, **kwargs)
 
-    def serialize(self, data={}):
+    def serialize(self):
         """All concrete fields of the ``SyncableModel`` subclass, except for those specifically blacklisted, are returned in a dict."""
         # NOTE: code adapted from https://github.com/django/django/blob/master/django/forms/models.py#L75
         opts = self._meta
-        if not data:
-            data = {}
 
+        data = {}
         for f in opts.concrete_fields:
             if f.attname in self.morango_fields_not_to_serialize:
                 continue
@@ -425,16 +426,18 @@ class SyncableModel(UUIDModelMixin):
             # case if model is morango mptt
             if f.attname in getattr(self, '_internal_mptt_fields_not_to_serialize', '_internal_fields_not_to_serialize'):
                 continue
-            if f.attname in data:
-                continue
-            data[f.attname] = f.value_from_object(self)
+            if hasattr(f, 'value_from_object_json_compatible'):
+                data[f.attname] = f.value_from_object_json_compatible(self)
+            else:
+                data[f.attname] = f.value_from_object(self)
         return data
 
     @classmethod
-    def deserialize(cls, dict_model, **kwargs):
+    def deserialize(cls, dict_model):
         """Returns an unsaved class object based on the valid properties passed in."""
+        kwargs = {}
         for f in cls._meta.concrete_fields:
-            if f.attname in dict_model and f.attname not in kwargs:
+            if f.attname in dict_model:
                 kwargs[f.attname] = dict_model[f.attname]
         return cls(**kwargs)
 

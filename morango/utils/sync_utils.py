@@ -1,4 +1,3 @@
-import importlib
 import json
 import functools
 
@@ -11,10 +10,6 @@ from morango.certificates import Filter
 from morango.models import Buffer, DatabaseMaxCounter, DeletedModels, InstanceIDModel, RecordMaxCounter, RecordMaxCounterBuffer, Store
 from morango.utils.register_models import _profile_models
 
-# custom JSON serialization class
-JSON_SERIALIZER_CLASS_PATH = getattr(settings, "MORANGO_JSON_SERIALIZER_CLASS", "morango.utils.encoders")
-JSON_SERIALIZER_MODULE = importlib.import_module(JSON_SERIALIZER_CLASS_PATH)
-JSON_SERIALIZER = getattr(JSON_SERIALIZER_MODULE, 'MorangoJSONEncoder')
 
 def _join_with_logical_operator(lst, operator):
     op = ") {operator} (".format(operator=operator)
@@ -74,7 +69,7 @@ def _serialize_into_store(profile, filter=None):
                     # set new serialized data on this store model
                     ser_dict = json.loads(store_model.serialized)
                     ser_dict.update(app_model.serialize())
-                    store_model.serialized = JSON_SERIALIZER().encode(ser_dict)
+                    store_model.serialized = DjangoJSONEncoder().encode(ser_dict)
 
                     # create or update instance and counter on the record max counter for this store model
                     RecordMaxCounter.objects.update_or_create(defaults={'counter': current_id.counter},
@@ -91,7 +86,7 @@ def _serialize_into_store(profile, filter=None):
                 except Store.DoesNotExist:
                     kwargs = {
                         'id': app_model.id,
-                        'serialized': JSON_SERIALIZER().encode(app_model.serialize()),
+                        'serialized': DjangoJSONEncoder().encode(app_model.serialize()),
                         'last_saved_instance': current_id.id,
                         'last_saved_counter': current_id.counter,
                         'model_name': app_model.morango_model_name,
