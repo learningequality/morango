@@ -1,4 +1,3 @@
--r base.txt
 # These are for testing
 fake-factory
 factory-boy
@@ -7,4 +6,3 @@ mock
 pytest
 pytest-cov
 pytest-django
-cryptography
