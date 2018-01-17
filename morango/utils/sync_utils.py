@@ -79,9 +79,10 @@ def _serialize_into_store(profile, filter=None):
                     # update last saved bys for this store model
                     store_model.last_saved_instance = current_id.id
                     store_model.last_saved_counter = current_id.counter
+                    store_model.deleted = False
 
                     # update fields for this store model
-                    store_model.save(update_fields=['serialized', 'last_saved_instance', 'last_saved_counter', 'conflicting_serialized_data'])
+                    store_model.save(update_fields=['serialized', 'last_saved_instance', 'last_saved_counter', 'conflicting_serialized_data', 'deleted'])
 
                 except Store.DoesNotExist:
                     kwargs = {
