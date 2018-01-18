@@ -194,6 +194,18 @@ class SerializeIntoStoreTestCase(TestCase):
         self.mc.serialize_into_store()
         self.assertEqual(Store.objects.get(id=log.id)._self_ref_fk, '')
 
+    def test_previously_deleted_store_flag_resets(self):
+        # create and delete object
+        user = MyUser.objects.create(username='user')
+        self.mc.serialize_into_store()
+        MyUser.objects.all().delete()
+        self.mc.serialize_into_store()
+        self.assertTrue(Store.objects.get(id=user.id).deleted)
+        # recreate object with same id
+        user = MyUser.objects.create(username='user')
+        # ensure deleted flag is updated after recreation
+        self.mc.serialize_into_store()
+        self.assertFalse(Store.objects.get(id=user.id).deleted)
 
 class RecordMaxCounterUpdatesDuringSerialization(TestCase):
 
