@@ -1,7 +1,7 @@
 from __future__ import unicode_literals
 
-import json
 import hashlib
+import json
 import os
 import platform
 import sys
@@ -15,8 +15,9 @@ from django.utils import timezone
 from django.utils.six import iteritems
 from morango.utils.register_models import _profile_models
 
-from .certificates import Certificate, ScopeDefinition, Nonce, Filter
+from .certificates import Certificate, Filter, Nonce, ScopeDefinition
 from .manager import SyncableModelManager
+from .utils import proquint
 from .utils.uuids import UUIDField, UUIDModelMixin, sha2_uuid
 
 
@@ -130,6 +131,9 @@ class InstanceIDModel(UUIDModelMixin):
     def get_current_instance_and_increment_counter():
         InstanceIDModel.objects.filter(current=True).update(counter=F('counter') + 1)
         return InstanceIDModel.objects.get(current=True)
+
+    def get_proquint(self):
+        return proquint.from_int(int(self.id[:8], 16))
 
 
 class SyncSession(models.Model):

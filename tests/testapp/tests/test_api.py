@@ -1,6 +1,7 @@
 import base64
 import json
 import sys
+import mock
 import uuid
 
 from django.core.urlresolvers import reverse
@@ -821,3 +822,17 @@ class BufferEndpointTestCase(CertificateTestCaseMixin, APITestCase):
             offset=3,
             expected_count=2,
         )
+
+
+class MorangoInfoTestCase(BaseTestCase):
+
+    def setUp(self):
+        InstanceIDModel.get_or_create_current_instance()
+        self.m_info = self.client.get(reverse('morangoinfo-detail', kwargs={"pk": 1}), format='json')
+
+    def test_id_changes_id_hash_changes(self):
+        old_id_hash = self.m_info.data['instance_hash']
+        with mock.patch('platform.platform', return_value='platform'):
+            InstanceIDModel.get_or_create_current_instance()
+            m_info = self.client.get(reverse('morangoinfo-detail', kwargs={"pk": 1}), format='json')
+        self.assertNotEqual(m_info.data['instance_hash'], old_id_hash)
