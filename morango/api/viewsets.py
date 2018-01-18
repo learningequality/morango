@@ -1,6 +1,8 @@
 import json
+import platform
 import uuid
 
+import morango
 from django.conf import settings
 from django.core.exceptions import ValidationError
 from django.db import transaction
@@ -8,7 +10,7 @@ from django.utils import timezone
 from django.utils.six import iteritems
 from ipware.ip import get_ip
 from morango.certificates import Filter
-from morango.models import Buffer, DatabaseMaxCounter, RecordMaxCounterBuffer
+from morango.models import Buffer, DatabaseMaxCounter, InstanceIDModel, RecordMaxCounterBuffer
 from morango.utils.sync_utils import (_dequeue_into_store, _queue_into_buffer,
                                       _serialize_into_store)
 from rest_framework import (decorators, mixins, pagination, response, status,
@@ -340,3 +342,14 @@ class BufferViewSet(mixins.ListModelMixin, viewsets.GenericViewSet):
         session_id = self.request.query_params["transfer_session_id"]
 
         return models.Buffer.objects.filter(transfer_session_id=session_id)
+
+
+class MorangoInfoViewSet(viewsets.ViewSet):
+
+    def retrieve(self, request, pk=None):
+        (id_model, _) = InstanceIDModel.get_or_create_current_instance()
+        m_info = {'instance_hash': id_model.get_proquint(),
+                  'instance_id': id_model.id,
+                  'system_os': platform.system(),
+                  'version': morango.__version__}
+        return response.Response(m_info)
