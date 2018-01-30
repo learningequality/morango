@@ -18,6 +18,9 @@ try:
     crypto_backend = default_backend()
     from cryptography.hazmat.primitives.asymmetric import rsa as crypto_rsa, padding as crypto_padding
     from cryptography.hazmat.primitives import serialization as crypto_serialization, hashes as crypto_hashes
+    # Ignore cryptography versions that do not support the 'sign' method
+    if not hasattr(crypto_rsa.RSAPrivateKey, 'sign'):
+        raise ImportError
     CRYPTOGRAPHY_EXISTS = True
 except:
     CRYPTOGRAPHY_EXISTS = False
