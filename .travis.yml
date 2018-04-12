@@ -1,6 +1,11 @@
 dist: trusty
 
+sudo: required
+
 language: python
+
+services:
+  - postgresql
 
 python:
   - "2.7"
@@ -19,6 +24,9 @@ env:
   - DJANGO="1.11" CRYPTOGRAPHY="2.0"
 
 matrix:
+  include:
+  - python: "2.7"
+    env: POSTGRES="yes"
   exclude:
   - python: "2.7"
     env: DJANGO="1.10" CRYPTOGRAPHY="1.2"
@@ -45,6 +53,9 @@ matrix:
 before_install:
   - pip install tox tox-travis codecov
 
+before_script:
+  - psql -c 'create database travis_ci_test;' -U postgres
+
 # command to run tests, e.g. python setup.py test
 script:
   - tox
@@ -53,3 +64,5 @@ after_success:
   - coverage combine
   - codecov
 
+notifications:
+    email: False

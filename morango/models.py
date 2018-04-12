@@ -332,14 +332,14 @@ class DatabaseMaxCounter(AbstractCounter):
     def calculate_filter_max_counters(cls, filters):
 
         # create string of prefixes to place into sql statement
-        condition = " UNION ".join(["SELECT '{}' AS a".format(prefix) for prefix in filters])
+        condition = " UNION ".join(["SELECT CAST('{}' as TEXT) AS a".format(prefix) for prefix in filters])
 
         filter_max_calculation = """
         SELECT PMC.instance, MIN(PMC.counter)
         FROM
             (
             SELECT dmc.instance_id as instance, MAX(dmc.counter) as counter, filter as filter_partition
-            FROM {dmc_table} as dmc, (SELECT T.a as filter FROM ({filter_list}) as T)
+            FROM {dmc_table} as dmc, (SELECT T.a as filter FROM ({filter_list}) as T) as foo
             WHERE filter LIKE dmc.partition || '%'
             GROUP BY instance, filter_partition
             ) as PMC
@@ -351,7 +351,8 @@ class DatabaseMaxCounter(AbstractCounter):
 
         with connection.cursor() as cursor:
             cursor.execute(filter_max_calculation)
-            return dict(cursor.fetchall())
+            # try to get hex value because postgres returns values as uuid
+            return {getattr(tup[0], 'hex', tup[0]): tup[1] for tup in cursor.fetchall()}
 
 
 class RecordMaxCounter(AbstractCounter):
