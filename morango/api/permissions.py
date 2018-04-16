@@ -31,7 +31,7 @@ class BasicMultiArgumentAuthentication(authentication.BasicAuthentication):
                 credentials[key] = val
 
         # authenticate the user via Django's auth backends
-        user = authenticate(request=request, **credentials)
+        user = authenticate(**credentials)
 
         if user is None:
             raise exceptions.AuthenticationFailed('Invalid credentials.')
