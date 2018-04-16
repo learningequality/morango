@@ -1,4 +1,4 @@
-from base import BaseSQLWrapper
+from morango.utils.backends.base import BaseSQLWrapper
 from morango.models import (Buffer, RecordMaxCounter, RecordMaxCounterBuffer,
                             Store)
 

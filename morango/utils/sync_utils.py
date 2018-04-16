@@ -12,7 +12,7 @@ from morango.models import (Buffer, DatabaseMaxCounter, DeletedModels,
                             InstanceIDModel, RecordMaxCounter,
                             RecordMaxCounterBuffer, Store)
 from morango.utils.register_models import _profile_models
-from backends.utils import load_backend
+from morango.utils.backends.utils import load_backend
 
 DBBackend = load_backend(connection).SQLWrapper()
 
