@@ -228,7 +228,7 @@ def _queue_into_buffer(transfersession):
                             (instance_id, counter, transfer_session_id, model_uuid)
                             SELECT instance_id, counter, '{transfer_session_id}', store_model_id
                             FROM {record_max_counter} AS rmc
-                            INNER JOIN {outgoing_buffer} AS buffer ON rmc.store_model_id = buffer.model_uuid AND rmc.instance_id = buffer.last_saved_instance
+                            INNER JOIN {outgoing_buffer} AS buffer ON rmc.store_model_id = buffer.model_uuid
                             WHERE buffer.transfer_session_id = '{transfer_session_id}'
                             """.format(outgoing_rmcb=RecordMaxCounterBuffer._meta.db_table,
                                        transfer_session_id=transfersession.id,
