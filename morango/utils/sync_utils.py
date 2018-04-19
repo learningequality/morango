@@ -153,7 +153,7 @@ def _deserialize_from_store(profile):
             for klass in klass_model.morango_model_dependencies:
                 query |= Q(model_name=klass.morango_model_name)
             if self_ref_fk:
-                clean_parents = Store.objects.filter(dirty_bit=False, profile=profile).filter(query).annotate(id_cast=Cast('id', TextField())).annotate(fixed_id=Func(F('id_cast'), Value('-'), Value(''), function='replace',)).values_list("fixed_id", flat=True)
+                clean_parents = Store.objects.filter(dirty_bit=False, profile=profile).filter(query).char_ids_list()
                 dirty_children = Store.objects.filter(dirty_bit=True, profile=profile) \
                                               .filter(Q(_self_ref_fk__in=clean_parents) | Q(_self_ref_fk='')).filter(query)
 
@@ -166,7 +166,7 @@ def _deserialize_from_store(profile):
                         store_model.save(update_fields=['dirty_bit'])
 
                     # update lists with new clean parents and dirty children
-                    clean_parents = Store.objects.filter(dirty_bit=False, profile=profile).filter(query).annotate(id_cast=Cast('id', TextField())).annotate(fixed_id=Func(F('id_cast'), Value('-'), Value(''), function='replace',)).values_list("fixed_id", flat=True)
+                    clean_parents = Store.objects.filter(dirty_bit=False, profile=profile).filter(query).char_ids_list()
                     dirty_children = Store.objects.filter(dirty_bit=True, profile=profile, _self_ref_fk__in=clean_parents).filter(query)
             else:
                 for store_model in Store.objects.filter(model_name=model_name, profile=profile, dirty_bit=True):
