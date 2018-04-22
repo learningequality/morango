@@ -1,15 +1,20 @@
-import json
 import functools
+import json
 
 from django.conf import settings
 from django.core.serializers.json import DjangoJSONEncoder
 from django.db import connection, transaction
-from django.db.models import Q
+from django.db.models import F, Q, CharField, Func, TextField, Value
+from django.db.models.functions import Cast
 from django.utils.six import iteritems
 from morango.certificates import Filter
-from morango.models import Buffer, DatabaseMaxCounter, DeletedModels, InstanceIDModel, RecordMaxCounter, RecordMaxCounterBuffer, Store
+from morango.models import (Buffer, DatabaseMaxCounter, DeletedModels,
+                            InstanceIDModel, RecordMaxCounter,
+                            RecordMaxCounterBuffer, Store)
 from morango.utils.register_models import _profile_models
+from morango.utils.backends.utils import load_backend
 
+DBBackend = load_backend(connection).SQLWrapper()
 
 def _join_with_logical_operator(lst, operator):
     op = ") {operator} (".format(operator=operator)
@@ -95,7 +100,7 @@ def _serialize_into_store(profile, filter=None):
                         'partition': app_model._morango_partition,
                         'source_id': app_model._morango_source_id,
                     }
-                    # check if model has FK pointing to itand add the value to a field on the store
+                    # check if model has FK pointing to it and add the value to a field on the store
                     self_ref_fk = _self_referential_fk(klass_model)
                     if self_ref_fk:
                         self_ref_fk_value = getattr(app_model, self_ref_fk)
@@ -148,7 +153,7 @@ def _deserialize_from_store(profile):
             for klass in klass_model.morango_model_dependencies:
                 query |= Q(model_name=klass.morango_model_name)
             if self_ref_fk:
-                clean_parents = Store.objects.filter(dirty_bit=False, profile=profile).filter(query).values_list("id", flat=True)
+                clean_parents = Store.objects.filter(dirty_bit=False, profile=profile).filter(query).char_ids_list()
                 dirty_children = Store.objects.filter(dirty_bit=True, profile=profile) \
                                               .filter(Q(_self_ref_fk__in=clean_parents) | Q(_self_ref_fk='')).filter(query)
 
@@ -161,7 +166,7 @@ def _deserialize_from_store(profile):
                         store_model.save(update_fields=['dirty_bit'])
 
                     # update lists with new clean parents and dirty children
-                    clean_parents = Store.objects.filter(dirty_bit=False, profile=profile).filter(query).values_list("id", flat=True)
+                    clean_parents = Store.objects.filter(dirty_bit=False, profile=profile).filter(query).char_ids_list()
                     dirty_children = Store.objects.filter(dirty_bit=True, profile=profile, _self_ref_fk__in=clean_parents).filter(query)
             else:
                 for store_model in Store.objects.filter(model_name=model_name, profile=profile, dirty_bit=True):
@@ -212,10 +217,8 @@ def _queue_into_buffer(transfersession):
         queue_buffer = """INSERT INTO {outgoing_buffer}
                         (model_uuid, serialized, deleted, last_saved_instance, last_saved_counter,
                          model_name, profile, partition, source_id, conflicting_serialized_data, transfer_session_id, _self_ref_fk)
-                        SELECT id, serialized, deleted, last_saved_instance, last_saved_counter,
-                        model_name, profile, partition, source_id, conflicting_serialized_data, '{transfer_session_id}', _self_ref_fk
-                        FROM {store}
-                        WHERE {condition}""".format(outgoing_buffer=Buffer._meta.db_table,
+                        SELECT id, serialized, deleted, last_saved_instance, last_saved_counter, model_name, profile, partition, source_id, conflicting_serialized_data, '{transfer_session_id}', _self_ref_fk
+                        FROM {store} WHERE {condition}""".format(outgoing_buffer=Buffer._meta.db_table,
                                                     transfer_session_id=transfersession.id,
                                                     condition=where_condition,
                                                     store=Store._meta.db_table)
@@ -224,232 +227,31 @@ def _queue_into_buffer(transfersession):
         queue_rmc_buffer = """INSERT INTO {outgoing_rmcb}
                             (instance_id, counter, transfer_session_id, model_uuid)
                             SELECT instance_id, counter, '{transfer_session_id}', store_model_id
-                            FROM {record_max_counter} AS rmc LEFT JOIN {outgoing_buffer} AS buffer
-                            WHERE buffer.model_uuid = rmc.store_model_id
-                            AND buffer.transfer_session_id = '{transfer_session_id}'
+                            FROM {record_max_counter} AS rmc
+                            INNER JOIN {outgoing_buffer} AS buffer ON rmc.store_model_id = buffer.model_uuid
+                            WHERE buffer.transfer_session_id = '{transfer_session_id}'
                             """.format(outgoing_rmcb=RecordMaxCounterBuffer._meta.db_table,
                                        transfer_session_id=transfersession.id,
                                        record_max_counter=RecordMaxCounter._meta.db_table,
                                        outgoing_buffer=Buffer._meta.db_table)
         cursor.execute(queue_rmc_buffer)
 
-# START of dequeuing methods
-def _dequeuing_delete_rmcb_records(cursor, transfersession_id):
-    # delete all RMCBs which are a reverse FF (store version newer than buffer version)
-    delete_rmcb_records = """DELETE FROM {rmcb}
-                             WHERE model_uuid IN
-                             (SELECT rmcb.model_uuid FROM {store} as store, {buffer} as buffer, {rmc} as rmc, {rmcb} as rmcb
-                             /*Scope to a single record*/
-                             WHERE store.id = buffer.model_uuid
-                             AND  store.id = rmc.store_model_id
-                             AND  store.id = rmcb.model_uuid
-                             /*Checks whether LSB of buffer or less is in RMC of store*/
-                             AND buffer.last_saved_instance = rmc.instance_id
-                             AND buffer.last_saved_counter <= rmc.counter
-                             AND rmcb.transfer_session_id = '{transfer_session_id}'
-                             AND buffer.transfer_session_id = '{transfer_session_id}')
-                              """.format(buffer=Buffer._meta.db_table,
-                                         store=Store._meta.db_table,
-                                         rmc=RecordMaxCounter._meta.db_table,
-                                         rmcb=RecordMaxCounterBuffer._meta.db_table,
-                                         transfer_session_id=transfersession_id)
-
-    cursor.execute(delete_rmcb_records)
-
-def _dequeuing_delete_buffered_records(cursor, transfersession_id):
-    # delete all buffer records which are a reverse FF (store version newer than buffer version)
-    delete_buffered_records = """DELETE FROM {buffer}
-                                 WHERE model_uuid in
-                                 (SELECT buffer.model_uuid FROM {store} as store, {buffer} as buffer, {rmc} as rmc
-                                 /*Scope to a single record*/
-                                 WHERE store.id = buffer.model_uuid
-                                 AND rmc.store_model_id = buffer.model_uuid
-                                 /*Checks whether LSB of buffer or less is in RMC of store*/
-                                 AND buffer.last_saved_instance = rmc.instance_id
-                                 AND buffer.last_saved_counter <= rmc.counter
-                                 AND buffer.transfer_session_id = '{transfer_session_id}')
-                              """.format(buffer=Buffer._meta.db_table,
-                                         store=Store._meta.db_table,
-                                         rmc=RecordMaxCounter._meta.db_table,
-                                         rmcb=RecordMaxCounterBuffer._meta.db_table,
-                                         transfer_session_id=transfersession_id)
-    cursor.execute(delete_buffered_records)
-
-def _dequeuing_merge_conflict_rmcb(cursor, transfersession_id):
-    # transfer record max counters for records with merge conflicts + perform max
-    merge_conflict_rmc = """REPLACE INTO {rmc} (instance_id, counter, store_model_id)
-                                SELECT rmcb.instance_id, rmcb.counter, rmcb.model_uuid
-                                FROM {rmcb} AS rmcb, {store} AS store, {rmc} AS rmc, {buffer} AS buffer
-                                /*Scope to a single record.*/
-                                WHERE store.id = rmcb.model_uuid
-                                AND store.id = rmc.store_model_id
-                                AND store.id = buffer.model_uuid
-                                /*Where buffer rmc is greater than store rmc*/
-                                AND rmcb.instance_id = rmc.instance_id
-                                AND rmcb.counter > rmc.counter
-                                AND rmcb.transfer_session_id = '{transfer_session_id}'
-                                /*Exclude fast-forwards*/
-                                AND NOT EXISTS (SELECT 1 FROM {rmcb} AS rmcb2 WHERE store.id = rmcb2.model_uuid
-                                                                              AND store.last_saved_instance = rmcb2.instance_id
-                                                                              AND store.last_saved_counter <= rmcb2.counter
-                                                                              AND rmcb2.transfer_session_id = '{transfer_session_id}')
-                           """.format(buffer=Buffer._meta.db_table,
-                                      store=Store._meta.db_table,
-                                      rmc=RecordMaxCounter._meta.db_table,
-                                      rmcb=RecordMaxCounterBuffer._meta.db_table,
-                                      transfer_session_id=transfersession_id)
-    cursor.execute(merge_conflict_rmc)
-
-def _dequeuing_merge_conflict_buffer(cursor, current_id, transfersession_id):
-    # transfer buffer serialized into conflicting store
-    merge_conflict_store = """REPLACE INTO {store} (id, serialized, deleted, last_saved_instance, last_saved_counter, model_name,
-                                                    profile, partition, source_id, conflicting_serialized_data, dirty_bit, _self_ref_fk)
-                                        SELECT store.id, store.serialized, store.deleted OR buffer.deleted, '{current_instance_id}',
-                                               {current_instance_counter}, store.model_name, store.profile, store.partition, store.source_id,
-                                               buffer.serialized || '\n' || store.conflicting_serialized_data, 1, store._self_ref_fk
-                                        FROM {buffer} AS buffer, {store} AS store
-                                        /*Scope to a single record.*/
-                                        WHERE store.id = buffer.model_uuid
-                                        AND buffer.transfer_session_id = '{transfer_session_id}'
-                                        /*Exclude fast-forwards*/
-                                        AND NOT EXISTS (SELECT 1 FROM {rmcb} AS rmcb2 WHERE store.id = rmcb2.model_uuid
-                                                                                      AND store.last_saved_instance = rmcb2.instance_id
-                                                                                      AND store.last_saved_counter <= rmcb2.counter
-                                                                                      AND rmcb2.transfer_session_id = '{transfer_session_id}')
-                                  """.format(buffer=Buffer._meta.db_table,
-                                             rmcb=RecordMaxCounterBuffer._meta.db_table,
-                                             store=Store._meta.db_table,
-                                             rmc=RecordMaxCounter._meta.db_table,
-                                             transfer_session_id=transfersession_id,
-                                             current_instance_id=current_id.id,
-                                             current_instance_counter=current_id.counter)
-    cursor.execute(merge_conflict_store)
-
-def _dequeuing_update_rmcs_last_saved_by(cursor, current_id, transfersession_id):
-    # update or create rmc for merge conflicts with local instance id
-    merge_conflict_store = """REPLACE INTO {rmc} (instance_id, counter, store_model_id)
-                            SELECT '{current_instance_id}', {current_instance_counter}, store.id
-                            FROM {store} as store, {buffer} as buffer
-                            /*Scope to a single record.*/
-                            WHERE store.id = buffer.model_uuid
-                            AND buffer.transfer_session_id = '{transfer_session_id}'
-                            /*Exclude fast-forwards*/
-                            AND NOT EXISTS (SELECT 1 FROM {rmcb} AS rmcb2 WHERE store.id = rmcb2.model_uuid
-                                                                          AND store.last_saved_instance = rmcb2.instance_id
-                                                                          AND store.last_saved_counter <= rmcb2.counter
-                                                                          AND rmcb2.transfer_session_id = '{transfer_session_id}')
-                                  """.format(buffer=Buffer._meta.db_table,
-                                             rmcb=RecordMaxCounterBuffer._meta.db_table,
-                                             store=Store._meta.db_table,
-                                             rmc=RecordMaxCounter._meta.db_table,
-                                             transfer_session_id=transfersession_id,
-                                             current_instance_id=current_id.id,
-                                             current_instance_counter=current_id.counter)
-    cursor.execute(merge_conflict_store)
-
-def _dequeuing_delete_mc_buffer(cursor, transfersession_id):
-    # delete records with merge conflicts from buffer
-    delete_mc_buffer = """DELETE FROM {buffer}
-                                WHERE EXISTS
-                                (SELECT 1 FROM {store} AS store, {buffer} AS buffer
-                                /*Scope to a single record.*/
-                                WHERE store.id = {buffer}.model_uuid
-                                AND {buffer}.transfer_session_id = '{transfer_session_id}'
-                                /*Exclude fast-forwards*/
-                                AND NOT EXISTS (SELECT 1 FROM {rmcb} AS rmcb2 WHERE store.id = rmcb2.model_uuid
-                                                                              AND store.last_saved_instance = rmcb2.instance_id
-                                                                              AND store.last_saved_counter <= rmcb2.counter
-                                                                              AND rmcb2.transfer_session_id = '{transfer_session_id}'))
-                           """.format(buffer=Buffer._meta.db_table,
-                                      store=Store._meta.db_table,
-                                      rmc=RecordMaxCounter._meta.db_table,
-                                      rmcb=RecordMaxCounterBuffer._meta.db_table,
-                                      transfer_session_id=transfersession_id)
-    cursor.execute(delete_mc_buffer)
-
-def _dequeuing_delete_mc_rmcb(cursor, transfersession_id):
-    # delete rmcb records with merge conflicts
-    delete_mc_rmc = """DELETE FROM {rmcb}
-                                WHERE EXISTS
-                                (SELECT 1 FROM {store} AS store, {rmc} AS rmc
-                                /*Scope to a single record.*/
-                                WHERE store.id = {rmcb}.model_uuid
-                                AND store.id = rmc.store_model_id
-                                /*Where buffer rmc is greater than store rmc*/
-                                AND {rmcb}.instance_id = rmc.instance_id
-                                AND {rmcb}.transfer_session_id = '{transfer_session_id}'
-                                /*Exclude fast fast-forwards*/
-                                AND NOT EXISTS (SELECT 1 FROM {rmcb} AS rmcb2 WHERE store.id = rmcb2.model_uuid
-                                                                              AND store.last_saved_instance = rmcb2.instance_id
-                                                                              AND store.last_saved_counter <= rmcb2.counter
-                                                                              AND rmcb2.transfer_session_id = '{transfer_session_id}'))
-                           """.format(buffer=Buffer._meta.db_table,
-                                      store=Store._meta.db_table,
-                                      rmc=RecordMaxCounter._meta.db_table,
-                                      rmcb=RecordMaxCounterBuffer._meta.db_table,
-                                      transfer_session_id=transfersession_id)
-    cursor.execute(delete_mc_rmc)
-
-def _dequeuing_insert_remaining_buffer(cursor, transfersession_id):
-    # insert remaining records into store
-    insert_remaining_buffer = """REPLACE INTO {store} (id, serialized, deleted, last_saved_instance, last_saved_counter,
-                                                           model_name, profile, partition, source_id, conflicting_serialized_data, dirty_bit, _self_ref_fk)
-                                SELECT buffer.model_uuid, buffer.serialized, buffer.deleted, buffer.last_saved_instance, buffer.last_saved_counter,
-                                       buffer.model_name, buffer.profile, buffer.partition, buffer.source_id, buffer.conflicting_serialized_data, 1,
-                                       buffer._self_ref_fk
-                                FROM {buffer} AS buffer
-                                WHERE buffer.transfer_session_id = '{transfer_session_id}'
-                       """.format(buffer=Buffer._meta.db_table,
-                                  store=Store._meta.db_table,
-                                  transfer_session_id=transfersession_id)
-
-    cursor.execute(insert_remaining_buffer)
-
-def _dequeuing_insert_remaining_rmcb(cursor, transfersession_id):
-    # insert remaining records into rmc
-    insert_remaining_rmcb = """REPLACE INTO {rmc} (instance_id, counter, store_model_id)
-                                SELECT rmcb.instance_id, rmcb.counter, rmcb.model_uuid
-                                FROM {rmcb} AS rmcb
-                                WHERE rmcb.transfer_session_id = '{transfer_session_id}'
-                       """.format(rmc=RecordMaxCounter._meta.db_table,
-                                  rmcb=RecordMaxCounterBuffer._meta.db_table,
-                                  transfer_session_id=transfersession_id)
-
-    cursor.execute(insert_remaining_rmcb)
-
-def _dequeuing_delete_remaining_rmcb(cursor, transfersession_id):
-    # delete the rest for this transfer session
-    delete_remaining_rmcb = """DELETE FROM {rmcb}
-                              WHERE {rmcb}.transfer_session_id = '{transfer_session_id}'
-                           """.format(rmcb=RecordMaxCounterBuffer._meta.db_table,
-                                      transfer_session_id=transfersession_id)
-
-    cursor.execute(delete_remaining_rmcb)
-
-def _dequeuing_delete_remaining_buffer(cursor, transfersession_id):
-    delete_remaining_buffer = """DELETE FROM {buffer}
-                             WHERE {buffer}.transfer_session_id = '{transfer_session_id}'
-                          """.format(buffer=Buffer._meta.db_table,
-                                     transfer_session_id=transfersession_id)
-
-    cursor.execute(delete_remaining_buffer)
-
 def _dequeue_into_store(transfersession):
     """
     Takes data from the buffers and merges into the store and record max counters.
     """
     with connection.cursor() as cursor:
-        _dequeuing_delete_rmcb_records(cursor, transfersession.id)
-        _dequeuing_delete_buffered_records(cursor, transfersession.id)
+        DBBackend._dequeuing_delete_rmcb_records(cursor, transfersession.id)
+        DBBackend._dequeuing_delete_buffered_records(cursor, transfersession.id)
         current_id = InstanceIDModel.get_current_instance_and_increment_counter()
-        _dequeuing_merge_conflict_buffer(cursor, current_id, transfersession.id)
-        _dequeuing_merge_conflict_rmcb(cursor, transfersession.id)
-        _dequeuing_update_rmcs_last_saved_by(cursor, current_id, transfersession.id)
-        _dequeuing_delete_mc_rmcb(cursor, transfersession.id)
-        _dequeuing_delete_mc_buffer(cursor, transfersession.id)
-        _dequeuing_insert_remaining_buffer(cursor, transfersession.id)
-        _dequeuing_insert_remaining_rmcb(cursor, transfersession.id)
-        _dequeuing_delete_remaining_rmcb(cursor, transfersession.id)
-        _dequeuing_delete_remaining_buffer(cursor, transfersession.id)
+        DBBackend._dequeuing_merge_conflict_buffer(cursor, current_id, transfersession.id)
+        DBBackend._dequeuing_merge_conflict_rmcb(cursor, transfersession.id)
+        DBBackend._dequeuing_update_rmcs_last_saved_by(cursor, current_id, transfersession.id)
+        DBBackend._dequeuing_delete_mc_rmcb(cursor, transfersession.id)
+        DBBackend._dequeuing_delete_mc_buffer(cursor, transfersession.id)
+        DBBackend._dequeuing_insert_remaining_buffer(cursor, transfersession.id)
+        DBBackend._dequeuing_insert_remaining_rmcb(cursor, transfersession.id)
+        DBBackend._dequeuing_delete_remaining_rmcb(cursor, transfersession.id)
+        DBBackend._dequeuing_delete_remaining_buffer(cursor, transfersession.id)
     if getattr(settings, 'MORANGO_DESERIALIZE_AFTER_DEQUEUING', True):
         _deserialize_from_store(transfersession.sync_session.profile)

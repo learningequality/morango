@@ -10,7 +10,8 @@ import uuid
 from django.conf import settings
 from django.core.exceptions import ObjectDoesNotExist
 from django.db import connection, models, transaction
-from django.db.models import F
+from django.db.models import F, Func, TextField, Value
+from django.db.models.functions import Cast
 from django.utils import timezone
 from django.utils.six import iteritems
 from morango.utils.register_models import _profile_models
@@ -239,6 +240,21 @@ class AbstractStore(models.Model):
         abstract = True
 
 
+class StoreQueryset(models.QuerySet):
+
+    def char_ids_list(self):
+        return (self.annotate(id_cast=Cast('id', TextField())) \
+               # remove dashes from char uuid
+               .annotate(fixed_id=Func(F('id_cast'), Value('-'), Value(''), function='replace',)) \
+               # return as list
+               .values_list("fixed_id", flat=True))
+
+
+class StoreManager(models.Manager):
+    def get_queryset(self):
+        return StoreQueryset(self.model, using=self._db)
+
+
 class Store(AbstractStore):
     """
     ``Store`` is the concrete model where serialized data is persisted, along with
@@ -248,6 +264,8 @@ class Store(AbstractStore):
     id = UUIDField(primary_key=True)
     # used to know which store records need to be deserialized into the app layer models
     dirty_bit = models.BooleanField(default=False)
+
+    objects = StoreManager()
 
     def _deserialize_store_model(self):
         klass_model = _profile_models[self.profile][self.model_name]
@@ -332,14 +350,14 @@ class DatabaseMaxCounter(AbstractCounter):
     def calculate_filter_max_counters(cls, filters):
 
         # create string of prefixes to place into sql statement
-        condition = " UNION ".join(["SELECT '{}' AS a".format(prefix) for prefix in filters])
+        condition = " UNION ".join(["SELECT CAST('{}' as TEXT) AS a".format(prefix) for prefix in filters])
 
         filter_max_calculation = """
         SELECT PMC.instance, MIN(PMC.counter)
         FROM
             (
             SELECT dmc.instance_id as instance, MAX(dmc.counter) as counter, filter as filter_partition
-            FROM {dmc_table} as dmc, (SELECT T.a as filter FROM ({filter_list}) as T)
+            FROM {dmc_table} as dmc, (SELECT T.a as filter FROM ({filter_list}) as T) as foo
             WHERE filter LIKE dmc.partition || '%'
             GROUP BY instance, filter_partition
             ) as PMC
@@ -351,7 +369,8 @@ class DatabaseMaxCounter(AbstractCounter):
 
         with connection.cursor() as cursor:
             cursor.execute(filter_max_calculation)
-            return dict(cursor.fetchall())
+            # try to get hex value because postgres returns values as uuid
+            return {getattr(tup[0], 'hex', tup[0]): tup[1] for tup in cursor.fetchall()}
 
 
 class RecordMaxCounter(AbstractCounter):

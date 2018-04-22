@@ -1,21 +1,24 @@
-import factory
 import json
 import uuid
 
+import factory
 from django.conf import settings
 from django.db import connection
 from django.test import TestCase
 from django.utils import timezone
 from facility_profile.models import Facility
 from morango.controller import MorangoProfileController
+from morango.models import (Buffer, DatabaseIDModel, InstanceIDModel,
+                            RecordMaxCounter, RecordMaxCounterBuffer, Store,
+                            SyncSession, TransferSession)
 from morango.syncsession import SyncClient
-from morango.models import Buffer, DatabaseIDModel, InstanceIDModel, Store, RecordMaxCounter, RecordMaxCounterBuffer, TransferSession, SyncSession
-from morango.utils.sync_utils import (_dequeue_into_store, _queue_into_buffer, _dequeuing_delete_rmcb_records,
-                                      _dequeuing_delete_buffered_records, _dequeuing_merge_conflict_rmcb, _dequeuing_merge_conflict_buffer,
-                                      _dequeuing_update_rmcs_last_saved_by, _dequeuing_delete_mc_buffer, _dequeuing_delete_mc_rmcb, _dequeuing_insert_remaining_buffer,
-                                      _dequeuing_insert_remaining_rmcb, _dequeuing_delete_remaining_rmcb, _dequeuing_delete_remaining_buffer)
-from .helpers import create_dummy_store_data, create_buffer_and_store_dummy_data
+from morango.utils.sync_utils import _dequeue_into_store, _queue_into_buffer
+from morango.utils.backends.utils import load_backend
 
+from .helpers import (create_buffer_and_store_dummy_data,
+                      create_dummy_store_data)
+
+DBBackend = load_backend(connection).SQLWrapper()
 
 class FacilityModelFactory(factory.DjangoModelFactory):
 
@@ -149,7 +152,7 @@ class BufferIntoStoreTestCase(TestCase):
         for i in self.data['model1_rmcb_ids']:
             self.assertTrue(RecordMaxCounterBuffer.objects.filter(instance_id=i, model_uuid=self.data['model1']).exists())
         with connection.cursor() as cursor:
-            _dequeuing_delete_rmcb_records(cursor, self.data['sc'].current_transfer_session.id)
+            DBBackend._dequeuing_delete_rmcb_records(cursor, self.data['sc'].current_transfer_session.id)
         for i in self.data['model1_rmcb_ids']:
             self.assertFalse(RecordMaxCounterBuffer.objects.filter(instance_id=i, model_uuid=self.data['model1']).exists())
         # ensure other records were not deleted
@@ -159,7 +162,7 @@ class BufferIntoStoreTestCase(TestCase):
     def test_dequeuing_delete_buffered_records(self):
         self.assertTrue(Buffer.objects.filter(model_uuid=self.data['model1']).exists())
         with connection.cursor() as cursor:
-            _dequeuing_delete_buffered_records(cursor, self.data['sc'].current_transfer_session.id)
+            DBBackend._dequeuing_delete_buffered_records(cursor, self.data['sc'].current_transfer_session.id)
         self.assertFalse(Buffer.objects.filter(model_uuid=self.data['model1']).exists())
         # ensure other records were not deleted
         self.assertTrue(Buffer.objects.filter(model_uuid=self.data['model2']).exists())
@@ -170,7 +173,7 @@ class BufferIntoStoreTestCase(TestCase):
         self.assertNotEqual(rmc.counter, rmcb.counter)
         self.assertGreaterEqual(rmcb.counter, rmc.counter)
         with connection.cursor() as cursor:
-            _dequeuing_merge_conflict_rmcb(cursor, self.data['sc'].current_transfer_session.id)
+            DBBackend._dequeuing_merge_conflict_rmcb(cursor, self.data['sc'].current_transfer_session.id)
         rmc = RecordMaxCounter.objects.get(instance_id=self.data['model2_rmc_ids'][0], store_model_id=self.data['model2'])
         rmcb = RecordMaxCounterBuffer.objects.get(instance_id=self.data['model2_rmc_ids'][0], model_uuid=self.data['model2'])
         self.assertEqual(rmc.counter, rmcb.counter)
@@ -181,7 +184,7 @@ class BufferIntoStoreTestCase(TestCase):
         self.assertNotEqual(rmc.counter, rmcb.counter)
         self.assertGreaterEqual(rmc.counter, rmcb.counter)
         with connection.cursor() as cursor:
-            _dequeuing_merge_conflict_rmcb(cursor, self.data['sc'].current_transfer_session.id)
+            DBBackend._dequeuing_merge_conflict_rmcb(cursor, self.data['sc'].current_transfer_session.id)
         rmc = RecordMaxCounter.objects.get(instance_id=self.data['model5_rmc_ids'][0], store_model_id=self.data['model5'])
         rmcb = RecordMaxCounterBuffer.objects.get(instance_id=self.data['model5_rmc_ids'][0], model_uuid=self.data['model5'])
         self.assertNotEqual(rmc.counter, rmcb.counter)
@@ -194,7 +197,7 @@ class BufferIntoStoreTestCase(TestCase):
         self.assertFalse(store.deleted)
         with connection.cursor() as cursor:
             current_id = InstanceIDModel.get_current_instance_and_increment_counter()
-            _dequeuing_merge_conflict_buffer(cursor, current_id, self.data['sc'].current_transfer_session.id)
+            DBBackend._dequeuing_merge_conflict_buffer(cursor, current_id, self.data['sc'].current_transfer_session.id)
         store = Store.objects.get(id=self.data['model2'])
         self.assertEqual(store.last_saved_instance, current_id.id)
         self.assertEqual(store.last_saved_counter, current_id.counter)
@@ -207,7 +210,7 @@ class BufferIntoStoreTestCase(TestCase):
         self.assertEqual(store.conflicting_serialized_data, "store")
         with connection.cursor() as cursor:
             current_id = InstanceIDModel.get_current_instance_and_increment_counter()
-            _dequeuing_merge_conflict_buffer(cursor, current_id, self.data['sc'].current_transfer_session.id)
+            DBBackend._dequeuing_merge_conflict_buffer(cursor, current_id, self.data['sc'].current_transfer_session.id)
         store = Store.objects.get(id=self.data['model5'])
         self.assertEqual(store.last_saved_instance, current_id.id)
         self.assertEqual(store.last_saved_counter, current_id.counter)
@@ -217,13 +220,13 @@ class BufferIntoStoreTestCase(TestCase):
         self.assertFalse(RecordMaxCounter.objects.filter(instance_id=self.current_id.id).exists())
         with connection.cursor() as cursor:
             current_id = InstanceIDModel.get_current_instance_and_increment_counter()
-            _dequeuing_update_rmcs_last_saved_by(cursor, current_id, self.data['sc'].current_transfer_session.id)
+            DBBackend._dequeuing_update_rmcs_last_saved_by(cursor, current_id, self.data['sc'].current_transfer_session.id)
         self.assertTrue(RecordMaxCounter.objects.filter(instance_id=current_id.id).exists())
 
     def test_dequeuing_delete_mc_buffer(self):
         self.assertTrue(Buffer.objects.filter(model_uuid=self.data['model2']).exists())
         with connection.cursor() as cursor:
-            _dequeuing_delete_mc_buffer(cursor, self.data['sc'].current_transfer_session.id)
+            DBBackend._dequeuing_delete_mc_buffer(cursor, self.data['sc'].current_transfer_session.id)
         self.assertFalse(Buffer.objects.filter(model_uuid=self.data['model2']).exists())
         # ensure other records were not deleted
         self.assertTrue(Buffer.objects.filter(model_uuid=self.data['model3']).exists())
@@ -231,7 +234,7 @@ class BufferIntoStoreTestCase(TestCase):
     def test_dequeuing_delete_mc_rmcb(self):
         self.assertTrue(RecordMaxCounterBuffer.objects.filter(model_uuid=self.data['model2'], instance_id=self.data['model2_rmcb_ids'][0]).exists())
         with connection.cursor() as cursor:
-            _dequeuing_delete_mc_rmcb(cursor, self.data['sc'].current_transfer_session.id)
+            DBBackend._dequeuing_delete_mc_rmcb(cursor, self.data['sc'].current_transfer_session.id)
         self.assertFalse(RecordMaxCounterBuffer.objects.filter(model_uuid=self.data['model2'], instance_id=self.data['model2_rmcb_ids'][0]).exists())
         self.assertTrue(RecordMaxCounterBuffer.objects.filter(model_uuid=self.data['model2'], instance_id=self.data['model2_rmcb_ids'][1]).exists())
         # ensure other records were not deleted
@@ -241,7 +244,7 @@ class BufferIntoStoreTestCase(TestCase):
         self.assertNotEqual(Store.objects.get(id=self.data['model3']).serialized, "buffer")
         self.assertFalse(Store.objects.filter(id=self.data['model4']).exists())
         with connection.cursor() as cursor:
-            _dequeuing_insert_remaining_buffer(cursor, self.data['sc'].current_transfer_session.id)
+            DBBackend._dequeuing_insert_remaining_buffer(cursor, self.data['sc'].current_transfer_session.id)
         self.assertEqual(Store.objects.get(id=self.data['model3']).serialized, "buffer")
         self.assertTrue(Store.objects.filter(id=self.data['model4']).exists())
 
@@ -249,20 +252,21 @@ class BufferIntoStoreTestCase(TestCase):
         for i in self.data['model4_rmcb_ids']:
             self.assertFalse(RecordMaxCounter.objects.filter(instance_id=i, store_model_id=self.data['model4']).exists())
         with connection.cursor() as cursor:
-            _dequeuing_insert_remaining_rmcb(cursor, self.data['sc'].current_transfer_session.id)
+            DBBackend._dequeuing_insert_remaining_buffer(cursor, self.data['sc'].current_transfer_session.id)
+            DBBackend._dequeuing_insert_remaining_rmcb(cursor, self.data['sc'].current_transfer_session.id)
         for i in self.data['model4_rmcb_ids']:
             self.assertTrue(RecordMaxCounter.objects.filter(instance_id=i, store_model_id=self.data['model4']).exists())
 
     def test_dequeuing_delete_remaining_rmcb(self):
         self.assertTrue(RecordMaxCounterBuffer.objects.filter(transfer_session_id=self.data['sc'].current_transfer_session.id).exists())
         with connection.cursor() as cursor:
-            _dequeuing_delete_remaining_rmcb(cursor, self.data['sc'].current_transfer_session.id)
+            DBBackend._dequeuing_delete_remaining_rmcb(cursor, self.data['sc'].current_transfer_session.id)
         self.assertFalse(RecordMaxCounterBuffer.objects.filter(transfer_session_id=self.data['sc'].current_transfer_session.id).exists())
 
     def test_dequeuing_delete_remaining_buffer(self):
         self.assertTrue(Buffer.objects.filter(transfer_session_id=self.data['sc'].current_transfer_session.id).exists())
         with connection.cursor() as cursor:
-            _dequeuing_delete_remaining_buffer(cursor, self.data['sc'].current_transfer_session.id)
+            DBBackend._dequeuing_delete_remaining_buffer(cursor, self.data['sc'].current_transfer_session.id)
         self.assertFalse(Buffer.objects.filter(transfer_session_id=self.data['sc'].current_transfer_session.id).exists())
 
     def test_dequeue_into_store(self):

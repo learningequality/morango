@@ -188,7 +188,9 @@ def create_buffer_and_store_dummy_data(transfer_session_id):
     create_rmcb_data(1, 2, 3, 4, data['model4_rmcb_ids'], data['model4'], transfer_session_id)
 
     # buffer record with different transfer session id
+    session = SyncSession.objects.create(id=uuid.uuid4().hex, profile="", last_activity_timestamp=timezone.now())
     data['tfs_id'] = '9' * 32
+    TransferSession.objects.create(id=data['tfs_id'], sync_session=session, push=True, last_activity_timestamp=timezone.now())
     data['model6'] = 'f' * 32
     data['model6_rmcb_ids'] = setUpIds()
     BufferFactory(last_saved_instance=data['model6_rmcb_ids'][0], last_saved_counter=1, model_uuid=data['model6'], transfer_session_id=data['tfs_id'])
