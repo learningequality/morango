@@ -8,6 +8,7 @@ import sys
 import uuid
 
 from django.conf import settings
+from django.db.models import signals
 from django.core.exceptions import ObjectDoesNotExist
 from django.db import connection, models, transaction
 from django.db.models import F, Func, TextField, Value
@@ -15,6 +16,7 @@ from django.db.models.functions import Cast
 from django.utils import timezone
 from django.utils.six import iteritems
 from morango.utils.register_models import _profile_models
+from morango.util import mute_signals
 
 from .certificates import Certificate, Filter, Nonce, ScopeDefinition
 from .manager import SyncableModelManager
@@ -278,11 +280,11 @@ class Store(AbstractStore):
             app_model._morango_source_id = self.source_id
             app_model._morango_partition = self.partition
             try:
-                app_model.save(update_dirty_bit_to=False)
+                with mute_signals(signals.pre_save, signals.post_save):
+                    app_model.save(update_dirty_bit_to=False)
             # if unable to save due to missing FKs, mark model as deleted
             except ObjectDoesNotExist:
                 app_model._update_deleted_models()
-
 
 class Buffer(AbstractStore):
     """
