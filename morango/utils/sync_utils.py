@@ -175,6 +175,7 @@ def _deserialize_from_store(profile):
         # clear dirty bit for all store models for this profile
         Store.objects.filter(profile=profile, dirty_bit=True).update(dirty_bit=False)
 
+@transaction.atomic()
 def _queue_into_buffer(transfersession):
     """
     Takes a chunk of data from the store to be put into the buffer to be sent to another morango instance.
@@ -219,9 +220,9 @@ def _queue_into_buffer(transfersession):
                          model_name, profile, partition, source_id, conflicting_serialized_data, transfer_session_id, _self_ref_fk)
                         SELECT id, serialized, deleted, last_saved_instance, last_saved_counter, model_name, profile, partition, source_id, conflicting_serialized_data, '{transfer_session_id}', _self_ref_fk
                         FROM {store} WHERE {condition}""".format(outgoing_buffer=Buffer._meta.db_table,
-                                                    transfer_session_id=transfersession.id,
-                                                    condition=where_condition,
-                                                    store=Store._meta.db_table)
+                                                                 transfer_session_id=transfersession.id,
+                                                                 condition=where_condition,
+                                                                 store=Store._meta.db_table)
         cursor.execute(queue_buffer)
         # take all record max counters that are foreign keyed onto store models, which were queued into the buffer
         queue_rmc_buffer = """INSERT INTO {outgoing_rmcb}
@@ -236,6 +237,7 @@ def _queue_into_buffer(transfersession):
                                        outgoing_buffer=Buffer._meta.db_table)
         cursor.execute(queue_rmc_buffer)
 
+@transaction.atomic()
 def _dequeue_into_store(transfersession):
     """
     Takes data from the buffers and merges into the store and record max counters.
