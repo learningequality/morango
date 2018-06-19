@@ -3,6 +3,7 @@ import re
 import sys
 import rsa as PYRSA
 
+from django.conf import settings
 from django.db import models
 
 try:
@@ -348,3 +349,22 @@ class PrivateKeyField(RSAKeyBaseField):
         if not value:
             return None
         return value.get_private_key_string()
+
+
+class SharedKey(models.Model):
+    public_key = PublicKeyField()
+    private_key = PrivateKeyField()
+
+    @classmethod
+    def get_or_create_shared_key(cls):
+        """
+        Create a shared public/private key pair for certificate pushing,
+        if the settings allow.
+        """
+        if getattr(settings, 'ALLOW_CERTIFICATE_PUSHING', False):
+            try:
+                return SharedKey.objects.get()
+            except SharedKey.DoesNotExist:
+                key = Key()
+                return SharedKey.objects.create(public_key=Key(public_key_string=key.get_public_key_string()),
+                                                private_key=key)

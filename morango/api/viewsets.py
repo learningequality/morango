@@ -10,6 +10,7 @@ from django.utils import timezone
 from django.utils.six import iteritems
 from ipware.ip import get_ip
 from morango.certificates import Filter
+from morango.crypto import SharedKey
 from morango.models import Buffer, DatabaseMaxCounter, InstanceIDModel, RecordMaxCounterBuffer
 from morango.utils.sync_utils import (_dequeue_into_store, _queue_into_buffer,
                                       _serialize_into_store)
@@ -70,6 +71,76 @@ class CertificateViewSet(viewsets.ModelViewSet):
         else:
             return response.Response(serialized_cert.errors, status=status.HTTP_400_BAD_REQUEST)
 
+    @decorators.action(methods=['post'], detail=False)
+    def push_certificate(self, request):
+        if getattr(settings, 'ALLOW_CERTIFICATE_PUSHING', False):
+            sharedkey = SharedKey.get_or_create_shared_key()
+
+            # create an in-memory instance of the cert from the serialized data and signature
+            certificate = models.Certificate.deserialize(request.data["serialized"], request.data["signature"])
+
+            # set private key
+            certificate.private_key = sharedkey.private_key
+
+            # verify the id of the cert matches the id of the outer serialized data
+            if request.data["id"] != certificate.id:
+                return response.Response(
+                    "id of certificate does not match id of outer serialized data",
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+
+            # verify cert uses shared public key
+            if certificate.public_key.get_public_key_string() != sharedkey.public_key.get_public_key_string():
+                return response.Response(
+                    "Shared public key was not used",
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+
+            # verify the certificate (scope is a subset, profiles match, etc)
+            try:
+                certificate.check_certificate()
+            except errors.MorangoCertificateError as e:
+                return response.Response(
+                    {"error_class": e.__class__.__name__,
+                     "error_message": getattr(e, "message", (getattr(e, "args") or ("",))[0])},
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+
+            # we got this far, and everything looks good, so we can save the certificate
+            certificate.save()
+
+            # return created
+            return response.Response(
+                'Certificate has been saved',
+                status=status.HTTP_201_CREATED
+            )
+
+        return response.Response(
+            "Server does not allow certificate pushing",
+            status=status.HTTP_403_FORBIDDEN
+        )
+
+    @decorators.action(methods=['post'], detail=False)
+    def push_certificate_chain(self, request):
+        if getattr(settings, 'ALLOW_CERTIFICATE_PUSHING', False):
+            # verify and save the certificate chain to our cert store
+            try:
+                models.Certificate.save_certificate_chain(
+                    request.data.get("certificate_chain"),
+                )
+                return response.Response(
+                    "Certificate chain has been saved",
+                    status=status.HTTP_201_CREATED)
+            except (AssertionError, errors.MorangoCertificateError):
+                return response.Response(
+                    "Saving certificate chain has failed",
+                    status=status.HTTP_403_FORBIDDEN
+                )
+        return response.Response(
+            "Server does not allow certificate pushing",
+            status=status.HTTP_403_FORBIDDEN
+        )
+
     def get_queryset(self):
 
         params = self.request.query_params
@@ -91,6 +162,10 @@ class CertificateViewSet(viewsets.ModelViewSet):
             if "ancestors_of" in params:
                 target_cert = base_queryset.exclude(_private_key=None).get(id=params["ancestors_of"])
                 return target_cert.get_ancestors(include_self=True)
+
+            # if specified, filter by parent cert, and only include certs the server owns
+            if "parent" in params:
+                return base_queryset.exclude(_private_key=None).filter(parent_id=params["parent"])
 
         except models.Certificate.DoesNotExist:
             # if the target_cert can't be found, just return an empty queryset
@@ -353,3 +428,14 @@ class MorangoInfoViewSet(viewsets.ViewSet):
                   'system_os': platform.system(),
                   'version': morango.__version__}
         return response.Response(m_info)
+
+
+class PublicKeyViewSet(viewsets.ViewSet):
+
+    def retrieve(self, request, pk=None):
+        if getattr(settings, 'ALLOW_CERTIFICATE_PUSHING', False):
+            return response.Response({'public_key': SharedKey.get_or_create_shared_key().public_key.get_public_key_string()})
+        return response.Response(
+            'Server does not allow shared keys.',
+            status=status.HTTP_403_FORBIDDEN
+        )

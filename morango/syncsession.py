@@ -183,12 +183,66 @@ class NetworkSyncConnection(Connection):
         csr_cert.save()
         return csr_cert
 
+    def inverse_certificate_signing_request(self, local_parent_cert, scope_definition_id, scope_params, userargs=None, password=None):
+        # check for certs owned by the server
+        cert_resp = self._request(api_urls.CERTIFICATE, params={'parent': local_parent_cert.id})
+        cert_data = cert_resp.json()
+        # if the server owns a cert, verify and save
+        if cert_data:
+            # create an in-memory instance of the cert from the serialized data and signature
+            cert = Certificate.deserialize(cert_data[0]["serialized"], cert_data[0]["signature"])
+
+            # verify the id of the cert matches the id of the outer serialized data
+            assert cert_data[0]["id"] == cert.id
+
+            # if cert already exists locally, it's already been verified, so just return that cert
+            try:
+                return Certificate.objects.get(id=cert.id)
+            # verify the cert and save into our records
+            except Certificate.DoesNotExist:
+                cert.check_certificate()
+                cert.save()
+                return cert
+        # if no server cert, proceed to create one
+        else:
+            # push up cert chain to server
+            self._push_certificate_chain(local_parent_cert, userargs, password)
+
+            # grab shared public key of server
+            publickey_response = self._request(api_urls.PUBLIC_KEY, method="GET", lookup=str(1))
+
+            # build up data for csr
+            certificate = Certificate(parent_id=local_parent_cert.id,
+                                      profile=local_parent_cert.profile,
+                                      scope_definition_id=scope_definition_id,
+                                      scope_version=local_parent_cert.scope_version,
+                                      scope_params=json.dumps(scope_params),
+                                      public_key=Key(public_key_string=publickey_response.json()['public_key']),
+                                      )
+            # add ID and signature to the certificate
+            certificate.salt = uuid.uuid4().hex
+            certificate.id = certificate.calculate_uuid()
+            certificate.parent.sign_certificate(certificate)
+
+            # client sends signed cert to server
+            self._request(api_urls.CERTIFICATE, lookup="push_certificate", method="POST", data=CertificateSerializer(certificate).data, userargs=userargs, password=password)
+
+            # we can now save the cert
+            certificate.save()
+            return certificate
+
     def _get_certificate_chain(self, server_cert):
         # get ancestors certificate chain for this server cert
         cert_chain_resp = self._request(api_urls.CERTIFICATE, params={'ancestors_of': server_cert.id})
 
         # upon receiving cert chain from server, we attempt to save the chain into our records
         Certificate.save_certificate_chain(cert_chain_resp.json(), expected_last_id=server_cert.id)
+
+    def _push_certificate_chain(self, client_cert, userargs, password):
+        data = {"certificate_chain": json.dumps(CertificateSerializer(client_cert.get_ancestors(include_self=True), many=True).data),
+                'scope_params': client_cert.scope_params,
+                'scope_definition': client_cert.scope_definition_id}
+        self._request(api_urls.CERTIFICATE, lookup="push_certificate_chain", method="POST", data=data, userargs=userargs, password=password)
 
     def _create_transfer_session(self, data):
         # create transfer session on server
