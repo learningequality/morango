@@ -31,6 +31,7 @@ from .morango_mptt import MorangoMPTTModel
 from .utils import get_0_4_system_parameters
 from .utils import get_0_5_system_id
 from .utils import get_0_5_mac_address
+from morango.constants import transfer_status
 
 logger = logging.getLogger(__name__)
 
@@ -258,6 +259,9 @@ class TransferSession(models.Model):
     client_fsic = models.TextField(blank=True, default="{}")
     server_fsic = models.TextField(blank=True, default="{}")
 
+    # stages of transfer session
+    transfer_stage = models.CharField(max_length=20, choices=transfer_status.choices, blank=True)
+
     def get_filter(self):
         return Filter(self.filter)
 
@@ -407,6 +411,7 @@ class Store(AbstractStore):
 
                 # if we got here, it means the validation error wasn't handled by propagating deletion, so re-raise it
                 raise e
+
 
 
 class Buffer(AbstractStore):
