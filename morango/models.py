@@ -17,6 +17,7 @@ from django.utils import timezone
 from django.utils.six import iteritems
 from morango.utils.register_models import _profile_models
 from morango.util import mute_signals
+from morango.constants import transfer_status
 
 from .certificates import Certificate, Filter, Nonce, ScopeDefinition
 from .manager import SyncableModelManager
@@ -197,6 +198,9 @@ class TransferSession(models.Model):
     client_fsic = models.TextField(blank=True, default="{}")
     server_fsic = models.TextField(blank=True, default="{}")
 
+    # stages of transfer session
+    transfer_stage = models.CharField(max_length=20, choices=transfer_status.choices, blank=True)
+
     def get_filter(self):
         return Filter(self.filter)
 
@@ -285,6 +289,7 @@ class Store(AbstractStore):
             # if unable to save due to missing FKs, mark model as deleted
             except ObjectDoesNotExist:
                 app_model._update_deleted_models()
+
 
 class Buffer(AbstractStore):
     """
