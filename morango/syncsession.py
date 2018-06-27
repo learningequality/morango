@@ -58,7 +58,7 @@ class NetworkSyncConnection(Connection):
     def __init__(self, base_url=''):
         self.base_url = base_url
 
-    def _request(self, endpoint, method="GET", lookup=None, data={}, params={}, userargs=None, password=None):
+    def _request(self, endpoint, method="GET", lookup=None, data={}, params={}, userargs=None, password=None, timeout=3, max_retries=5):
         """
         Generic request method designed to handle any morango endpoint.
 
@@ -71,6 +71,10 @@ class NetworkSyncConnection(Connection):
         :param password:
         :return: ``Response`` object from request
         """
+        request_exceptions = (
+            requests.exceptions.ConnectionError,
+        )
+
         # convert user arguments into query str for passing to auth layer
         if isinstance(userargs, dict):
             userargs = "&".join(["{}={}".format(key, val) for (key, val) in iteritems(userargs)])
@@ -80,9 +84,20 @@ class NetworkSyncConnection(Connection):
             lookup = lookup + '/'
         url = urljoin(urljoin(self.base_url, endpoint), lookup)
         auth = (userargs, password) if userargs else None
-        resp = requests.request(method, url, json=data, params=params, auth=auth)
-        resp.raise_for_status()
-        return resp
+        # handle network failures and retry logic
+        for i in range(max_retries):
+            try:
+                resp = requests.request(method, url, json=data, params=params, auth=auth)
+                # if any other status code besides 2XX, raise an exception and close the transfer session
+                resp.raise_for_status()
+            except request_exceptions:
+                time.sleep(timeout*i)
+                continue
+            else:
+                return resp
+        else:
+            # raise error if there has been multiple connection errors
+            raise requests.exceptions.ConnectionError
 
     def create_sync_session(self, client_cert, server_cert):
         # if server cert does not exist locally, retrieve it from server
