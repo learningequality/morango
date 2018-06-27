@@ -9,11 +9,13 @@ from django.utils import timezone
 
 from rest_framework.test import APITestCase as BaseTestCase
 
+from django.test.utils import override_settings
 from morango.api.serializers import CertificateSerializer, InstanceIDSerializer, BufferSerializer
 from morango.certificates import Certificate, ScopeDefinition, Key, Nonce
 from morango.errors import CertificateScopeNotSubset, CertificateSignatureInvalid, CertificateIDInvalid, CertificateProfileInvalid, CertificateRootScopeInvalid
 from morango.models import InstanceIDModel, SyncSession, TransferSession, Buffer, RecordMaxCounterBuffer
 from morango.utils.register_models import _profile_models
+from morango.crypto import SharedKey
 
 from facility_profile.models import MyUser
 
@@ -238,6 +240,20 @@ class CertificateListingTestCase(CertificateTestCaseMixin, APITestCase):
         _, data = self.make_cert_endpoint_request(params={'ancestors_of': self.subset_cert2_with_key.id, "profile": self.profile})
         self.assertEqual(len(data), 2)
 
+    def test_certificate_filtering_by_parent(self):
+        # check that child cert is returned, for which we have private key for
+        _, data = self.make_cert_endpoint_request(params={'parent': self.subset_cert1_without_key.id})
+        self.assertEqual(len(data), 1)
+        self.assertEqual(data[0]["id"], self.sub_subset_cert1_with_key.id)
+
+        # check that no certs are returned when we do not own private key
+        _, data = self.make_cert_endpoint_request(params={'parent': self.root_cert1_with_key.id})
+        self.assertEqual(len(data), 0)
+
+        # check that no certificates are returned when the certificate ID doesn't exist
+        _, data = self.make_cert_endpoint_request(params={'parent': "a" * 32})
+        self.assertEqual(len(data), 0)
+
     def test_certificate_full_list_request(self):
 
         # check that all the certs owned by the server (for which it has private keys) are returned
@@ -323,6 +339,61 @@ class CertificateCreationTestCase(CertificateTestCaseMixin, APITestCase):
             parent=self.root_cert1_with_key,
             scope_definition="this-aint-no-scope-def",
         )
+
+    @override_settings(ALLOW_CERTIFICATE_PUSHING=True)
+    def test_certificate_pushing_creation(self):
+        key = SharedKey.get_or_create_shared_key()
+
+        unsaved_cert = Certificate(
+            parent=self.root_cert1_with_key,
+            profile=self.profile,
+            scope_definition=self.subset_scope_def,
+            scope_version=self.subset_scope_def.version,
+            scope_params=json.dumps({"mainpartition": self.root_cert1_with_key.id, "subpartition": "abracadabra"}),
+            public_key=key.public_key,
+        )
+        self.root_cert1_with_key.sign_certificate(unsaved_cert)
+        self.root_cert1_with_key.private_key = None
+        self.root_cert1_with_key.save()
+        self.perform_basic_authentication(self.superuser)
+        self.client.post(reverse('certificates-push-certificate'), data=CertificateSerializer(unsaved_cert).data, format='json')
+        self.assertTrue(Certificate.objects.filter(id=unsaved_cert.id).exists())
+
+    @override_settings(ALLOW_CERTIFICATE_PUSHING=True)
+    def test_certificate_chain_pushing(self):
+        # create a root cert
+        unsaved_root_cert = Certificate(
+            scope_definition=self.root_scope_def,
+            scope_version=self.root_scope_def.version,
+            profile=self.profile,
+            private_key=Key()
+        )
+        unsaved_root_cert.id = unsaved_root_cert.calculate_uuid()
+        unsaved_root_cert.scope_params = json.dumps({self.root_scope_def.primary_scope_param_key: unsaved_root_cert.id})
+        unsaved_root_cert.sign_certificate(unsaved_root_cert)
+
+        # create a child cert
+        unsaved_subset_cert = Certificate(
+            parent=unsaved_root_cert,
+            profile=self.profile,
+            scope_definition=self.subset_scope_def,
+            scope_version=self.subset_scope_def.version,
+            scope_params=json.dumps({"mainpartition": unsaved_root_cert.id, "subpartition": "hooplah"}),
+            private_key=Key(),
+        )
+        unsaved_subset_cert.id = unsaved_subset_cert.calculate_uuid()
+        unsaved_root_cert.sign_certificate(unsaved_subset_cert)
+
+        # push cert chain up to server
+        self.perform_basic_authentication(self.superuser)
+        data = {
+            "scope_definition": self.root_scope_def.id,
+            "scope_params": unsaved_root_cert.scope_params,
+            "certificate_chain": json.dumps(CertificateSerializer([unsaved_root_cert, unsaved_subset_cert], many=True).data)
+        }
+        self.client.post(reverse('certificates-push-certificate-chain'), data=data, format='json')
+        self.assertTrue(Certificate.objects.filter(id=unsaved_root_cert.id).exists())
+        self.assertTrue(Certificate.objects.filter(id=unsaved_subset_cert.id).exists())
 
 
 class NonceCreationTestCase(APITestCase):
@@ -824,7 +895,7 @@ class BufferEndpointTestCase(CertificateTestCaseMixin, APITestCase):
         )
 
 
-class MorangoInfoTestCase(BaseTestCase):
+class MorangoInfoTestCase(APITestCase):
 
     def setUp(self):
         InstanceIDModel.get_or_create_current_instance()
@@ -836,3 +907,20 @@ class MorangoInfoTestCase(BaseTestCase):
             InstanceIDModel.get_or_create_current_instance()
             m_info = self.client.get(reverse('morangoinfo-detail', kwargs={"pk": 1}), format='json')
         self.assertNotEqual(m_info.data['instance_hash'], old_id_hash)
+
+
+class PublicKeyTestCase(APITestCase):
+
+    def setUp(self):
+        key = Key()
+        self.key = SharedKey.objects.create(public_key=Key(public_key_string=key.get_public_key_string()),
+                                            private_key=key)
+
+    @override_settings(ALLOW_CERTIFICATE_PUSHING=True)
+    def test_get_public_key(self):
+        publickey_response = self.client.get(reverse('publickey-detail', kwargs={"pk": 1}), format='json')
+        self.assertEqual(publickey_response.data['public_key'], self.key.public_key.get_public_key_string())
+
+    def test_can_not_get_public_key(self):
+        publickey_response = self.client.get(reverse('publickey-detail', kwargs={"pk": 1}), format='json')
+        self.assertEqual(publickey_response.status_code, 403)

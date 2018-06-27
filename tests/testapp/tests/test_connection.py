@@ -64,6 +64,16 @@ class NetworkSyncConnectionTestCase(TestCase):
         self.root_cert.sign_certificate(self.subset_cert)
         self.subset_cert.save()
 
+        self.unsaved_cert = Certificate(
+            parent=self.root_cert,
+            profile=self.profile,
+            scope_definition=self.subset_scope_def,
+            scope_version=self.subset_scope_def.version,
+            scope_params=json.dumps({"mainpartition": self.root_cert.id, "subpartition": "other"}),
+            public_key=Key(),
+        )
+        self.root_cert.sign_certificate(self.unsaved_cert)
+
         self.controller = MorangoProfileController('facilitydata')
         self.network_connection = self.controller.create_network_connection('127.0.0.1')
 
@@ -102,6 +112,21 @@ class NetworkSyncConnectionTestCase(TestCase):
         with mock.patch.object(Key, "get_private_key_string", return_value=self.subset_cert.private_key.get_private_key_string()):
             self.network_connection.certificate_signing_request(self.root_cert, '', '')
         self.assertTrue(Certificate.objects.filter(id=json.loads(cert_serialized)['id']).exists())
+
+    @mock_patch_decorator
+    def test_inverse_csr_existing_cert(self):
+        self.unsaved_cert.save()
+        cert_serialized = [CertificateSerializer(self.unsaved_cert).data]
+        NetworkSyncConnection._request.return_value.json.return_value = cert_serialized
+        response_cert = self.network_connection.inverse_certificate_signing_request(self.root_cert, '', '')
+        self.assertEqual(self.unsaved_cert, response_cert)
+
+    @mock_patch_decorator
+    def test_inverse_csr_nonexistent_cert(self):
+        cert_serialized = [CertificateSerializer(self.unsaved_cert).data]
+        NetworkSyncConnection._request.return_value.json.return_value = cert_serialized
+        response_cert = self.network_connection.inverse_certificate_signing_request(self.root_cert, '', '')
+        self.assertEqual(self.unsaved_cert, response_cert)
 
     @mock_patch_decorator
     def test_get_cert_chain(self):
