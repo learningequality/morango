@@ -114,19 +114,13 @@ class NetworkSyncConnectionTestCase(TestCase):
         self.assertTrue(Certificate.objects.filter(id=json.loads(cert_serialized)['id']).exists())
 
     @mock_patch_decorator
-    def test_inverse_csr_existing_cert(self):
-        self.unsaved_cert.save()
-        cert_serialized = [CertificateSerializer(self.unsaved_cert).data]
-        NetworkSyncConnection._request.return_value.json.return_value = cert_serialized
-        response_cert = self.network_connection.inverse_certificate_signing_request(self.root_cert, '', '')
-        self.assertEqual(self.unsaved_cert, response_cert)
-
-    @mock_patch_decorator
-    def test_inverse_csr_nonexistent_cert(self):
-        cert_serialized = [CertificateSerializer(self.unsaved_cert).data]
-        NetworkSyncConnection._request.return_value.json.return_value = cert_serialized
-        response_cert = self.network_connection.inverse_certificate_signing_request(self.root_cert, '', '')
-        self.assertEqual(self.unsaved_cert, response_cert)
+    def test_push_signed_client_certificate_chain(self):
+        # sanity test to make sure things are working as expected
+        NetworkSyncConnection._request.return_value.json.return_value = {'id': uuid.uuid4().hex, 'public_key': Key().get_public_key_string()}
+        cert = self.network_connection.push_signed_client_certificate_chain(self.root_cert,
+                                                                            self.subset_scope_def.id,
+                                                                            {"mainpartition": self.root_cert.id, "subpartition": "abracadabra"})
+        self.assertEqual(cert.private_key, None)
 
     @mock_patch_decorator
     def test_get_cert_chain(self):

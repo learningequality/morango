@@ -31,6 +31,7 @@ else:
 
 class CertificateTestCaseMixin(object):
 
+    @override_settings(ALLOW_CERTIFICATE_PUSHING=True)
     def setUp(self):
 
         self.user = MyUser(username="user")
@@ -113,6 +114,29 @@ class CertificateTestCaseMixin(object):
         self.root_cert2_without_key.save()
 
         self.original_cert_count = Certificate.objects.count()
+
+        self.sharedkey = SharedKey.get_or_create_shared_key()
+
+        # create a root cert
+        self.unsaved_root_cert = Certificate(
+            scope_definition=self.root_scope_def,
+            scope_version=self.root_scope_def.version,
+            profile=self.profile,
+            private_key=Key()
+        )
+        self.unsaved_root_cert.id = self.unsaved_root_cert.calculate_uuid()
+        self.unsaved_root_cert.scope_params = json.dumps({self.root_scope_def.primary_scope_param_key: self.unsaved_root_cert.id})
+        self.unsaved_root_cert.sign_certificate(self.unsaved_root_cert)
+
+        # create a child cert
+        self.unsaved_subset_cert = Certificate(
+            parent=self.unsaved_root_cert,
+            profile=self.profile,
+            scope_definition=self.subset_scope_def,
+            scope_version=self.subset_scope_def.version,
+            scope_params=json.dumps({"mainpartition": self.unsaved_root_cert.id, "subpartition": "hooplah"}),
+            public_key=self.sharedkey.public_key,
+        )
 
     def make_cert_endpoint_request(self, params={}, method="GET"):
         fn = getattr(self.client, method.lower())
@@ -240,20 +264,6 @@ class CertificateListingTestCase(CertificateTestCaseMixin, APITestCase):
         _, data = self.make_cert_endpoint_request(params={'ancestors_of': self.subset_cert2_with_key.id, "profile": self.profile})
         self.assertEqual(len(data), 2)
 
-    def test_certificate_filtering_by_parent(self):
-        # check that child cert is returned, for which we have private key for
-        _, data = self.make_cert_endpoint_request(params={'parent': self.subset_cert1_without_key.id})
-        self.assertEqual(len(data), 1)
-        self.assertEqual(data[0]["id"], self.sub_subset_cert1_with_key.id)
-
-        # check that no certs are returned when we do not own private key
-        _, data = self.make_cert_endpoint_request(params={'parent': self.root_cert1_with_key.id})
-        self.assertEqual(len(data), 0)
-
-        # check that no certificates are returned when the certificate ID doesn't exist
-        _, data = self.make_cert_endpoint_request(params={'parent': "a" * 32})
-        self.assertEqual(len(data), 0)
-
     def test_certificate_full_list_request(self):
 
         # check that all the certs owned by the server (for which it has private keys) are returned
@@ -341,59 +351,49 @@ class CertificateCreationTestCase(CertificateTestCaseMixin, APITestCase):
         )
 
     @override_settings(ALLOW_CERTIFICATE_PUSHING=True)
-    def test_certificate_pushing_creation(self):
-        key = SharedKey.get_or_create_shared_key()
-
-        unsaved_cert = Certificate(
-            parent=self.root_cert1_with_key,
-            profile=self.profile,
-            scope_definition=self.subset_scope_def,
-            scope_version=self.subset_scope_def.version,
-            scope_params=json.dumps({"mainpartition": self.root_cert1_with_key.id, "subpartition": "abracadabra"}),
-            public_key=key.public_key,
-        )
-        self.root_cert1_with_key.sign_certificate(unsaved_cert)
-        self.root_cert1_with_key.private_key = None
-        self.root_cert1_with_key.save()
-        self.perform_basic_authentication(self.superuser)
-        self.client.post(reverse('certificates-push-certificate'), data=CertificateSerializer(unsaved_cert).data, format='json')
-        self.assertTrue(Certificate.objects.filter(id=unsaved_cert.id).exists())
-
-    @override_settings(ALLOW_CERTIFICATE_PUSHING=True)
     def test_certificate_chain_pushing(self):
-        # create a root cert
-        unsaved_root_cert = Certificate(
-            scope_definition=self.root_scope_def,
-            scope_version=self.root_scope_def.version,
-            profile=self.profile,
-            private_key=Key()
-        )
-        unsaved_root_cert.id = unsaved_root_cert.calculate_uuid()
-        unsaved_root_cert.scope_params = json.dumps({self.root_scope_def.primary_scope_param_key: unsaved_root_cert.id})
-        unsaved_root_cert.sign_certificate(unsaved_root_cert)
-
-        # create a child cert
-        unsaved_subset_cert = Certificate(
-            parent=unsaved_root_cert,
-            profile=self.profile,
-            scope_definition=self.subset_scope_def,
-            scope_version=self.subset_scope_def.version,
-            scope_params=json.dumps({"mainpartition": unsaved_root_cert.id, "subpartition": "hooplah"}),
-            private_key=Key(),
-        )
-        unsaved_subset_cert.id = unsaved_subset_cert.calculate_uuid()
-        unsaved_root_cert.sign_certificate(unsaved_subset_cert)
+        # attach nonce value to certificate salt
+        response = self.client.post(reverse('nonces-list'), format='json')
+        self.unsaved_subset_cert.salt = response.json()['id']
+        self.unsaved_subset_cert.id = self.unsaved_subset_cert.calculate_uuid()
+        self.unsaved_root_cert.sign_certificate(self.unsaved_subset_cert)
 
         # push cert chain up to server
-        self.perform_basic_authentication(self.superuser)
         data = {
-            "scope_definition": self.root_scope_def.id,
-            "scope_params": unsaved_root_cert.scope_params,
-            "certificate_chain": json.dumps(CertificateSerializer([unsaved_root_cert, unsaved_subset_cert], many=True).data)
+            "certificate_chain": json.dumps(CertificateSerializer([self.unsaved_root_cert, self.unsaved_subset_cert], many=True).data)
         }
-        self.client.post(reverse('certificates-push-certificate-chain'), data=data, format='json')
-        self.assertTrue(Certificate.objects.filter(id=unsaved_root_cert.id).exists())
-        self.assertTrue(Certificate.objects.filter(id=unsaved_subset_cert.id).exists())
+        response = self.client.post(reverse('certificates-push-certificate-chain'), data=data, format='json')
+        self.assertEqual(response.status_code, 201)
+        saved_subset_cert = Certificate.objects.get(id=self.unsaved_subset_cert.id)
+        self.assertEqual(saved_subset_cert.private_key.get_private_key_string(), self.sharedkey.private_key.get_private_key_string())
+
+    @override_settings(ALLOW_CERTIFICATE_PUSHING=True)
+    def test_cert_chain_pushing_fails_for_nonce(self):
+        # use non-existent nonce value
+        self.unsaved_subset_cert.salt = uuid.uuid4().hex
+        self.unsaved_subset_cert.id = self.unsaved_subset_cert.calculate_uuid()
+        self.unsaved_root_cert.sign_certificate(self.unsaved_subset_cert)
+
+        # push cert chain up to server
+        data = {
+            "certificate_chain": json.dumps(CertificateSerializer([self.unsaved_root_cert, self.unsaved_subset_cert], many=True).data)
+        }
+        response = self.client.post(reverse('certificates-push-certificate-chain'), data=data, format='json')
+        self.assertEqual(response.status_code, 403)
+
+    @override_settings(ALLOW_CERTIFICATE_PUSHING=True)
+    def test_cert_chain_pushing_fails_for_public_key(self):
+        # do not use shared public key value
+        self.unsaved_subset_cert.public_key = Key()
+        self.unsaved_subset_cert.id = self.unsaved_subset_cert.calculate_uuid()
+        self.unsaved_root_cert.sign_certificate(self.unsaved_subset_cert)
+
+        # push cert chain up to server
+        data = {
+            "certificate_chain": json.dumps(CertificateSerializer([self.unsaved_root_cert, self.unsaved_subset_cert], many=True).data)
+        }
+        response = self.client.post(reverse('certificates-push-certificate-chain'), data=data, format='json')
+        self.assertEqual(response.status_code, 400)
 
 
 class NonceCreationTestCase(APITestCase):
