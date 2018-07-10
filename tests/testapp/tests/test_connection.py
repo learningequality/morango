@@ -1,16 +1,20 @@
 import json
-import mock
 import uuid
 
+import mock
 from django.test import TestCase
 from django.utils import timezone
 from facility_profile.models import SummaryLog
-from morango.api.serializers import CertificateSerializer, BufferSerializer
-from morango.certificates import Certificate, ScopeDefinition, Key
+from morango.api.serializers import (BufferSerializer, CertificateSerializer,
+                                     InstanceIDSerializer)
+from morango.certificates import Certificate, Key, ScopeDefinition
+from morango.constants import transfer_status
 from morango.controller import MorangoProfileController
 from morango.errors import CertificateSignatureInvalid
-from morango.models import Buffer, SyncSession, TransferSession, InstanceIDModel
+from morango.models import (Buffer, InstanceIDModel, SyncSession,
+                            TransferSession)
 from morango.syncsession import NetworkSyncConnection, SyncClient
+from requests.exceptions import HTTPError
 
 
 def mock_patch_decorator(func):
@@ -81,6 +85,47 @@ class NetworkSyncConnectionTestCase(TestCase):
             self.network_connection.create_sync_session(self.subset_cert, self.root_cert)
 
     @mock_patch_decorator
+    def test_resuming_sync_session(self):
+        session = SyncSession.objects.create(id=uuid.uuid4().hex,
+                                             profile="facilitydata",
+                                             last_activity_timestamp=timezone.now(),
+                                             client_certificate_id=self.subset_cert.id,
+                                             server_certificate_id=self.root_cert.id,
+                                             server_instance=json.dumps(InstanceIDSerializer(InstanceIDModel.get_or_create_current_instance()[0]).data))
+        NetworkSyncConnection._request.return_value.json.return_value = {'instance_id': InstanceIDModel.get_or_create_current_instance()[0].id, 'active': True}
+        client = self.network_connection.create_sync_session(self.subset_cert, self.root_cert)
+        self.assertEqual(session.id, client.sync_session.id)
+        self.assertEqual(SyncSession.objects.count(), 1)
+
+    @mock_patch_decorator
+    def test_not_resuming_sync_session(self):
+        session = SyncSession.objects.create(id=uuid.uuid4().hex,
+                                             profile="facilitydata",
+                                             last_activity_timestamp=timezone.now(),
+                                             client_certificate_id=self.subset_cert.id,
+                                             server_certificate_id=self.root_cert.id,
+                                             server_instance=json.dumps(InstanceIDSerializer(InstanceIDModel.get_or_create_current_instance()[0]).data))
+        NetworkSyncConnection._request.return_value.json.return_value = {'instance_id': InstanceIDModel.get_or_create_current_instance()[0].id, 'active': False}
+        client = self.network_connection.create_sync_session(self.subset_cert, self.root_cert)
+        self.assertNotEqual(session.id, client.sync_session.id)
+        self.assertEqual(SyncSession.objects.count(), 2)
+
+    @mock_patch_decorator
+    def test_not_resuming_sync_session_404(self):
+        session = SyncSession.objects.create(id=uuid.uuid4().hex,
+                                             profile="facilitydata",
+                                             last_activity_timestamp=timezone.now(),
+                                             client_certificate_id=self.subset_cert.id,
+                                             server_certificate_id=self.root_cert.id,
+                                             server_instance=json.dumps(InstanceIDSerializer(InstanceIDModel.get_or_create_current_instance()[0]).data))
+        NetworkSyncConnection._request.return_value.json.return_value = {'instance_id': InstanceIDModel.get_or_create_current_instance()[0].id}
+        with mock.patch.object(NetworkSyncConnection, '_get_sync_session') as ss_mock:
+            ss_mock.side_effect = HTTPError(response=mock.Mock(status_code=404))
+            client = self.network_connection.create_sync_session(self.subset_cert, self.root_cert)
+        self.assertNotEqual(session.id, client.sync_session.id)
+        self.assertEqual(SyncSession.objects.count(), 2)
+
+    @mock_patch_decorator
     def test_get_remote_certs(self):
         # mock certs being returned by server
         certs = self.subset_cert.get_ancestors(include_self=True)
@@ -120,13 +165,14 @@ class NetworkSyncConnectionTestCase(TestCase):
 class SyncClientTestCase(TestCase):
 
     def setUp(self):
-        session = SyncSession.objects.create(id=uuid.uuid4().hex, profile="facilitydata", last_activity_timestamp=timezone.now())
-        transfer_session = TransferSession.objects.create(id=uuid.uuid4().hex, sync_session=session, filter='partition',
-                                                          push=True, last_activity_timestamp=timezone.now(), records_total=3)
-        conn = NetworkSyncConnection()
-        self.syncclient = SyncClient(conn, session)
-        self.syncclient.current_transfer_session = transfer_session
-        self.chunk_size = 3
+        self.filter = 'partition'
+        self.syncsession = SyncSession.objects.create(id=uuid.uuid4().hex, profile="facilitydata", last_activity_timestamp=timezone.now())
+        self.transfersession = TransferSession.objects.create(id=uuid.uuid4().hex, sync_session=self.syncsession, filter=self.filter,
+                                                              push=True, last_activity_timestamp=timezone.now(), records_total=100)
+        self.conn = NetworkSyncConnection()
+        self.chunk_size = 100
+        self.syncclient = SyncClient(self.conn, self.syncsession, self.chunk_size)
+        self.syncclient.current_transfer_session = self.transfersession
         InstanceIDModel.get_or_create_current_instance()
 
     def build_buffer_items(self, transfer_session, **kwargs):
@@ -158,7 +204,7 @@ class SyncClientTestCase(TestCase):
     def test_push_records(self):
         self.build_buffer_items(self.syncclient.current_transfer_session)
         self.assertEqual(self.syncclient.current_transfer_session.records_transferred, 0)
-        self.syncclient._push_records(chunk_size=self.chunk_size)
+        self.syncclient._push_records()
         self.assertEqual(self.syncclient.current_transfer_session.records_transferred, self.chunk_size)
 
     @mock_patch_decorator
@@ -168,17 +214,49 @@ class SyncClientTestCase(TestCase):
         Buffer.objects.filter(transfer_session=self.syncclient.current_transfer_session).delete()
         self.assertEqual(Buffer.objects.filter(transfer_session=self.syncclient.current_transfer_session).count(), 0)
         self.assertEqual(self.syncclient.current_transfer_session.records_transferred, 0)
-        self.syncclient._pull_records(chunk_size=self.chunk_size)
+        self.syncclient._pull_records()
         self.assertEqual(Buffer.objects.filter(transfer_session=self.syncclient.current_transfer_session).count(), self.chunk_size)
         self.assertEqual(self.syncclient.current_transfer_session.records_transferred, self.chunk_size)
 
     @mock_patch_decorator
-    def test_create_transfer_session_push(self):
-        self.syncclient.current_transfer_session.active = False
-        self.syncclient.current_transfer_session.save()
+    def test_start_transfer_session_push(self):
+        self.syncclient.current_transfer_session.delete(soft=False)
         self.assertEqual(TransferSession.objects.filter(active=True).count(), 0)
-        self.syncclient._create_transfer_session(True, 'filter')
+        self.syncclient._starting_transfer_session(self.filter, True)
         self.assertEqual(TransferSession.objects.filter(active=True).count(), 1)
+
+    @mock_patch_decorator
+    def test_start_transfer_session_resume(self):
+        # create random transfer session tied to same sync session
+        TransferSession.objects.create(id=uuid.uuid4().hex, sync_session=self.syncsession, filter=self.filter,
+                                       push=False, last_activity_timestamp=timezone.now(), records_total=1)
+        self.syncclient.current_transfer_session = None
+        self.assertEqual(TransferSession.objects.filter(active=True).count(), 2)
+        NetworkSyncConnection._request.return_value.json.return_value = {'active': True, 'push': True}
+        self.syncclient._starting_transfer_session(self.filter, True)
+        # ensure other transfer session attached to sync session is turned off
+        self.assertEqual(TransferSession.objects.filter(active=True).count(), 1)
+        self.assertEqual(self.syncclient.current_transfer_session, self.transfersession)
+
+    @mock_patch_decorator
+    def test_start_transfer_session_resume_404(self):
+        self.assertEqual(TransferSession.objects.filter(active=True).count(), 1)
+        with mock.patch.object(NetworkSyncConnection, '_get_transfer_session') as ts_mock:
+            ts_mock.side_effect = HTTPError(response=mock.Mock(status_code=404))
+            self.syncclient._starting_transfer_session(self.filter, True)
+        self.assertEqual(TransferSession.objects.filter(active=True).count(), 2)
+        self.assertNotEqual(self.syncclient.current_transfer_session, self.transfersession)
+
+    @mock_patch_decorator
+    def test_start_transfer_session_resume_records_transferred(self):
+        self.assertEqual(self.syncclient.current_transfer_session.records_transferred, 0)
+        self.syncclient.current_transfer_session.transfer_stage = transfer_status.PUSHING
+        self.syncclient.current_transfer_session.save()
+        self.syncclient.current_transfer_session = None
+        NetworkSyncConnection._request.return_value.json.return_value = {'active': True, 'push': True, 'records_transferred': 100}
+        self.syncclient._starting_transfer_session(self.filter, True)
+        self.assertEqual(self.syncclient.current_transfer_session, self.transfersession)
+        self.assertEqual(self.syncclient.current_transfer_session.records_transferred, 100)
 
     @mock_patch_decorator
     def test_close_transfer_session_push(self):

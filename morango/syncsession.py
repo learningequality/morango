@@ -104,11 +104,28 @@ class NetworkSyncConnection(Connection):
             raise requests.exceptions.ConnectionError
 
     def create_sync_session(self, client_cert, server_cert, chunk_size=500):
-        active = SyncSession.objects.filter(active=True).filter(client_certificate=client_cert).filter(server_certificate=server_cert).filter(is_server=False)
-        # hoping there should only be one
-        if active:
-            return SyncClient(self, active[0], chunk_size=chunk_size)
+        resumable = SyncSession.objects.filter(active=True, client_certificate=client_cert, server_certificate=server_cert, is_server=False)
+        # attempt to resume an active sync session
+        if resumable:
+            resumable_ss = resumable[0]
+            info = self.get_server_info()
+            # if instance ids match (ensuring syncing with same server), resume sync session
+            if info.json()['instance_id'] == json.loads(resumable_ss.server_instance)['id']:
+                try:
+                    ss_response = self._get_sync_session(resumable_ss.id)
+                except requests.exceptions.HTTPError as e:
+                    # if non existent server ss, continue to create one on server
+                    if e.response.status_code == 404:
+                        pass
+                    else:
+                        raise
+                # only gets executed if no exception was caught above
+                else:
+                    # if server session still active, resume session
+                    if ss_response.json()['active'] is True:
+                        return SyncClient(self, resumable_ss, chunk_size=chunk_size)
 
+        # resumable.update(active=False)
         # if server cert does not exist locally, retrieve it from server
         if not Certificate.objects.filter(id=server_cert.id).exists():
             self._get_certificate_chain(server_cert)
@@ -207,12 +224,18 @@ class NetworkSyncConnection(Connection):
         csr_cert.save()
         return csr_cert
 
+    def get_server_info(self):
+        return self._request(api_urls.INFO, method="GET", lookup=str(1))
+
     def _get_certificate_chain(self, server_cert):
         # get ancestors certificate chain for this server cert
         cert_chain_resp = self._request(api_urls.CERTIFICATE, params={'ancestors_of': server_cert.id})
 
         # upon receiving cert chain from server, we attempt to save the chain into our records
         Certificate.save_certificate_chain(cert_chain_resp.json(), expected_last_id=server_cert.id)
+
+    def _get_transfer_session(self, id):
+        return self._request(api_urls.TRANSFERSESSION, method="GET", lookup=id)
 
     def _create_transfer_session(self, data):
         # create transfer session on server
@@ -226,9 +249,12 @@ class NetworkSyncConnection(Connection):
         # "delete" transfer session on server side
         return self._request(api_urls.TRANSFERSESSION, method="DELETE", lookup=transfer_session.id)
 
-    def _close_sync_session(self, sync_session):
+    def _get_sync_session(self, id):
+        return self._request(api_urls.SYNCSESSION, method="GET", lookup=id)
+
+    def _close_sync_session(self, syncsession):
         # "delete" sync session on server side
-        return self._request(api_urls.SYNCSESSION, method="DELETE", lookup=sync_session.id)
+        return self._request(api_urls.SYNCSESSION, method="DELETE", lookup=syncsession.id)
 
     def _push_record_chunk(self, serialized_recs):
         # push a chunk of records to the server side
@@ -248,60 +274,78 @@ class SyncClient(object):
         self.sync_connection = sync_connection
         self.sync_session = sync_session
         self.current_transfer_session = None
-        if chunk_size % 100 != 0:
-            raise MorangoError('Chunk size must be evenly divisible by 100.')
         self.chunk_size = chunk_size
 
-    def _starting(self, sync_filter, push):
+    def _starting_transfer_session(self, sync_filter, push):
         data = None
-        # syncsession may or may not have created a transfer session
-        transfer_syncs = self.sync_session.transfersession_set.filter(filter=sync_filter).filter(active=True).filter(push=push)
-        if push:
-            if transfer_syncs:
-                logger.info("Resuming sync push...")
-                # grab active transfer session
-                self.current_transfer_session = transfer_syncs[0]
-                # turn off any other active transfer sessions attached to this syncsession
-                self.sync_session.transfersession_set.filter(active=True).exclude(id=self.current_transfer_session.id).update(active=False)
-                # clear buffered records from other transfer sessions
-                Buffer.objects.delete(transfersession_id__in=self.sync_session.transfersession_set.exclude(id=self.current_transfer_session.id).values_list('id', flat=True))
-            else:
-                logger.info('Beginning sync push...')
-                data = self._generate_transfer_session_data(True, sync_filter)
-                data.pop('last_activity_timestamp')
-                # create transfer session server side
-                try:
-                    response = self.sync_connection._create_transfer_session(data)
-                except requests.HTTPError as e:
-                    self.current_transfer_session.active = False
-                    self.current_transfer_session.save()
+        # transfer session may or may not exist
+        resumable = self.sync_session.transfersession_set.filter(filter=sync_filter).filter(active=True).filter(push=push)
+        if resumable:
+            # grab active transfer session
+            self.current_transfer_session = resumable[0]
+            try:
+                ts_response = self.sync_connection._get_transfer_session(self.current_transfer_session.id)
+            except requests.exceptions.HTTPError as e:
+                # if non existent server ts, continue to create one on server
+                if e.response.status_code == 404:
+                    pass
+                else:
                     raise
-
-                # create transfer session locally
-                data['server_fsic'] = response.json().get('server_fsic') or '{}'
-                data['last_activity_timestamp'] = timezone.now()
-                data['transfer_stage'] = transfer_status.QUEUING
-                self.current_transfer_session = TransferSession.objects.create(**data)
-        else:
-            if transfer_syncs:
-                logger.info("Resuming sync pull...")
-                self.current_transfer_session = transfer_syncs[0]
-                data = {
-                    'id': self.current_transfer_session.id,
-                    'filter': self.current_transfer_session.filter,
-                    'push': self.current_transfer_session.push,
-                    'sync_session_id': self.current_transfer_session.sync_session.id,
-                    'transfer_stage': transfer_status.QUEUING,
-                    'client_fsic': self.current_transfer_session.client_fsic,
-                }
+            # only gets executed if no exception was caught above
             else:
-                logger.info('Beginning sync pull...')
-                # create transfer session locally
-                data = self._generate_transfer_session_data(False, sync_filter)
-                data['last_activity_timestamp'] = timezone.now()
-                data['transfer_stage'] = transfer_status.QUEUING
-                self.current_transfer_session = TransferSession.objects.create(**data)
-                data.pop('last_activity_timestamp')
+                ts_data = ts_response.json()
+                # if transfer session still active, resume session
+                if ts_data['active'] is True and ts_data['push'] == push:
+                    # grab active transfer session
+                    self.current_transfer_session = resumable[0]
+                    # set to server records transferred in case client did not receive response from server
+                    if self.current_transfer_session.transfer_stage == transfer_status.PUSHING:
+                        self.current_transfer_session.records_transferred = ts_data['records_transferred']
+                    self.current_transfer_session.save()
+                    # turn off any other active transfer sessions attached to this syncsession
+                    # this also deletes buffer and rmcb records associated with those transfersessions
+                    self.sync_session.transfersession_set.filter(active=True).exclude(id=self.current_transfer_session.id).delete(soft=True)
+                    # resume transfer session
+                    if push:
+                        logger.info("Resuming sync push from {} stage".format(self.current_transfer_session.transfer_stage))
+                    else:  # pull
+                        logger.info("Resuming sync pull from {} stage".format(self.current_transfer_session.transfer_stage))
+                        # we need to pass data dict onto QUEUING stage which creates transfer session server side
+                        data = {
+                            'id': self.current_transfer_session.id,
+                            'filter': self.current_transfer_session.filter,
+                            'push': self.current_transfer_session.push,
+                            'sync_session_id': self.current_transfer_session.sync_session.id,
+                            'transfer_stage': transfer_status.QUEUING,
+                            'client_fsic': self.current_transfer_session.client_fsic,
+                        }
+                    return data
+
+        # execute as normal if no resumable ts or non existent ts on server
+        if push:
+            logger.info('Beginning sync push...')
+            data = self._generate_transfer_session_data(True, sync_filter)
+            data.pop('last_activity_timestamp')
+            # create transfer session server side
+            try:
+                response = self.sync_connection._create_transfer_session(data)
+            except requests.HTTPError as e:
+                self.current_transfer_session.delete(soft=True)
+                raise
+
+            # create transfer session locally
+            data['server_fsic'] = response.json().get('server_fsic') or '{}'
+            data['last_activity_timestamp'] = timezone.now()
+            data['transfer_stage'] = transfer_status.QUEUING
+            self.current_transfer_session = TransferSession.objects.create(**data)
+        else:  # pull
+            logger.info('Beginning sync pull...')
+            # create transfer session locally
+            data = self._generate_transfer_session_data(False, sync_filter)
+            data['last_activity_timestamp'] = timezone.now()
+            data['transfer_stage'] = transfer_status.QUEUING
+            self.current_transfer_session = TransferSession.objects.create(**data)
+            data.pop('last_activity_timestamp')
 
         return data
 
@@ -318,13 +362,36 @@ class SyncClient(object):
             try:
                 response = self.sync_connection._create_transfer_session(data)
             except requests.HTTPError as e:
-                self.current_transfer_session.active = False
-                self.current_transfer_session.save()
+                self.current_transfer_session.delete(soft=True)
                 raise
 
             self.current_transfer_session.server_fsic = response.json().get('server_fsic') or '{}'
             self.current_transfer_session.records_total = response.json().get('records_total')
             self.current_transfer_session.transfer_stage = transfer_status.PULLING
+            self.current_transfer_session.save()
+
+    def _push_records(self, callback=None):
+        buffered_records = Buffer.objects.filter(transfer_session=self.current_transfer_session).order_by('pk')
+
+        while self.current_transfer_session.records_transferred < self.current_transfer_session.records_total:
+            # slice queryset to get chunk of records for sending
+            records = buffered_records[self.current_transfer_session.records_transferred:self.chunk_size + self.current_transfer_session.records_transferred]
+            # serialize and send records to server
+            serialized_recs = BufferSerializer(records, many=True)
+            logger.info('Pushing {} records at a time with {}/{} records transferred'.format(self.chunk_size,
+                                                                                             self.current_transfer_session.records_transferred,
+                                                                                             self.current_transfer_session.records_total))
+            try:
+                self.sync_connection._push_record_chunk(serialized_recs.data)
+            except requests.HTTPError as e:
+                self._close_transfer_session()
+                raise
+
+            # update records_transferred upon successful request
+            self.current_transfer_session.records_transferred += self.chunk_size
+            # ensure records transferred does not go over total records
+            if self.current_transfer_session.records_transferred > self.current_transfer_session.records_total:
+                self.current_transfer_session.records_transferred = self.current_transfer_session.records_total
             self.current_transfer_session.save()
 
     def _pushing(self):
@@ -342,68 +409,6 @@ class SyncClient(object):
         RecordMaxCounterBuffer.objects.filter(transfer_session=self.current_transfer_session).delete()
         self.current_transfer_session.transfer_stage = transfer_status.DEQUEUING
         self.current_transfer_session.save()
-
-    def _pulling(self):
-        # pull records and close transfer session upon completion
-        try:
-            self._pull_records()
-        except requests.HTTPError as e:
-            self._close_transfer_session()
-            raise
-        self.current_transfer_session.transfer_stage = transfer_status.DEQUEUING
-        self.current_transfer_session.save()
-
-    def _dequeuing(self, push):
-        if push:
-            # close client and server transfer session
-            # closing server transfer session triggers a dequeue
-            self._close_transfer_session()
-        else:
-            self._dequeue_into_store()
-
-    def initiate_push(self, sync_filter):
-        data = self._starting(sync_filter, push=True)
-        if self.current_transfer_session.transfer_stage == transfer_status.QUEUING:
-            logger.info('Preparing records for transfer...')
-            self._queuing(data, push=True)
-
-        if self.current_transfer_session.records_total == 0:
-            self._close_transfer_session()
-            return
-
-        if self.current_transfer_session.transfer_stage == transfer_status.PUSHING:
-            logger.info('Pushing {} records to server...'.format(self.current_transfer_session.records_total))
-            self._pushing()
-
-        if self.current_transfer_session.transfer_stage == transfer_status.DEQUEUING:
-            logger.info('Server is deserializing records...')
-            self._dequeuing(push=True)
-
-    def initiate_pull(self, sync_filter):
-        data = self._starting(sync_filter, push=False)
-
-        if self.current_transfer_session.transfer_stage == transfer_status.QUEUING:
-            logger.info('Server is preparing records for transfer...')
-            self._queuing(data, push=False)
-
-        if self.current_transfer_session.records_total == 0:
-            self._close_transfer_session()
-            return
-
-        if self.current_transfer_session.transfer_stage == transfer_status.PULLING:
-            logger.info('Pulling {} records from server...'.format(self.current_transfer_session.records_total))
-            self._pulling()
-
-        if self.current_transfer_session.transfer_stage == transfer_status.DEQUEUING:
-            logger.info('Deserializing records...')
-            self._dequeuing(push=False)
-
-        # update database max counters but use latest fsics on client
-        DatabaseMaxCounter.update_fsics(json.loads(self.current_transfer_session.server_fsic),
-                                        sync_filter)
-
-        logger.info('Closing session...')
-        self._close_transfer_session()
 
     def _pull_records(self, callback=None):
         while self.current_transfer_session.records_transferred < self.current_transfer_session.records_total:
@@ -432,29 +437,67 @@ class SyncClient(object):
             self.current_transfer_session.records_transferred += self.chunk_size
             self.current_transfer_session.save()
 
-    def _push_records(self, callback=None):
-        # paginate buffered records so we do not load them all into memory
-        # order by to get the records in the same order every time
-        buffered_records = Buffer.objects.filter(transfer_session=self.current_transfer_session).order_by('pk')
-        buffered_pages = Paginator(buffered_records, self.chunk_size)
+    def _pulling(self):
+        # pull records and close transfer session upon completion
+        try:
+            self._pull_records()
+        except requests.HTTPError as e:
+            self._close_transfer_session()
+            raise
+        self.current_transfer_session.transfer_stage = transfer_status.DEQUEUING
+        self.current_transfer_session.save()
 
-        # if we change the chunk size, we want to reflect that in the pages being sent
-        page_number = int(ceil(self.current_transfer_session.records_transferred / float(self.chunk_size))) + 1
-        page_range = moves.range(page_number, buffered_pages.num_pages + 1)
+    def _dequeuing(self, push):
+        if push:
+            # close client and server transfer session
+            # closing server transfer session triggers a dequeue
+            self._close_transfer_session()
+        else:
+            self._dequeue_into_store()
 
-        for count in page_range:
-            # serialize and send records to server
-            serialized_recs = BufferSerializer(buffered_pages.page(count).object_list, many=True)
-            logger.info('Pushing {} records at a time with {}/{} records transferred'.format(self.chunk_size, self.current_transfer_session.records_transferred, self.current_transfer_session.records_total))
-            try:
-                self.sync_connection._push_record_chunk(serialized_recs.data)
-            except requests.HTTPError as e:
-                self._close_transfer_session()
-                raise
+    def initiate_push(self, sync_filter):
+        data = self._starting_transfer_session(sync_filter, push=True)
+        if self.current_transfer_session.transfer_stage == transfer_status.QUEUING:
+            logger.info('Preparing records for transfer...')
+            self._queuing(data, push=True)
 
-            # update records_transferred upon successful request
-            self.current_transfer_session.records_transferred += self.chunk_size
-            self.current_transfer_session.save()
+        if self.current_transfer_session.records_total == 0:
+            self._close_transfer_session()
+            return
+
+        if self.current_transfer_session.transfer_stage == transfer_status.PUSHING:
+            logger.info('Pushing {} records to server...'.format(self.current_transfer_session.records_total))
+            self._pushing()
+
+        if self.current_transfer_session.transfer_stage == transfer_status.DEQUEUING:
+            logger.info('Server is deserializing records...')
+            self._dequeuing(push=True)
+
+    def initiate_pull(self, sync_filter):
+        data = self._starting_transfer_session(sync_filter, push=False)
+
+        if self.current_transfer_session.transfer_stage == transfer_status.QUEUING:
+            logger.info('Server is preparing records for transfer...')
+            self._queuing(data, push=False)
+
+        if self.current_transfer_session.records_total == 0:
+            self._close_transfer_session()
+            return
+
+        if self.current_transfer_session.transfer_stage == transfer_status.PULLING:
+            logger.info('Pulling {} records from server...'.format(self.current_transfer_session.records_total))
+            self._pulling()
+
+        if self.current_transfer_session.transfer_stage == transfer_status.DEQUEUING:
+            logger.info('Deserializing records...')
+            self._dequeuing(push=False)
+
+        # update database max counters but use latest fsics on client
+        DatabaseMaxCounter.update_fsics(json.loads(self.current_transfer_session.server_fsic),
+                                        sync_filter)
+
+        logger.info('Closing session...')
+        self._close_transfer_session()
 
     def close_sync_session(self):
 
@@ -493,14 +536,13 @@ class SyncClient(object):
         try:
             self.sync_connection._close_transfer_session(self.current_transfer_session)
         except requests.HTTPError as e:
-            self.current_transfer_session.active = False
-            self.current_transfer_session.save()
+            self.current_transfer_session.delete(soft=True)
             raise
 
         # "delete" our own local transfer session
-        self.current_transfer_session.active = False
         self.current_transfer_session.transfer_stage = transfer_status.COMPLETED
         self.current_transfer_session.save()
+        self.current_transfer_session.delete(soft=True)
         self.current_transfer_session = None
 
     def _queue_into_buffer(self):
