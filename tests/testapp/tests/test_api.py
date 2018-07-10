@@ -9,11 +9,13 @@ from django.utils import timezone
 
 from rest_framework.test import APITestCase as BaseTestCase
 
+from django.test.utils import override_settings
 from morango.api.serializers import CertificateSerializer, InstanceIDSerializer, BufferSerializer
 from morango.certificates import Certificate, ScopeDefinition, Key, Nonce
 from morango.errors import CertificateScopeNotSubset, CertificateSignatureInvalid, CertificateIDInvalid, CertificateProfileInvalid, CertificateRootScopeInvalid
 from morango.models import InstanceIDModel, SyncSession, TransferSession, Buffer, RecordMaxCounterBuffer
 from morango.utils.register_models import _profile_models
+# from morango.crypto import SharedKey
 
 from facility_profile.models import MyUser
 
@@ -238,6 +240,7 @@ class CertificateListingTestCase(CertificateTestCaseMixin, APITestCase):
         _, data = self.make_cert_endpoint_request(params={'ancestors_of': self.subset_cert2_with_key.id, "profile": self.profile})
         self.assertEqual(len(data), 2)
 
+
     def test_certificate_full_list_request(self):
 
         # check that all the certs owned by the server (for which it has private keys) are returned
@@ -383,6 +386,16 @@ class SyncSessionEndpointTestCase(CertificateTestCaseMixin, APITestCase):
         # check that the syncsession was not created
         self.assertEqual(SyncSession.objects.count(), 0)
 
+    def test_syncsession_can_be_retrieved_with_id(self):
+        syncsession = self.create_syncsession()
+        response = self.client.get(reverse('syncsessions-detail', kwargs={"pk": syncsession.id}), format='json')
+        self.assertEqual(syncsession.id, response.data['id'])
+
+    def test_non_existent_syncsession_returns_404(self):
+        data = self.get_initial_syncsession_data_for_request()
+        response = self.client.get(reverse('syncsessions-detail', kwargs={"pk": data['id']}), format='json')
+        self.assertEqual(response.status_code, 404)
+
     def test_syncsession_can_be_created(self):
 
         data = self.get_initial_syncsession_data_for_request()
@@ -473,6 +486,18 @@ class SyncSessionEndpointTestCase(CertificateTestCaseMixin, APITestCase):
 
 
 class TransferSessionEndpointTestCase(CertificateTestCaseMixin, APITestCase):
+
+    def test_transfersession_can_be_retrieved_with_id(self):
+        transfersession = self.make_transfersession_creation_request(
+            filter=str(self.sub_subset_cert1_with_key.get_scope().write_filter),
+            push=True,
+        ).data
+        response = self.client.get(reverse('transfersessions-detail', kwargs={"pk": transfersession['id']}), format='json')
+        self.assertEqual(transfersession['id'], response.data['id'])
+
+    def test_non_existent_transfersession_returns_404(self):
+        response = self.client.get(reverse('transfersessions-detail', kwargs={"pk": uuid.uuid4().hex}), format='json')
+        self.assertEqual(response.status_code, 404)
 
     def test_transfersession_can_be_created(self):
 
@@ -824,7 +849,7 @@ class BufferEndpointTestCase(CertificateTestCaseMixin, APITestCase):
         )
 
 
-class MorangoInfoTestCase(BaseTestCase):
+class MorangoInfoTestCase(APITestCase):
 
     def setUp(self):
         InstanceIDModel.get_or_create_current_instance()

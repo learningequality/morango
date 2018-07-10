@@ -81,27 +81,14 @@ class SyncSessionPermissions(permissions.BasePermission):
 
     def has_permission(self, request, view):
 
+        if request.method in permissions.SAFE_METHODS:
+            return True
+
         if request.method == "DELETE":
             return True
 
         if request.method == "POST":
             return True   # we'll be doing some additional permission checks in the viewset
-
-        return False
-
-
-class TransferSessionPermissions(permissions.BasePermission):
-
-    def has_permission(self, request, view):
-
-        if request.method == "DELETE":
-            return True
-
-        if request.method == "POST":
-            return True  # we'll be doing some additional permission checks in the viewset
-
-        if request.method == "PATCH":
-            return True
 
         return False
 

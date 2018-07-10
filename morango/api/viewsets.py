@@ -207,7 +207,6 @@ class SyncSessionViewSet(viewsets.ModelViewSet):
 
 
 class TransferSessionViewSet(viewsets.ModelViewSet):
-    permission_classes = (permissions.TransferSessionPermissions,)
     serializer_class = serializers.TransferSessionSerializer
 
     def create(self, request):
