@@ -5,10 +5,11 @@ import uuid
 from django.test import TestCase
 from django.utils import timezone
 from facility_profile.models import SummaryLog
+from requests.exceptions import HTTPError
 from morango.api.serializers import CertificateSerializer, BufferSerializer
 from morango.certificates import Certificate, ScopeDefinition, Key
 from morango.controller import MorangoProfileController
-from morango.errors import CertificateSignatureInvalid
+from morango.errors import CertificateSignatureInvalid, MorangoServerDoesNotAllowNewCertPush
 from morango.models import Buffer, SyncSession, TransferSession, InstanceIDModel
 from morango.syncsession import NetworkSyncConnection, SyncClient
 
@@ -121,6 +122,15 @@ class NetworkSyncConnectionTestCase(TestCase):
                                                                             self.subset_scope_def.id,
                                                                             {"mainpartition": self.root_cert.id, "subpartition": "abracadabra"})
         self.assertEqual(cert.private_key, None)
+
+    @mock_patch_decorator
+    def test_push_signed_client_certificate_chain_403(self):
+        # access denied when requesting public key endpoint
+        NetworkSyncConnection._request.side_effect = HTTPError(response=mock.Mock(status_code=403))
+        with self.assertRaises(MorangoServerDoesNotAllowNewCertPush):
+            self.network_connection.push_signed_client_certificate_chain(self.root_cert,
+                                                                         self.subset_scope_def.id,
+                                                                         {"mainpartition": self.root_cert.id, "subpartition": "abracadabra"})
 
     @mock_patch_decorator
     def test_get_cert_chain(self):

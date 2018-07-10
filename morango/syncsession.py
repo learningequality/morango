@@ -10,7 +10,7 @@ from django.utils.six import iteritems
 from morango.api.serializers import BufferSerializer, CertificateSerializer, InstanceIDSerializer
 from morango.certificates import Certificate, Key, Filter
 from morango.constants import api_urls
-from morango.errors import CertificateSignatureInvalid, MorangoError
+from morango.errors import CertificateSignatureInvalid, MorangoError, MorangoServerDoesNotAllowNewCertPush
 from morango.models import Buffer, InstanceIDModel, RecordMaxCounterBuffer, SyncSession, TransferSession, DatabaseMaxCounter
 from morango.utils.sync_utils import _serialize_into_store, _queue_into_buffer, _dequeue_into_store
 from six.moves.urllib.parse import urljoin, urlparse
@@ -185,7 +185,13 @@ class NetworkSyncConnection(Connection):
 
     def push_signed_client_certificate_chain(self, local_parent_cert, scope_definition_id, scope_params):
         # grab shared public key of server
-        publickey_response = self._request(api_urls.PUBLIC_KEY, method="GET", lookup=str(1))
+        try:
+            publickey_response = self._request(api_urls.PUBLIC_KEY, method="GET", lookup=str(1))
+        except requests.exceptions.HTTPError as e:
+            if e.response.status_code == 403:
+                raise MorangoServerDoesNotAllowNewCertPush(e.message)
+            else:
+                raise
 
         # build up data for csr
         certificate = Certificate(parent_id=local_parent_cert.id,
@@ -212,7 +218,7 @@ class NetworkSyncConnection(Connection):
         try:
             self._push_certificate_chain(certificate)
         # for any errors, we delete the certificate we attempted to send to the server
-        except (requests.ConnectionError, requests.HTTPError):
+        except (requests.exceptions.ConnectionError, requests.exceptions.HTTPError):
             certificate.delete()
             raise
 
