@@ -176,11 +176,21 @@ class SyncSession(models.Model):
     server_instance = models.TextField(default="{}")
 
 
+class TransferSessionSoftDeleteQueryset(models.QuerySet):
+
+    def delete(self, *args, **kwargs):
+        soft = kwargs.get('soft', True)
+        for obj in self:
+            obj.delete(soft=soft)
+
+
 class TransferSession(models.Model):
     """
     ``TransferSession`` holds metatada that is related to a specific transfer (push/pull) session
     between 2 morango instances.
     """
+
+    objects = TransferSessionSoftDeleteQueryset.as_manager()
 
     id = UUIDField(primary_key=True)
     filter = models.TextField()  # partition/filter to know what subset of data is to be synced
@@ -203,6 +213,19 @@ class TransferSession(models.Model):
 
     def get_filter(self):
         return Filter(self.filter)
+
+    def delete(self, soft=True):
+        with transaction.atomic():
+            # part of delete removes buffer and rmcbs associated with this ts
+            Buffer.objects.filter(transfer_session=self).delete()
+            RecordMaxCounterBuffer.objects.filter(transfer_session=self).delete()
+            # soft delete only sets active to false
+            if soft:
+                self.active = False
+                self.save()
+            # hard delete removes ts from database
+            else:
+                super(TransferSession, self).delete()
 
 
 class DeletedModels(models.Model):
@@ -250,10 +273,10 @@ class StoreQueryset(models.QuerySet):
 
     def char_ids_list(self):
         return (self.annotate(id_cast=Cast('id', TextField())) \
-               # remove dashes from char uuid
-               .annotate(fixed_id=Func(F('id_cast'), Value('-'), Value(''), function='replace',)) \
-               # return as list
-               .values_list("fixed_id", flat=True))
+                # remove dashes from char uuid
+                .annotate(fixed_id=Func(F('id_cast'), Value('-'), Value(''), function='replace',)) \
+                # return as list
+                .values_list("fixed_id", flat=True))
 
 
 class StoreManager(models.Manager):

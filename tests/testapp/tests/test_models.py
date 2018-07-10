@@ -1,9 +1,15 @@
-import factory
+import json
+import uuid
 
+import factory
 from django.test import TestCase
-from morango.models import DatabaseMaxCounter
-from morango.certificates import Filter
+from django.utils import timezone
 from django.utils.six import iteritems
+from facility_profile.models import SummaryLog
+from morango.api.serializers import BufferSerializer
+from morango.certificates import Filter
+from morango.models import (Buffer, DatabaseMaxCounter, SyncSession,
+                            TransferSession, RecordMaxCounterBuffer)
 
 
 class DatabaseMaxCounterFactory(factory.DjangoModelFactory):
@@ -91,3 +97,75 @@ class DatabaseMaxCounterUpdateCalculation(TestCase):
             DatabaseMaxCounter.objects.create(instance_id=instance_id, counter=counter, partition=self.filter)
         DatabaseMaxCounter.update_fsics(client_fsic, Filter(self.filter))
         self.assertFalse(DatabaseMaxCounter.objects.filter(counter=1).exists())
+
+
+class TransferSessionDeletion(TestCase):
+
+    def setUp(self):
+        self.syncsession = SyncSession.objects.create(id=uuid.uuid4().hex, profile="facilitydata", last_activity_timestamp=timezone.now())
+        self.transfersession = TransferSession.objects.create(id=uuid.uuid4().hex, sync_session=self.syncsession, filter='partition',
+                                                              push=True, last_activity_timestamp=timezone.now(), records_total=100)
+        self.build_buffer_items()
+
+    def build_buffer_items(self, **kwargs):
+
+        data = {
+            "profile": kwargs.get("profile", 'facilitydata'),
+            "serialized": kwargs.get("serialized", '{"test": 99}'),
+            "deleted": kwargs.get("deleted", False),
+            "last_saved_instance": kwargs.get("last_saved_instance", uuid.uuid4().hex),
+            "last_saved_counter": kwargs.get("last_saved_counter", 179),
+            "partition": kwargs.get("partition", 'partition'),
+            "source_id": kwargs.get("source_id", uuid.uuid4().hex),
+            "model_name": kwargs.get("model_name", "contentsummarylog"),
+            "conflicting_serialized_data": kwargs.get("conflicting_serialized_data", ""),
+            "model_uuid": kwargs.get("model_uuid", None),
+            "transfer_session": self.transfersession,
+        }
+
+        for i in range(3):
+            data['source_id'] = uuid.uuid4().hex
+            data["model_uuid"] = SummaryLog.compute_namespaced_id(data["partition"], data["source_id"], data["model_name"])
+            Buffer.objects.create(**data)
+            RecordMaxCounterBuffer.objects.create(
+                transfer_session=self.transfersession,
+                model_uuid=data["model_uuid"],
+                instance_id=uuid.uuid4().hex,
+                counter=i * 3 + 1,
+            )
+
+    def test_model_soft_deletion(self):
+        self.assertEqual(TransferSession.objects.count(), 1)
+        self.assertTrue(Buffer.objects.count() > 0)
+        self.assertTrue(RecordMaxCounterBuffer.objects.count() > 0)
+        self.transfersession.delete(soft=True)
+        self.assertEqual(TransferSession.objects.count(), 1)
+        self.assertTrue(Buffer.objects.count() == 0)
+        self.assertTrue(RecordMaxCounterBuffer.objects.count() == 0)
+
+    def test_model_hard_deletion(self):
+        self.assertTrue(Buffer.objects.count() > 0)
+        self.assertTrue(RecordMaxCounterBuffer.objects.count() > 0)
+        self.assertEqual(TransferSession.objects.count(), 1)
+        self.transfersession.delete(soft=False)
+        self.assertEqual(TransferSession.objects.count(), 0)
+        self.assertTrue(Buffer.objects.count() == 0)
+        self.assertTrue(RecordMaxCounterBuffer.objects.count() == 0)
+
+    def test_queryset_soft_deletion(self):
+        self.assertTrue(Buffer.objects.count() > 0)
+        self.assertTrue(RecordMaxCounterBuffer.objects.count() > 0)
+        self.assertEqual(TransferSession.objects.count(), 1)
+        TransferSession.objects.delete(soft=True)
+        self.assertEqual(TransferSession.objects.count(), 1)
+        self.assertTrue(Buffer.objects.count() == 0)
+        self.assertTrue(RecordMaxCounterBuffer.objects.count() == 0)
+
+    def test_queryset_hard_deletion(self):
+        self.assertTrue(Buffer.objects.count() > 0)
+        self.assertTrue(RecordMaxCounterBuffer.objects.count() > 0)
+        self.assertEqual(TransferSession.objects.count(), 1)
+        TransferSession.objects.delete(soft=False)
+        self.assertEqual(TransferSession.objects.count(), 0)
+        self.assertTrue(Buffer.objects.count() == 0)
+        self.assertTrue(RecordMaxCounterBuffer.objects.count() == 0)
