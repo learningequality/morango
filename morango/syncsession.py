@@ -189,7 +189,7 @@ class NetworkSyncConnection(Connection):
             publickey_response = self._request(api_urls.PUBLIC_KEY, method="GET", lookup=str(1))
         except requests.exceptions.HTTPError as e:
             if e.response.status_code == 403:
-                raise MorangoServerDoesNotAllowNewCertPush(e.message)
+                raise MorangoServerDoesNotAllowNewCertPush(str(e))
             else:
                 raise
 
