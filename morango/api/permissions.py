@@ -1,5 +1,6 @@
 import json
 
+from django.conf import settings
 from django.contrib.auth import authenticate, get_user_model
 from rest_framework import permissions, authentication, exceptions
 
@@ -64,6 +65,15 @@ class CertificatePermissions(permissions.BasePermission):
                     return request.user.has_morango_certificate_scope_permission(scope_definition_id, scope_params)
             return False
 
+        return False
+
+
+class CertificatePushPermissions(permissions.BasePermission):
+    message = "Server does not allow certificate pushing."
+
+    def has_permission(self, request, view):
+        if getattr(settings, 'ALLOW_CERTIFICATE_PUSHING', False):
+            return True
         return False
 
 

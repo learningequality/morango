@@ -912,15 +912,13 @@ class MorangoInfoTestCase(APITestCase):
 class PublicKeyTestCase(APITestCase):
 
     def setUp(self):
-        key = Key()
-        self.key = SharedKey.objects.create(public_key=Key(public_key_string=key.get_public_key_string()),
-                                            private_key=key)
+        self.key = SharedKey.get_or_create_shared_key()
 
     @override_settings(ALLOW_CERTIFICATE_PUSHING=True)
     def test_get_public_key(self):
-        publickey_response = self.client.get(reverse('publickey-detail', kwargs={"pk": 1}), format='json')
-        self.assertEqual(publickey_response.data['public_key'], self.key.public_key.get_public_key_string())
+        response = self.client.get(reverse('publickey-list'), format='json')
+        self.assertEqual(response.data[0]['public_key'], self.key.public_key.get_public_key_string())
 
     def test_can_not_get_public_key(self):
-        publickey_response = self.client.get(reverse('publickey-detail', kwargs={"pk": 1}), format='json')
-        self.assertEqual(publickey_response.status_code, 403)
+        response = self.client.get(reverse('publickey-list'), format='json')
+        self.assertEqual(response.status_code, 403)

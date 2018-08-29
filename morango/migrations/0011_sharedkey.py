@@ -19,6 +19,7 @@ class Migration(migrations.Migration):
                 ('id', models.AutoField(auto_created=True, primary_key=True, serialize=False, verbose_name='ID')),
                 ('public_key', morango.crypto.PublicKeyField()),
                 ('private_key', morango.crypto.PrivateKeyField()),
+                ('current', models.BooleanField(default=True)),
             ],
         ),
     ]

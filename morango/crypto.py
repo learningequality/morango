@@ -3,8 +3,7 @@ import re
 import sys
 import rsa as PYRSA
 
-from django.conf import settings
-from django.db import models
+from django.db import models, transaction
 
 try:
     from M2Crypto import RSA as M2RSA
@@ -354,17 +353,26 @@ class PrivateKeyField(RSAKeyBaseField):
 class SharedKey(models.Model):
     public_key = PublicKeyField()
     private_key = PrivateKeyField()
+    current = models.BooleanField(default=True)
 
     @classmethod
-    def get_or_create_shared_key(cls):
+    def get_or_create_shared_key(cls, force_new=False):
         """
         Create a shared public/private key pair for certificate pushing,
         if the settings allow.
         """
-        if getattr(settings, 'ALLOW_CERTIFICATE_PUSHING', False):
-            try:
-                return SharedKey.objects.get()
-            except SharedKey.DoesNotExist:
+        if force_new:
+            with transaction.atomic():
+                SharedKey.objects.filter(current=True).update(current=False)
                 key = Key()
-                return SharedKey.objects.create(public_key=Key(public_key_string=key.get_public_key_string()),
-                                                private_key=key)
+                return SharedKey.objects.create(public_key=key,
+                                                private_key=key,
+                                                current=True)
+        # create a new shared key if one doesn't exist
+        try:
+            return SharedKey.objects.get(current=True)
+        except SharedKey.DoesNotExist:
+            key = Key()
+            return SharedKey.objects.create(public_key=key,
+                                            private_key=key,
+                                            current=True)

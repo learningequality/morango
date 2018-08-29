@@ -430,12 +430,9 @@ class MorangoInfoViewSet(viewsets.ViewSet):
         return response.Response(m_info)
 
 
-class PublicKeyViewSet(viewsets.ViewSet):
+class PublicKeyViewSet(viewsets.ReadOnlyModelViewSet):
+    permission_classes = (permissions.CertificatePushPermissions,)
+    serializer_class = serializers.SharedKeySerializer
 
-    def retrieve(self, request, pk=None):
-        if getattr(settings, 'ALLOW_CERTIFICATE_PUSHING', False):
-            return response.Response({'public_key': SharedKey.get_or_create_shared_key().public_key.get_public_key_string()})
-        return response.Response(
-            'Server does not allow shared keys.',
-            status=status.HTTP_403_FORBIDDEN
-        )
+    def get_queryset(self):
+        return SharedKey.objects.filter(current=True)
