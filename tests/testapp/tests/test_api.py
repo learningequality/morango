@@ -359,40 +359,34 @@ class CertificateCreationTestCase(CertificateTestCaseMixin, APITestCase):
         self.unsaved_root_cert.sign_certificate(self.unsaved_subset_cert)
 
         # push cert chain up to server
-        data = {
-            "certificate_chain": json.dumps(CertificateSerializer([self.unsaved_root_cert, self.unsaved_subset_cert], many=True).data)
-        }
-        response = self.client.post(reverse('certificates-push-certificate-chain'), data=data, format='json')
+        data = json.dumps(CertificateSerializer([self.unsaved_root_cert, self.unsaved_subset_cert], many=True).data)
+        response = self.client.post(reverse('certificatechain-list'), data=data, format='json')
         self.assertEqual(response.status_code, 201)
         saved_subset_cert = Certificate.objects.get(id=self.unsaved_subset_cert.id)
         self.assertEqual(saved_subset_cert.private_key.get_private_key_string(), self.sharedkey.private_key.get_private_key_string())
 
     @override_settings(ALLOW_CERTIFICATE_PUSHING=True)
-    def test_cert_chain_pushing_fails_for_nonce(self):
+    def test_certificate_chain_pushing_fails_for_nonce(self):
         # use non-existent nonce value
         self.unsaved_subset_cert.salt = uuid.uuid4().hex
         self.unsaved_subset_cert.id = self.unsaved_subset_cert.calculate_uuid()
         self.unsaved_root_cert.sign_certificate(self.unsaved_subset_cert)
 
         # push cert chain up to server
-        data = {
-            "certificate_chain": json.dumps(CertificateSerializer([self.unsaved_root_cert, self.unsaved_subset_cert], many=True).data)
-        }
-        response = self.client.post(reverse('certificates-push-certificate-chain'), data=data, format='json')
+        data = json.dumps(CertificateSerializer([self.unsaved_root_cert, self.unsaved_subset_cert], many=True).data)
+        response = self.client.post(reverse('certificatechain-list'), data=data, format='json')
         self.assertEqual(response.status_code, 403)
 
     @override_settings(ALLOW_CERTIFICATE_PUSHING=True)
-    def test_cert_chain_pushing_fails_for_public_key(self):
+    def test_certificate_chain_pushing_fails_for_public_key(self):
         # do not use shared public key value
         self.unsaved_subset_cert.public_key = Key()
         self.unsaved_subset_cert.id = self.unsaved_subset_cert.calculate_uuid()
         self.unsaved_root_cert.sign_certificate(self.unsaved_subset_cert)
 
         # push cert chain up to server
-        data = {
-            "certificate_chain": json.dumps(CertificateSerializer([self.unsaved_root_cert, self.unsaved_subset_cert], many=True).data)
-        }
-        response = self.client.post(reverse('certificates-push-certificate-chain'), data=data, format='json')
+        data = json.dumps(CertificateSerializer([self.unsaved_root_cert, self.unsaved_subset_cert], many=True).data)
+        response = self.client.post(reverse('certificatechain-list'), data=data, format='json')
         self.assertEqual(response.status_code, 400)
 
 
