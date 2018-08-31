@@ -31,7 +31,6 @@ else:
 
 class CertificateTestCaseMixin(object):
 
-    @override_settings(ALLOW_CERTIFICATE_PUSHING=True)
     def setUp(self):
 
         self.user = MyUser(username="user")

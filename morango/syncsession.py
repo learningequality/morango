@@ -161,7 +161,10 @@ class NetworkSyncConnection(Connection):
     def certificate_signing_request(self, parent_cert, scope_definition_id, scope_params, userargs=None, password=None):
         # if server cert does not exist locally, retrieve it from server
         if not Certificate.objects.filter(id=parent_cert.id).exists():
-            self._get_certificate_chain(parent_cert)
+            cert_chain_response = self._get_certificate_chain(parent_cert)
+
+            # upon receiving cert chain from server, we attempt to save the chain into our records
+            Certificate.save_certificate_chain(cert_chain_response.json(), expected_last_id=parent_cert.id)
 
         csr_key = Key()
         # build up data for csr
@@ -185,13 +188,10 @@ class NetworkSyncConnection(Connection):
 
     def push_signed_client_certificate_chain(self, local_parent_cert, scope_definition_id, scope_params):
         # grab shared public key of server
-        try:
-            publickey_response = self._request(api_urls.PUBLIC_KEY, method="GET", lookup=str(1))
-        except requests.exceptions.HTTPError as e:
-            if e.response.status_code == 403:
-                raise MorangoServerDoesNotAllowNewCertPush(str(e))
-            else:
-                raise
+        publickey_response = self._get_public_key()
+
+        # request the server for a one-time-use nonce
+        nonce_response = self._get_nonce()
 
         # build up data for csr
         certificate = Certificate(parent_id=local_parent_cert.id,
@@ -199,41 +199,44 @@ class NetworkSyncConnection(Connection):
                                   scope_definition_id=scope_definition_id,
                                   scope_version=local_parent_cert.scope_version,
                                   scope_params=json.dumps(scope_params),
-                                  public_key=Key(public_key_string=publickey_response.json()['public_key']),
+                                  public_key=Key(public_key_string=publickey_response.json()[0]['public_key']),
+                                  salt=nonce_response.json()["id"]  # for pushing signed certs, we use nonce as salt
                                   )
 
-        # request the server for a one-time-use nonce
-        nonce_resp = self._request(api_urls.NONCE, method="POST")
-        nonce_value = nonce_resp.json()["id"]
-
         # add ID and signature to the certificate
-        # for pushing signed certs, we use nonce as salt
-        certificate.salt = nonce_value
         certificate.id = certificate.calculate_uuid()
         certificate.parent.sign_certificate(certificate)
 
+        # serialize the chain for sending to server
+        certificate_chain = list(local_parent_cert.get_descendants(include_self=True)) + [certificate]
+        data = json.dumps(CertificateSerializer(certificate_chain, many=True).data)
+
+        # client sends signed certificate chain to server
+        self._push_certificate_chain(data)
+
+        # if there are no errors, we can save the pushed certificate
         certificate.save()
-
-        # client sends signed cert to server
-        try:
-            self._push_certificate_chain(certificate)
-        # for any errors, we delete the certificate we attempted to send to the server
-        except (requests.exceptions.ConnectionError, requests.exceptions.HTTPError):
-            certificate.delete()
-            raise
-
         return certificate
+
+    def _get_public_key(self):
+        try:
+            return self._request(api_urls.PUBLIC_KEY)
+        except requests.exceptions.HTTPError as e:
+            if e.response.status_code == 403:
+                raise MorangoServerDoesNotAllowNewCertPush(str(e))
+            else:
+                raise
+
+    def _get_nonce(self):
+        return self._request(api_urls.NONCE, method="POST")
 
     def _get_certificate_chain(self, server_cert):
         # get ancestors certificate chain for this server cert
-        cert_chain_resp = self._request(api_urls.CERTIFICATE, params={'ancestors_of': server_cert.id})
+        return self._request(api_urls.CERTIFICATE, params={'ancestors_of': server_cert.id})
 
-        # upon receiving cert chain from server, we attempt to save the chain into our records
-        Certificate.save_certificate_chain(cert_chain_resp.json(), expected_last_id=server_cert.id)
-
-    def _push_certificate_chain(self, client_cert):
-        data = {"certificate_chain": json.dumps(CertificateSerializer(client_cert.get_ancestors(include_self=True), many=True).data)}
-        self._request(api_urls.CERTIFICATE, lookup="push_certificate_chain", method="POST", data=data)
+    def _push_certificate_chain(self, data):
+        # push signed certificate chain to server
+        return self._request(api_urls.CERTIFICATE_CHAIN, method="POST", data=data)
 
     def _create_transfer_session(self, data):
         # create transfer session on server
