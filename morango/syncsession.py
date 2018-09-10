@@ -90,13 +90,14 @@ class NetworkSyncConnection(Connection):
             self._get_certificate_chain(server_cert)
 
         # request the server for a one-time-use nonce
-        nonce_resp = self._request(api_urls.NONCE, method="POST")
+        nonce_resp = self._get_nonce()
         nonce = json.loads(nonce_resp.content.decode())["id"]
 
         # if no hostname then url is actually an ip
         url = urlparse(self.base_url)
         hostname = url.hostname or self.base_url
         port = url.port or (80 if url.scheme == 'http' else 443)
+
         # prepare the data to send in the syncsession creation request
         data = {
             "id": uuid.uuid4().hex,
@@ -116,7 +117,7 @@ class NetworkSyncConnection(Connection):
         data["signature"] = client_cert.sign(message)
 
         # Sync Session creation request
-        session_resp = self._request(api_urls.SYNCSESSION, method="POST", data=data)
+        session_resp = self._create_sync_session(data)
 
         # check that the nonce/id were properly signed by the server cert
         if not server_cert.verify(message, session_resp.json().get("signature")):
@@ -237,6 +238,9 @@ class NetworkSyncConnection(Connection):
     def _push_certificate_chain(self, data):
         # push signed certificate chain to server
         return self._request(api_urls.CERTIFICATE_CHAIN, method="POST", data=data)
+
+    def _create_sync_session(self, data):
+        return self._request(api_urls.SYNCSESSION, method="POST", data=data)
 
     def _create_transfer_session(self, data):
         # create transfer session on server
