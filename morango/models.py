@@ -214,6 +214,10 @@ class TransferSession(models.Model):
     def get_filter(self):
         return Filter(self.filter)
 
+    def save(self, *args, **kwargs):
+        self.last_activity_timestamp = timezone.now()
+        super(TransferSession, self).save(*args, **kwargs)
+
     def delete(self, soft=True):
         with transaction.atomic():
             # part of delete removes buffer and rmcbs associated with this ts
