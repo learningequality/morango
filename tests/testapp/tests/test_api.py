@@ -15,8 +15,6 @@ from morango.certificates import Certificate, ScopeDefinition, Key, Nonce
 from morango.errors import CertificateScopeNotSubset, CertificateSignatureInvalid, CertificateIDInvalid, CertificateProfileInvalid, CertificateRootScopeInvalid
 from morango.models import InstanceIDModel, SyncSession, TransferSession, Buffer, RecordMaxCounterBuffer
 from morango.utils.register_models import _profile_models
-# from morango.crypto import SharedKey
-
 from facility_profile.models import MyUser
 
 # A weird hack because of http://bugs.python.org/issue17866

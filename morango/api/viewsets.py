@@ -114,7 +114,6 @@ class NonceViewSet(viewsets.ModelViewSet):
 
 
 class SyncSessionViewSet(viewsets.ModelViewSet):
-    permission_classes = (permissions.SyncSessionPermissions,)
     serializer_class = serializers.SyncSessionSerializer
 
     def create(self, request):
@@ -350,5 +349,6 @@ class MorangoInfoViewSet(viewsets.ViewSet):
         m_info = {'instance_hash': id_model.get_proquint(),
                   'instance_id': id_model.id,
                   'system_os': platform.system(),
-                  'version': morango.__version__}
+                  'version': morango.__version__,
+                  'capabilities': ''}
         return response.Response(m_info)
