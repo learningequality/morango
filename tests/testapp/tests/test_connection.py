@@ -3,15 +3,18 @@ import mock
 import uuid
 
 from django.test import TestCase
+from django.test.utils import override_settings
 from django.utils import timezone
 from facility_profile.models import SummaryLog
 from morango.api.serializers import CertificateSerializer, BufferSerializer
 from morango.certificates import Certificate, ScopeDefinition, Key
 from morango.controller import MorangoProfileController
-from morango.errors import CertificateSignatureInvalid
+from morango.errors import CertificateSignatureInvalid, MorangoServerDoesNotAllowNewCertPush
 from morango.models import Buffer, SyncSession, TransferSession, InstanceIDModel
 from morango.syncsession import NetworkSyncConnection, SyncClient
-
+from django.test.testcases import LiveServerTestCase
+from morango.crypto import SharedKey
+from requests.exceptions import HTTPError
 
 def mock_patch_decorator(func):
 
@@ -24,7 +27,7 @@ def mock_patch_decorator(func):
     return wrapper
 
 
-class NetworkSyncConnectionTestCase(TestCase):
+class NetworkSyncConnectionTestCase(LiveServerTestCase):
 
     def setUp(self):
         self.profile = "facilitydata"
@@ -64,38 +67,43 @@ class NetworkSyncConnectionTestCase(TestCase):
         self.root_cert.sign_certificate(self.subset_cert)
         self.subset_cert.save()
 
-        self.controller = MorangoProfileController('facilitydata')
-        self.network_connection = self.controller.create_network_connection('127.0.0.1')
+        self.unsaved_cert = Certificate(
+            parent=self.root_cert,
+            profile=self.profile,
+            scope_definition=self.subset_scope_def,
+            scope_version=self.subset_scope_def.version,
+            scope_params=json.dumps({"mainpartition": self.root_cert.id, "subpartition": "other"}),
+            public_key=Key(),
+        )
+        self.root_cert.sign_certificate(self.unsaved_cert)
 
-    @mock_patch_decorator
-    def test_creating_sync_session_successful(self):
+        self.controller = MorangoProfileController('facilitydata')
+        self.network_connection = self.controller.create_network_connection(self.live_server_url)
+        self.key = SharedKey.get_or_create_shared_key()
+
+    @mock.patch.object(SyncSession.objects, 'create', return_value=None)
+    def test_creating_sync_session_successful(self, mock_object):
         self.assertEqual(SyncSession.objects.filter(active=True).count(), 0)
-        NetworkSyncConnection._request.return_value.json.return_value = {'signature': 'sig', 'local_fsic': '{}'}
         self.network_connection.create_sync_session(self.subset_cert, self.root_cert)
         self.assertEqual(SyncSession.objects.filter(active=True).count(), 1)
 
-    @mock_patch_decorator
-    def test_creating_sync_session_cert_fails_to_verify(self):
-        Certificate.verify.return_value = False
+    @mock.patch.object(NetworkSyncConnection, '_create_sync_session')
+    @mock.patch.object(Certificate, 'verify', return_value=False)
+    def test_creating_sync_session_cert_fails_to_verify(self, mock_verify, mock_create):
+        mock_create.return_value.json.return_value = {}
         with self.assertRaises(CertificateSignatureInvalid):
-            self.network_connection.create_sync_session(self.subset_cert, self.root_cert)
+                self.network_connection.create_sync_session(self.subset_cert, self.root_cert)
 
-    @mock_patch_decorator
     def test_get_remote_certs(self):
-        # mock certs being returned by server
         certs = self.subset_cert.get_ancestors(include_self=True)
-        cert_serialized = json.dumps(CertificateSerializer(certs, many=True).data)
-        NetworkSyncConnection._request.return_value.json.return_value = json.loads(cert_serialized)
-
-        # we want to see if the models are created (not saved) successfully
-        remote_certs = self.network_connection.get_remote_certificates('abc')
+        remote_certs = self.network_connection.get_remote_certificates(self.root_cert.id)
         self.assertSetEqual(set(certs), set(remote_certs))
 
-    @mock_patch_decorator
-    def test_csr(self):
+    @mock.patch.object(NetworkSyncConnection, '_request')
+    def test_csr(self, mock_request):
         # mock a "signed" cert being returned by server
         cert_serialized = json.dumps(CertificateSerializer(self.subset_cert).data)
-        NetworkSyncConnection._request.return_value.json.return_value = json.loads(cert_serialized)
+        mock_request.return_value.json.return_value = json.loads(cert_serialized)
         self.subset_cert.delete()
 
         # we only want to make sure the "signed" cert is saved
@@ -103,18 +111,55 @@ class NetworkSyncConnectionTestCase(TestCase):
             self.network_connection.certificate_signing_request(self.root_cert, '', '')
         self.assertTrue(Certificate.objects.filter(id=json.loads(cert_serialized)['id']).exists())
 
-    @mock_patch_decorator
-    def test_get_cert_chain(self):
-        # mock a cert chain being returned by server
-        certs = self.subset_cert.get_ancestors(include_self=True)
-        original_cert_count = certs.count()
-        cert_serialized = json.dumps(CertificateSerializer(certs, many=True).data)
-        NetworkSyncConnection._request.return_value.json.return_value = json.loads(cert_serialized)
-        Certificate.objects.all().delete()
+    @override_settings(ALLOW_CERTIFICATE_PUSHING=True)
+    def test_push_signed_client_certificate_chain(self):
+        cert = self.network_connection.push_signed_client_certificate_chain(self.root_cert,
+                                                                            self.subset_scope_def.id,
+                                                                            {"mainpartition": self.root_cert.id, "subpartition": "abracadabra"})
+        self.assertEqual(cert.private_key, None)
+        self.assertTrue(Certificate.objects.filter(id=cert.id).exists())
 
-        # we only want to make sure the cert chain is saved
-        self.network_connection._get_certificate_chain(certs[1])
-        self.assertEqual(Certificate.objects.count(), original_cert_count)
+    @override_settings(ALLOW_CERTIFICATE_PUSHING=True)
+    def test_push_signed_client_certificate_chain_publickey_error(self):
+        with mock.patch.object(NetworkSyncConnection, '_get_public_key'):
+            NetworkSyncConnection._get_public_key.return_value.json.return_value = [{'public_key': Key().get_public_key_string()}]
+            with self.assertRaises(HTTPError) as e:
+                self.network_connection.push_signed_client_certificate_chain(self.root_cert,
+                                                                             self.subset_scope_def.id,
+                                                                             {"mainpartition": self.root_cert.id, "subpartition": "abracadabra"})
+            self.assertEqual(e.exception.response.status_code, 400)
+
+    @override_settings(ALLOW_CERTIFICATE_PUSHING=True)
+    def test_push_signed_client_certificate_chain_bad_cert(self):
+        with self.assertRaises(HTTPError) as e:
+            self.network_connection.push_signed_client_certificate_chain(self.root_cert,
+                                                                         self.subset_scope_def.id,
+                                                                         {"bad": "scope_params"})
+        self.assertEqual(e.exception.response.status_code, 400)
+
+    @override_settings(ALLOW_CERTIFICATE_PUSHING=True)
+    @mock.patch.object(NetworkSyncConnection, '_get_nonce')
+    def test_push_signed_client_certificate_chain_nonce_error(self, mock_nonce):
+        mock_nonce.return_value.json.return_value = {'id': uuid.uuid4().hex}
+        with self.assertRaises(HTTPError) as e:
+            self.network_connection.push_signed_client_certificate_chain(self.root_cert,
+                                                                         self.subset_scope_def.id,
+                                                                         {"mainpartition": self.root_cert.id, "subpartition": "abracadabra"})
+        self.assertEqual(e.exception.response.status_code, 403)
+
+    def test_push_signed_client_certificate_chain_not_allowed(self):
+        with self.assertRaises(MorangoServerDoesNotAllowNewCertPush) as e:
+            self.network_connection.push_signed_client_certificate_chain(self.root_cert,
+                                                                         self.subset_scope_def.id,
+                                                                         {"mainpartition": self.root_cert.id, "subpartition": "abracadabra"})
+            self.assertEqual(e.exception.response.status_code, 403)
+
+    def test_get_cert_chain(self):
+        response = self.network_connection._get_certificate_chain(self.subset_cert)
+        data = response.json()
+        self.assertEqual(len(data), Certificate.objects.count())
+        self.assertEqual(data[0]['id'], self.root_cert.id)
+        self.assertEqual(data[1]['id'], self.subset_cert.id)
 
 
 class SyncClientTestCase(TestCase):

@@ -9,11 +9,13 @@ from django.utils import timezone
 
 from rest_framework.test import APITestCase as BaseTestCase
 
+from django.test.utils import override_settings
 from morango.api.serializers import CertificateSerializer, InstanceIDSerializer, BufferSerializer
 from morango.certificates import Certificate, ScopeDefinition, Key, Nonce
 from morango.errors import CertificateScopeNotSubset, CertificateSignatureInvalid, CertificateIDInvalid, CertificateProfileInvalid, CertificateRootScopeInvalid
 from morango.models import InstanceIDModel, SyncSession, TransferSession, Buffer, RecordMaxCounterBuffer
 from morango.utils.register_models import _profile_models
+from morango.crypto import SharedKey
 
 from facility_profile.models import MyUser
 
@@ -111,6 +113,29 @@ class CertificateTestCaseMixin(object):
         self.root_cert2_without_key.save()
 
         self.original_cert_count = Certificate.objects.count()
+
+        self.sharedkey = SharedKey.get_or_create_shared_key()
+
+        # create a root cert
+        self.unsaved_root_cert = Certificate(
+            scope_definition=self.root_scope_def,
+            scope_version=self.root_scope_def.version,
+            profile=self.profile,
+            private_key=Key()
+        )
+        self.unsaved_root_cert.id = self.unsaved_root_cert.calculate_uuid()
+        self.unsaved_root_cert.scope_params = json.dumps({self.root_scope_def.primary_scope_param_key: self.unsaved_root_cert.id})
+        self.unsaved_root_cert.sign_certificate(self.unsaved_root_cert)
+
+        # create a child cert
+        self.unsaved_subset_cert = Certificate(
+            parent=self.unsaved_root_cert,
+            profile=self.profile,
+            scope_definition=self.subset_scope_def,
+            scope_version=self.subset_scope_def.version,
+            scope_params=json.dumps({"mainpartition": self.unsaved_root_cert.id, "subpartition": "hooplah"}),
+            public_key=self.sharedkey.public_key,
+        )
 
     def make_cert_endpoint_request(self, params={}, method="GET"):
         fn = getattr(self.client, method.lower())
@@ -323,6 +348,45 @@ class CertificateCreationTestCase(CertificateTestCaseMixin, APITestCase):
             parent=self.root_cert1_with_key,
             scope_definition="this-aint-no-scope-def",
         )
+
+    @override_settings(ALLOW_CERTIFICATE_PUSHING=True)
+    def test_certificate_chain_pushing(self):
+        # attach nonce value to certificate salt
+        response = self.client.post(reverse('nonces-list'), format='json')
+        self.unsaved_subset_cert.salt = response.json()['id']
+        self.unsaved_subset_cert.id = self.unsaved_subset_cert.calculate_uuid()
+        self.unsaved_root_cert.sign_certificate(self.unsaved_subset_cert)
+
+        # push cert chain up to server
+        data = json.dumps(CertificateSerializer([self.unsaved_root_cert, self.unsaved_subset_cert], many=True).data)
+        response = self.client.post(reverse('certificatechain-list'), data=data, format='json')
+        self.assertEqual(response.status_code, 201)
+        saved_subset_cert = Certificate.objects.get(id=self.unsaved_subset_cert.id)
+        self.assertEqual(saved_subset_cert.private_key.get_private_key_string(), self.sharedkey.private_key.get_private_key_string())
+
+    @override_settings(ALLOW_CERTIFICATE_PUSHING=True)
+    def test_certificate_chain_pushing_fails_for_nonce(self):
+        # use non-existent nonce value
+        self.unsaved_subset_cert.salt = uuid.uuid4().hex
+        self.unsaved_subset_cert.id = self.unsaved_subset_cert.calculate_uuid()
+        self.unsaved_root_cert.sign_certificate(self.unsaved_subset_cert)
+
+        # push cert chain up to server
+        data = json.dumps(CertificateSerializer([self.unsaved_root_cert, self.unsaved_subset_cert], many=True).data)
+        response = self.client.post(reverse('certificatechain-list'), data=data, format='json')
+        self.assertEqual(response.status_code, 403)
+
+    @override_settings(ALLOW_CERTIFICATE_PUSHING=True)
+    def test_certificate_chain_pushing_fails_for_public_key(self):
+        # do not use shared public key value
+        self.unsaved_subset_cert.public_key = Key()
+        self.unsaved_subset_cert.id = self.unsaved_subset_cert.calculate_uuid()
+        self.unsaved_root_cert.sign_certificate(self.unsaved_subset_cert)
+
+        # push cert chain up to server
+        data = json.dumps(CertificateSerializer([self.unsaved_root_cert, self.unsaved_subset_cert], many=True).data)
+        response = self.client.post(reverse('certificatechain-list'), data=data, format='json')
+        self.assertEqual(response.status_code, 400)
 
 
 class NonceCreationTestCase(APITestCase):
@@ -824,7 +888,7 @@ class BufferEndpointTestCase(CertificateTestCaseMixin, APITestCase):
         )
 
 
-class MorangoInfoTestCase(BaseTestCase):
+class MorangoInfoTestCase(APITestCase):
 
     def setUp(self):
         InstanceIDModel.get_or_create_current_instance()
@@ -836,3 +900,18 @@ class MorangoInfoTestCase(BaseTestCase):
             InstanceIDModel.get_or_create_current_instance()
             m_info = self.client.get(reverse('morangoinfo-detail', kwargs={"pk": 1}), format='json')
         self.assertNotEqual(m_info.data['instance_hash'], old_id_hash)
+
+
+class PublicKeyTestCase(APITestCase):
+
+    def setUp(self):
+        self.key = SharedKey.get_or_create_shared_key()
+
+    @override_settings(ALLOW_CERTIFICATE_PUSHING=True)
+    def test_get_public_key(self):
+        response = self.client.get(reverse('publickey-list'), format='json')
+        self.assertEqual(response.data[0]['public_key'], self.key.public_key.get_public_key_string())
+
+    def test_can_not_get_public_key(self):
+        response = self.client.get(reverse('publickey-list'), format='json')
+        self.assertEqual(response.status_code, 403)

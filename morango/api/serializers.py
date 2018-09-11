@@ -5,6 +5,7 @@ import json
 from .fields import PublicKeyField
 from ..models import Certificate, Nonce, SyncSession, TransferSession, InstanceIDModel, Buffer, SyncableModel, RecordMaxCounterBuffer
 from ..utils.register_models import _profile_models
+from ..crypto import SharedKey
 
 
 class CertificateSerializer(serializers.ModelSerializer):
@@ -22,6 +23,13 @@ class CertificateSerializer(serializers.ModelSerializer):
         model = Certificate
         fields = ('id', 'parent', 'profile', 'scope_definition', 'scope_version', 'scope_params', 'public_key', 'serialized', 'signature', 'salt')
         read_only_fields = ('serialized', 'id', 'signature', 'salt')
+
+
+class SharedKeySerializer(serializers.ModelSerializer):
+
+    class Meta:
+        model = SharedKey
+        fields = ('public_key',)
 
 
 class NonceSerializer(serializers.ModelSerializer):

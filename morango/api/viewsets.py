@@ -10,6 +10,7 @@ from django.utils import timezone
 from django.utils.six import iteritems
 from ipware.ip import get_ip
 from morango.certificates import Filter
+from morango.crypto import SharedKey
 from morango.models import Buffer, DatabaseMaxCounter, InstanceIDModel, RecordMaxCounterBuffer
 from morango.utils.sync_utils import (_dequeue_into_store, _queue_into_buffer,
                                       _serialize_into_store)
@@ -18,6 +19,68 @@ from rest_framework import (decorators, mixins, pagination, response, status,
 
 from . import permissions, serializers
 from .. import certificates, errors, models
+
+
+class CertificateChainViewSet(viewsets.ViewSet):
+    permissions = (permissions.CertificatePushPermissions,)
+
+    def create(self, request):
+        # pop last certificate in chain
+        cert_chain = json.loads(request.data)
+        client_cert = cert_chain.pop()
+
+        # verify the rest of the cert chain
+        try:
+            models.Certificate.save_certificate_chain(
+                cert_chain,
+            )
+        except (AssertionError, errors.MorangoCertificateError) as e:
+            return response.Response(
+                "Saving certificate chain has failed: {}".format(str(e)),
+                status=status.HTTP_403_FORBIDDEN
+            )
+
+        # create an in-memory instance of the cert from the serialized data and signature
+        certificate = models.Certificate.deserialize(client_cert["serialized"], client_cert["signature"])
+
+        # check if certificate's public key is in our list of shared keys
+        try:
+            sharedkey = SharedKey.objects.get(public_key=certificate.public_key)
+        except SharedKey.DoesNotExist:
+            return response.Response(
+                "Shared public key was not used",
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        # set private key
+        certificate.private_key = sharedkey.private_key
+
+        # check that the nonce is valid, and consume it so it can't be used again
+        try:
+            certificates.Nonce.use_nonce(certificate.salt)
+        except errors.MorangoNonceError:
+            return response.Response(
+                "Nonce (certificate's salt) is not valid",
+                status=status.HTTP_403_FORBIDDEN
+            )
+
+        # verify the certificate (scope is a subset, profiles match, etc)
+        try:
+            certificate.check_certificate()
+        except errors.MorangoCertificateError as e:
+            return response.Response(
+                {"error_class": e.__class__.__name__,
+                 "error_message": getattr(e, "message", (getattr(e, "args") or ("",))[0])},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        # we got this far, and everything looks good, so we can save the certificate
+        certificate.save()
+
+        return response.Response(
+            "Certificate chain has been saved",
+            status=status.HTTP_201_CREATED
+        )
 
 
 class CertificateViewSet(viewsets.ModelViewSet):
@@ -353,3 +416,11 @@ class MorangoInfoViewSet(viewsets.ViewSet):
                   'system_os': platform.system(),
                   'version': morango.__version__}
         return response.Response(m_info)
+
+
+class PublicKeyViewSet(viewsets.ReadOnlyModelViewSet):
+    permission_classes = (permissions.CertificatePushPermissions,)
+    serializer_class = serializers.SharedKeySerializer
+
+    def get_queryset(self):
+        return SharedKey.objects.filter(current=True)
