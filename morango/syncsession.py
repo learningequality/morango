@@ -5,19 +5,18 @@ import time
 import uuid
 import logging
 
-from math import ceil
 from django.conf import settings
 from django.utils import timezone
-from django.utils.six import iteritems, moves
+from django.utils.six import iteritems
 from morango.api.serializers import BufferSerializer, CertificateSerializer, InstanceIDSerializer
-from morango.certificates import Certificate, Key, Filter
+from morango.certificates import Certificate, Key
 from morango.constants import api_urls, transfer_status
 from morango.errors import CertificateSignatureInvalid, MorangoError
 from morango.models import Buffer, InstanceIDModel, RecordMaxCounterBuffer, SyncSession, TransferSession, DatabaseMaxCounter
 from morango.utils.sync_utils import _serialize_into_store, _queue_into_buffer, _dequeue_into_store
 from six.moves.urllib.parse import urljoin, urlparse
-
-from django.core.paginator import Paginator
+from requests.packages.urllib3.util.retry import Retry
+from requests.adapters import HTTPAdapter
 
 logger = logging.getLogger(__name__)
 
@@ -57,12 +56,26 @@ class Connection(object):
     pass
 
 
+# retry requests with an increasing time interval between each request
+# [0, 0.6, 1.2 ,2.4, 4.8, 9.6, 19, 38, 76, 120]seconds
+session = requests.Session()
+retry = Retry(
+    total=10,
+    read=10,
+    connect=10,
+    backoff_factor=0.3,
+)
+
+retry_adapter = HTTPAdapter(max_retries=retry)
+session.mount('', retry_adapter)
+
+
 class NetworkSyncConnection(Connection):
 
     def __init__(self, base_url=''):
         self.base_url = base_url
 
-    def _request(self, endpoint, method="GET", lookup=None, data={}, params={}, userargs=None, password=None, timeout=3, max_retries=5):
+    def _request(self, endpoint, method="GET", lookup=None, data={}, params={}, userargs=None, password=None):
         """
         Generic request method designed to handle any morango endpoint.
 
@@ -75,9 +88,6 @@ class NetworkSyncConnection(Connection):
         :param password:
         :return: ``Response`` object from request
         """
-        request_exceptions = (
-            requests.exceptions.ConnectionError,
-        )
 
         # convert user arguments into query str for passing to auth layer
         if isinstance(userargs, dict):
@@ -88,20 +98,10 @@ class NetworkSyncConnection(Connection):
             lookup = lookup + '/'
         url = urljoin(urljoin(self.base_url, endpoint), lookup)
         auth = (userargs, password) if userargs else None
-        # handle network failures and retry logic
-        for i in range(max_retries):
-            try:
-                resp = requests.request(method, url, json=data, params=params, auth=auth)
-                # if any other status code besides 2XX, raise an exception and close the transfer session
-                resp.raise_for_status()
-            except request_exceptions:
-                time.sleep(timeout*i)
-                continue
-            else:
-                return resp
-        else:
-            # raise error if there has been multiple connection errors
-            raise requests.exceptions.ConnectionError
+        # request should handle network failures and retry logic
+        resp = session.request(method, url, json=data, params=params, auth=auth)
+        # if any other status code besides 2XX, raise an exception and close the transfer session
+        resp.raise_for_status()
 
     def create_sync_session(self, client_cert, server_cert, chunk_size=500):
         resumable = SyncSession.objects.filter(active=True, client_certificate=client_cert, server_certificate=server_cert, is_server=False)
