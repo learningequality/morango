@@ -84,13 +84,10 @@ class BufferSerializer(serializers.ModelSerializer):
             Model = _profile_models[data["profile"]][data["model_name"]]
         except KeyError:
             Model = SyncableModel
-        expected_model_uuid = Model.compute_namespaced_id(data["partition"], data["source_id"], data["model_name"])
+        partition = data['partition'].replace(data['model_uuid'], Model.ID_PLACEHOLDER)
+        expected_model_uuid = Model.compute_namespaced_id(partition, data["source_id"], data["model_name"])
         if expected_model_uuid != data["model_uuid"]:
-            # we sometimes calculate ids based on placeholders, so we recompute ids with those parameters
-            model = Model.deserialize(json.loads(data['serialized']))
-            expected_model_uuid = model.compute_namespaced_id(model.calculate_partition(), data['source_id'], data['model_name'])
-            if expected_model_uuid != data['model_uuid']:
-                raise serializers.ValidationError({"model_uuid": "Does not match results of calling {}.compute_namespaced_id".format(Model.__class__.__name__)})
+            raise serializers.ValidationError({"model_uuid": "Does not match results of calling {}.compute_namespaced_id".format(Model.__class__.__name__)})
 
         # ensure the profile is marked onto the buffer record
         data["profile"] = transfer_session.sync_session.profile
@@ -117,4 +114,4 @@ class BufferSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = Buffer
-        fields = ('serialized', 'deleted', 'last_saved_instance', 'last_saved_counter', 'partition', 'source_id', 'model_name', 'conflicting_serialized_data', 'model_uuid', 'transfer_session', 'profile', 'rmcb_list', '_self_ref_fk')
+        fields = ('serialized', 'deleted', 'last_saved_instance', 'last_saved_counter', 'hard_delete', 'partition', 'source_id', 'model_name', 'conflicting_serialized_data', 'model_uuid', 'transfer_session', 'profile', 'rmcb_list', '_self_ref_fk')

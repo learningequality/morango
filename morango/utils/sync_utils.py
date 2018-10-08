@@ -8,7 +8,7 @@ from django.db.models import F, Q, CharField, Func, TextField, Value
 from django.db.models.functions import Cast
 from django.utils.six import iteritems
 from morango.certificates import Filter
-from morango.models import (Buffer, DatabaseMaxCounter, DeletedModels,
+from morango.models import (Buffer, DatabaseMaxCounter, DeletedModels, HardDeletedModels,
                             InstanceIDModel, RecordMaxCounter,
                             RecordMaxCounterBuffer, Store)
 from morango.utils.register_models import _profile_models
@@ -129,6 +129,13 @@ def _serialize_into_store(profile, filter=None):
         RecordMaxCounter.objects.bulk_create([RecordMaxCounter(store_model_id=r_id, instance_id=current_id.id, counter=current_id.counter) for r_id in new_rmc_ids])
         # clear deleted models table for this profile
         DeletedModels.objects.filter(profile=profile).delete()
+
+        # handle logic for hard deletion models
+        hard_delete_ids = HardDeletedModels.objects.filter(profile=profile).values_list('id', flat=True)
+        hard_delete_store_records = Store.objects.filter(id__in=hard_delete_ids)
+        hard_delete_store_records.update(hard_delete=True, serialized='', conflicting_serialized_data='')
+        HardDeletedModels.objects.filter(profile=profile).delete()
+
         # update our own database max counters after serialization
         if not filter:
             DatabaseMaxCounter.objects.update_or_create(instance_id=current_id.id, partition="", defaults={'counter': current_id.counter})
@@ -216,9 +223,9 @@ def _queue_into_buffer(transfersession):
     # execute raw sql to take all records that match condition, to be put into buffer for transfer
     with connection.cursor() as cursor:
         queue_buffer = """INSERT INTO {outgoing_buffer}
-                        (model_uuid, serialized, deleted, last_saved_instance, last_saved_counter,
+                        (model_uuid, serialized, deleted, last_saved_instance, last_saved_counter, hard_delete,
                          model_name, profile, partition, source_id, conflicting_serialized_data, transfer_session_id, _self_ref_fk)
-                        SELECT id, serialized, deleted, last_saved_instance, last_saved_counter, model_name, profile, partition, source_id, conflicting_serialized_data, '{transfer_session_id}', _self_ref_fk
+                        SELECT id, serialized, deleted, last_saved_instance, last_saved_counter, hard_delete, model_name, profile, partition, source_id, conflicting_serialized_data, '{transfer_session_id}', _self_ref_fk
                         FROM {store} WHERE {condition}""".format(outgoing_buffer=Buffer._meta.db_table,
                                                                  transfer_session_id=transfersession.id,
                                                                  condition=where_condition,
