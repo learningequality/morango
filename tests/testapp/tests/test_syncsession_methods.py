@@ -216,6 +216,17 @@ class BufferIntoStoreTestCase(TestCase):
         self.assertEqual(store.last_saved_counter, current_id.counter)
         self.assertEqual(store.conflicting_serialized_data, "buffer\nstore")
 
+    def test_dequeuing_merge_conflict_hard_delete(self):
+        store = Store.objects.get(id=self.data['model7'])
+        self.assertEqual(store.serialized, "store")
+        self.assertEqual(store.conflicting_serialized_data, "store")
+        with connection.cursor() as cursor:
+            current_id = InstanceIDModel.get_current_instance_and_increment_counter()
+            DBBackend._dequeuing_merge_conflict_buffer(cursor, current_id, self.data['sc'].current_transfer_session.id)
+        store.refresh_from_db()
+        self.assertEqual(store.serialized, "")
+        self.assertEqual(store.conflicting_serialized_data, "")
+
     def test_dequeuing_update_rmcs_last_saved_by(self):
         self.assertFalse(RecordMaxCounter.objects.filter(instance_id=self.current_id.id).exists())
         with connection.cursor() as cursor:

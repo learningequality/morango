@@ -207,6 +207,19 @@ class SerializeIntoStoreTestCase(TestCase):
         self.mc.serialize_into_store()
         self.assertFalse(Store.objects.get(id=user.id).deleted)
 
+    def test_hard_delete_wipes_serialized(self):
+        log = SummaryLog.objects.create(user=MyUser.objects.create(username='user'))
+        self.mc.serialize_into_store()
+        Store.objects.update(conflicting_serialized_data='store')
+        st = Store.objects.get(id=log.id)
+        self.assertNotEqual(st.serialized, '')
+        self.assertNotEqual(st.conflicting_serialized_data, '')
+        log.delete(hard_delete=True)
+        self.mc.serialize_into_store()
+        st.refresh_from_db()
+        self.assertEqual(st.serialized, '')
+        self.assertEqual(st.conflicting_serialized_data, '')
+
 class RecordMaxCounterUpdatesDuringSerialization(TestCase):
 
     def setUp(self):
