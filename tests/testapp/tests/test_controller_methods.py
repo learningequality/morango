@@ -220,7 +220,7 @@ class SerializeIntoStoreTestCase(TestCase):
         self.assertEqual(st.serialized, '')
         self.assertEqual(st.conflicting_serialized_data, '')
 
-    def test_hard_delete_propogates_to_store_model(self):
+    def test_in_app_hard_delete_propagates(self):
         user = MyUser.objects.create(username='user')
         log_id = uuid.uuid4().hex
         log = SummaryLog(user=user, id=log_id)
@@ -234,6 +234,16 @@ class SerializeIntoStoreTestCase(TestCase):
         store_log.refresh_from_db()
         self.assertTrue(store_log.hard_delete)
         self.assertEqual(store_log.serialized, '')
+
+    def test_store_hard_delete_propagates(self):
+        user = MyUser(username='user')
+        user.save(update_dirty_bit_to=False)
+        log = SummaryLog(user=user)
+        log.save(update_dirty_bit_to=False)
+        StoreModelFacilityFactory(model_name="user", id=user.id, serialized=json.dumps(user.serialize()), hard_delete=True, deleted=True)
+        # make sure hard_delete propogates to related models even if they are not hard_deleted
+        self.mc.deserialize_from_store()
+        self.assertTrue(HardDeletedModels.objects.filter(id=log.id).exists())
 
 
 class RecordMaxCounterUpdatesDuringSerialization(TestCase):

@@ -288,7 +288,14 @@ class Store(AbstractStore):
         klass_model = _profile_models[self.profile][self.model_name]
         # if store model marked as deleted, attempt to delete in app layer
         if self.deleted:
-            klass_model.objects.filter(id=self.id).delete()
+            # if hard deleted, propogate to related models
+            if self.hard_delete:
+                try:
+                    klass_model.objects.get(id=self.id).delete(hard_delete=True)
+                except klass_model.DoesNotExist:
+                    pass
+            else:
+                klass_model.objects.filter(id=self.id).delete()
         # inflate model and attempt to save
         else:
             app_model = klass_model.deserialize(json.loads(self.serialized))
