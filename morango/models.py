@@ -19,7 +19,7 @@ from morango.util import mute_signals
 from django.db.models.deletion import Collector
 from django.db import router
 from morango.utils.morango_mptt import MorangoMPTTModel
-
+from django.db.models.fields.related import ForeignKey
 
 from .certificates import Certificate, Filter, Nonce, ScopeDefinition
 from .manager import SyncableModelManager
@@ -300,6 +300,14 @@ class Store(AbstractStore):
                     app_model.save(update_dirty_bit_to=False)
             # if unable to save due to missing FKs, mark model as deleted
             except ValidationError:
+                # check FKs in store to see if any of those models were hard deleted
+                fk_ids = [getattr(app_model, field.attname) for field in app_model._meta.fields if isinstance(field, ForeignKey)]
+                for fk_id in fk_ids:
+                    try:
+                        if Store.objects.get(id=fk_id).hard_delete:
+                            app_model._update_hard_deleted_models()
+                    except Store.DoesNotExist:
+                        pass
                 app_model._update_deleted_models()
 
 class Buffer(AbstractStore):
@@ -444,6 +452,10 @@ class SyncableModel(UUIDModelMixin):
         DeletedModels.objects.update_or_create(defaults={'id': self.id, 'profile': self.morango_profile},
                                                id=self.id)
 
+    def _update_hard_deleted_models(self):
+        HardDeletedModels.objects.update_or_create(defaults={'id': self.id, 'profile': self.morango_profile},
+                                                   id=self.id)
+
     def save(self, update_dirty_bit_to=True, *args, **kwargs):
         if update_dirty_bit_to is None:
             pass  # don't do anything with the dirty bit
@@ -467,8 +479,7 @@ class SyncableModel(UUIDModelMixin):
                 for model, instances in six.iteritems(collector.data):
                     if issubclass(model, SyncableModel) or issubclass(model, MorangoMPTTModel):
                         for obj in instances:
-                            HardDeletedModels.objects.update_or_create(defaults={'id': obj.id, 'profile': self.morango_profile},
-                                                                       id=obj.id)
+                            obj._update_hard_deleted_models()
             return collector.delete()
 
     def serialize(self):

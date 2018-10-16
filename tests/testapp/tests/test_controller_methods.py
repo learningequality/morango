@@ -8,8 +8,7 @@ from morango.controller import MorangoProfileController
 from morango.controller import _self_referential_fk
 from facility_profile.models import Facility, MyUser, SummaryLog
 from morango.certificates import Filter
-from morango.controller import MorangoProfileController, _self_referential_fk
-from morango.models import DeletedModels, InstanceIDModel, RecordMaxCounter, Store
+from morango.models import DeletedModels, InstanceIDModel, RecordMaxCounter, Store, HardDeletedModels
 
 from .helpers import serialized_facility_factory
 
@@ -208,17 +207,34 @@ class SerializeIntoStoreTestCase(TestCase):
         self.assertFalse(Store.objects.get(id=user.id).deleted)
 
     def test_hard_delete_wipes_serialized(self):
-        log = SummaryLog.objects.create(user=MyUser.objects.create(username='user'))
+        user = MyUser.objects.create(username='user')
+        log = SummaryLog.objects.create(user=user)
         self.mc.serialize_into_store()
         Store.objects.update(conflicting_serialized_data='store')
         st = Store.objects.get(id=log.id)
         self.assertNotEqual(st.serialized, '')
         self.assertNotEqual(st.conflicting_serialized_data, '')
-        log.delete(hard_delete=True)
+        user.delete(hard_delete=True)  # cascade hard delete
         self.mc.serialize_into_store()
         st.refresh_from_db()
         self.assertEqual(st.serialized, '')
         self.assertEqual(st.conflicting_serialized_data, '')
+
+    def test_hard_delete_propogates_to_store_model(self):
+        user = MyUser.objects.create(username='user')
+        log_id = uuid.uuid4().hex
+        log = SummaryLog(user=user, id=log_id)
+        StoreModelFacilityFactory(model_name="user", id=user.id, serialized=json.dumps(user.serialize()))
+        store_log = StoreModelFacilityFactory(model_name="contentsummarylog", id=log.id, serialized=json.dumps(log.serialize()))
+        user.delete(hard_delete=True)
+        # preps log to be hard_deleted
+        self.mc.deserialize_from_store()
+        # updates store log to be hard_deleted
+        self.mc.serialize_into_store()
+        store_log.refresh_from_db()
+        self.assertTrue(store_log.hard_delete)
+        self.assertEqual(store_log.serialized, '')
+
 
 class RecordMaxCounterUpdatesDuringSerialization(TestCase):
 
