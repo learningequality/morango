@@ -302,7 +302,7 @@ class Store(AbstractStore):
             app_model._morango_source_id = self.source_id
             app_model._morango_partition = self.partition
             try:
-                app_model.full_clean()
+                app_model.clean_fields()
                 with mute_signals(signals.pre_save, signals.post_save):
                     app_model.save(update_dirty_bit_to=False)
             # if unable to save due to missing FKs, mark model as deleted
