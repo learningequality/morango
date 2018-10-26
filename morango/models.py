@@ -9,7 +9,7 @@ import uuid
 
 from django.conf import settings
 from django.db.models import signals
-from django.core.exceptions import ObjectDoesNotExist, ValidationError
+from django.core import exceptions
 from django.db import connection, models, transaction
 from django.db.models import F, Func, TextField, Value
 from django.db.models.functions import Cast
@@ -285,10 +285,19 @@ class Store(AbstractStore):
     objects = StoreManager()
 
     def _deserialize_store_model(self):
+        """
+        When deserializing a store model, we look at the deleted flags to know if we should delete the app model.
+        Upon loading the app model in memory we validate the app models fields, if any errors occurs we follow
+        foreign key relationships to see if the related model has been deleted to propagate that deletion to the target app model.
+        If there are no errors, we save the app model.
+
+        :return: ``bool`` whether the object was successfully deleted or saved
+        """
+        valid = True
         klass_model = _profile_models[self.profile][self.model_name]
         # if store model marked as deleted, attempt to delete in app layer
         if self.deleted:
-            # if hard deleted, propogate to related models
+            # if hard deleted, propagate to related models
             if self.hard_delete:
                 try:
                     klass_model.objects.get(id=self.id).delete(hard_delete=True)
@@ -296,26 +305,35 @@ class Store(AbstractStore):
                     pass
             else:
                 klass_model.objects.filter(id=self.id).delete()
-        # inflate model and attempt to save
+            return valid  # mark deletion as being validated
         else:
+            # load model into memory
             app_model = klass_model.deserialize(json.loads(self.serialized))
             app_model._morango_source_id = self.source_id
             app_model._morango_partition = self.partition
+
             try:
+                # validate and save the model
                 app_model.clean_fields()
                 with mute_signals(signals.pre_save, signals.post_save):
                     app_model.save(update_dirty_bit_to=False)
-            # if unable to save due to missing FKs, mark model as deleted
-            except ValidationError:
-                # check FKs in store to see if any of those models were hard deleted
+                return valid
+            except exceptions.ValidationError:
+                valid = False
+                # check FKs in store to see if any of those models were deleted or hard_deleted to propagate to this model
                 fk_ids = [getattr(app_model, field.attname) for field in app_model._meta.fields if isinstance(field, ForeignKey)]
                 for fk_id in fk_ids:
                     try:
-                        if Store.objects.get(id=fk_id).hard_delete:
+                        st_model = Store.objects.get(id=fk_id)
+                        if st_model.hard_delete:
                             app_model._update_hard_deleted_models()
+                        if st_model.delete:
+                            valid = True  # mark deletion as being validated
+                            app_model._update_deleted_models()
                     except Store.DoesNotExist:
                         pass
-                app_model._update_deleted_models()
+                return valid
+
 
 class Buffer(AbstractStore):
     """

@@ -152,6 +152,7 @@ def _deserialize_from_store(profile):
 
     with transaction.atomic():
         syncable_dict = _profile_models[profile]
+        excluded_list = []
         # iterate through classes which are in foreign key dependency order
         for model_name, klass_model in iteritems(syncable_dict):
             # handle cases where a class has a single FK reference to itself
@@ -167,20 +168,28 @@ def _deserialize_from_store(profile):
                 # keep iterating until size of dirty_children is 0
                 while len(dirty_children) > 0:
                     for store_model in dirty_children:
-                        store_model._deserialize_store_model()
-                        # we update a store model after we have deserialized it
-                        store_model.dirty_bit = False
-                        store_model.save(update_fields=['dirty_bit'])
+                        if store_model._deserialize_store_model():
+                            # we update a store model after we have deserialized it to be able to mark it as a clean parent
+                            store_model.dirty_bit = False
+                            store_model.save(update_fields=['dirty_bit'])
+                        else:
+                            # if the app model did not validate, we leave the store dirty bit set
+                            excluded_list.append(store_model.id)
 
                     # update lists with new clean parents and dirty children
                     clean_parents = Store.objects.filter(dirty_bit=False, profile=profile).filter(query).char_ids_list()
                     dirty_children = Store.objects.filter(dirty_bit=True, profile=profile, _self_ref_fk__in=clean_parents).filter(query)
             else:
                 for store_model in Store.objects.filter(model_name=model_name, profile=profile, dirty_bit=True):
-                    store_model._deserialize_store_model()
+                    if store_model._deserialize_store_model():
+                        pass
+                    else:
+                        # if the app model did not validate, we leave the store dirty bit set
+                        excluded_list.append(store_model.id)
 
-        # clear dirty bit for all store models for this profile
-        Store.objects.filter(profile=profile, dirty_bit=True).update(dirty_bit=False)
+        # clear dirty bit for all store models for this profile except for models that did not validate
+        Store.objects.exclude(id__in=excluded_list).filter(profile=profile, dirty_bit=True).update(dirty_bit=False)
+
 
 @transaction.atomic()
 def _queue_into_buffer(transfersession):

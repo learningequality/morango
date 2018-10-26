@@ -367,12 +367,19 @@ class DeserializationFromStoreIntoAppTestCase(TestCase):
         self.mc.deserialize_from_store()
         self.assertFalse(Facility.objects.filter(id=st.id).exists())
 
-    def test_broken_fk_adds_to_deleted_models(self):
+    def test_broken_fk_leaves_store_dirty_bit(self):
         serialized = """{"user_id": "40de9a3fded95d7198f200c78e559353", "id": "bd205b5ee5bc42da85925d24c61341a8"}"""
-        StoreModelFacilityFactory(id=uuid.uuid4().hex, serialized=serialized, model_name="contentsummarylog")
-        with mock.patch('morango.models.SyncableModel._update_deleted_models') as mock_update:
-            self.mc.deserialize_from_store()
-            self.assertTrue(mock_update.called)
+        st = StoreModelFacilityFactory(id=uuid.uuid4().hex, serialized=serialized, model_name="contentsummarylog")
+        self.mc.deserialize_from_store()
+        st.refresh_from_db()
+        self.assertTrue(st.dirty_bit)
+
+    def test_invalid_model_leaves_store_dirty_bit(self):
+        user = MyUser.objects.create(username='a'*21)
+        st = StoreModelFacilityFactory(model_name="user", id=user.id, serialized=json.dumps(user.serialize()))
+        self.mc.deserialize_from_store()
+        st.refresh_from_db()
+        self.assertTrue(st.dirty_bit)
 
 
 class SelfReferentialFKDeserializationTestCase(TestCase):
