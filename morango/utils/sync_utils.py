@@ -62,9 +62,10 @@ def _serialize_into_store(profile, filter=None):
             klass_queryset = klass_model.objects.filter(_morango_dirty_bit=True)
             if prefix_condition:
                 klass_queryset = klass_queryset.filter(prefix_condition)
+            store_records_dict = Store.objects.in_bulk(id_list=klass_queryset.values_list('id', flat=True))
             for app_model in klass_queryset:
                 try:
-                    store_model = Store.objects.get(id=app_model.id)
+                    store_model = store_records_dict[app_model.id]
 
                     # if store record dirty and app record dirty, append store serialized to conflicting data
                     if store_model.dirty_bit:
@@ -89,7 +90,7 @@ def _serialize_into_store(profile, filter=None):
                     # update fields for this store model
                     store_model.save(update_fields=['serialized', 'last_saved_instance', 'last_saved_counter', 'conflicting_serialized_data', 'deleted'])
 
-                except Store.DoesNotExist:
+                except KeyError:
                     kwargs = {
                         'id': app_model.id,
                         'serialized': DjangoJSONEncoder().encode(app_model.serialize()),
