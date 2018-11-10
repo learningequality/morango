@@ -16,10 +16,6 @@ python:
 env:
 # Removed because linting PR coming up separately
 #  - LINT="yes"
-  - DJANGO="1.10" CRYPTOGRAPHY="1.2"
-  - DJANGO="1.10" CRYPTOGRAPHY="1.8"
-  - DJANGO="1.10" CRYPTOGRAPHY="2.0"
-  - DJANGO="1.10" CRYPTOGRAPHY="2.3"
   - DJANGO="1.11" CRYPTOGRAPHY="1.2"
   - DJANGO="1.11" CRYPTOGRAPHY="1.8"
   - DJANGO="1.11" CRYPTOGRAPHY="2.0"
@@ -30,28 +26,16 @@ matrix:
   - python: "2.7"
     env: POSTGRES="yes"
   exclude:
-  - python: "2.7"
-    env: DJANGO="1.10" CRYPTOGRAPHY="1.2"
   - python: "3.4"
     env: LINT="yes"
-  - python: "3.4"
-    env: DJANGO="1.10" CRYPTOGRAPHY="1.2"
   - python: "3.4"
     env: DJANGO="1.11" CRYPTOGRAPHY="1.2"
   - python: "3.5"
     env: LINT="yes"
   - python: "3.5"
-    env: DJANGO="1.10" CRYPTOGRAPHY="1.2"
-  - python: "3.5"
     env: DJANGO="1.11" CRYPTOGRAPHY="1.2"
   - python: "3.6"
     env: LINT="yes"
-  - python: "3.6"
-    env: DJANGO="1.10" CRYPTOGRAPHY="1.2"
-  - python: "3.6"
-    env: DJANGO="1.10" CRYPTOGRAPHY="2.0"
-  - python: "3.6"
-    env: DJANGO="1.10" CRYPTOGRAPHY="2.3"
 
 # command to install dependencies, e.g. pip install -r requirements.txt --use-mirrors
 before_install:
