@@ -8,6 +8,8 @@ import sys
 import uuid
 
 from django.conf import settings
+from django.core import exceptions
+from django.core.cache import cache
 from django.db.models import signals
 from django.core import exceptions
 from django.db import connection, models, transaction
@@ -507,6 +509,42 @@ class SyncableModel(UUIDModelMixin):
                         for obj in instances:
                             obj._update_hard_deleted_models()
             return collector.delete()
+
+    def clean_fields(self, exclude=None):
+        """
+        Cleans all fields and raises a ValidationError containing a dict
+        of all validation errors if any occur.
+        """
+        if exclude is None:
+            exclude = []
+
+        errors = {}
+        for f in self._meta.fields:
+            if f.name in exclude:
+                continue
+            # Skip validation for empty fields with blank=True. The developer
+            # is responsible for making sure they have a valid value.
+            raw_value = getattr(self, f.attname)
+            if f.blank and raw_value in f.empty_values:
+                continue
+            try:
+                if isinstance(f, models.ForeignKey):
+                    key = 'morango_{id}_{db_table}_foreignkey'.format(db_table=f.related_model._meta.db_table, id=raw_value)
+                    cached_value = cache.get(key)
+                    if cached_value:
+                        setattr(self, f.attname, cached_value)
+                    else:
+                        cleaned_value = f.clean(raw_value, self)
+                        cache.set(key, cleaned_value, 60 * 10)
+                        setattr(self, f.attname, cleaned_value)
+                else:
+                    setattr(self, f.attname, f.clean(raw_value, self))
+
+            except exceptions.ValidationError as e:
+                errors[f.name] = e.error_list
+
+        if errors:
+            raise exceptions.ValidationError(errors)
 
     def serialize(self):
         """All concrete fields of the ``SyncableModel`` subclass, except for those specifically blacklisted, are returned in a dict."""
