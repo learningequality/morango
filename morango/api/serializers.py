@@ -71,66 +71,10 @@ class RecordMaxCounterBufferSerializer(serializers.ModelSerializer):
         fields = ('transfer_session', 'model_uuid', 'instance_id', 'counter')
 
 
-class BufferListSerializer(serializers.ListSerializer):
-
-    def create(self, validated_data):
-        # bulk create implementation
-        rmcb_list = []
-        buffer_list = []
-        for attrs in validated_data:
-            rmcb_list += [RecordMaxCounterBuffer(**rmcb_data) for rmcb_data in attrs.pop('rmcb_list')]
-            buffer_list += [Buffer(**attrs)]
-        with transaction.atomic():
-            buffers = Buffer.objects.bulk_create(buffer_list)
-            RecordMaxCounterBuffer.objects.bulk_create(rmcb_list)
-        return buffers
-
-
 class BufferSerializer(serializers.ModelSerializer):
 
     rmcb_list = RecordMaxCounterBufferSerializer(many=True)
 
-    def validate(self, data):
-
-        transfer_session = data["transfer_session"]
-
-        # ensure the provided model_uuid matches the expected/computed id
-        try:
-            Model = _profile_models[data["profile"]][data["model_name"]]
-        except KeyError:
-            Model = SyncableModel
-        expected_model_uuid = Model.compute_namespaced_id(data["partition"], data["source_id"], data["model_name"])
-        if expected_model_uuid != data["model_uuid"]:
-            # we sometimes calculate ids based on placeholders, so we recompute ids with those parameters
-            model = Model.deserialize(json.loads(data['serialized']))
-            expected_model_uuid = model.compute_namespaced_id(model.calculate_partition(), data['source_id'], data['model_name'])
-            if expected_model_uuid != data['model_uuid']:
-                raise serializers.ValidationError({"model_uuid": "Does not match results of calling {}.compute_namespaced_id".format(Model.__class__.__name__)})
-
-        # ensure the profile is marked onto the buffer record
-        data["profile"] = transfer_session.sync_session.profile
-
-        # ensure the partition is within the transfer session's filter
-        if not transfer_session.get_filter().contains_partition(data["partition"]):
-            raise serializers.ValidationError({"partition": "Partition {} is not contained within filter for TransferSession ({})".format(data["partition"], transfer_session.filter)})
-
-        # ensure that all nested RMCB models are properly associated with this record and transfer session
-        for rmcb in data["rmcb_list"]:
-            if rmcb["transfer_session"] != transfer_session:
-                raise serializers.ValidationError({"rmcb_list": "Transfer session on RMCB ({}) does not match Buffer's TransferSession ({})".format(rmcb["transfer_session"], transfer_session)})
-            if rmcb["model_uuid"] != data["model_uuid"]:
-                raise serializers.ValidationError({"rmcb_list": "Model UUID on RMCB ({}) does not match Buffer's Model UUID ({})".format(rmcb["model_uuid"], data["model_uuid"])})
-
-        return data
-
-    def create(self, validated_data):
-        rmcb_list = [RecordMaxCounterBuffer(**rmcb_data) for rmcb_data in validated_data.pop('rmcb_list')]
-        with transaction.atomic():
-            buffermodel = Buffer.objects.create(**validated_data)
-            RecordMaxCounterBuffer.objects.bulk_create(rmcb_list)
-        return buffermodel
-
     class Meta:
         model = Buffer
         fields = ('serialized', 'deleted', 'last_saved_instance', 'last_saved_counter', 'partition', 'source_id', 'model_name', 'conflicting_serialized_data', 'model_uuid', 'transfer_session', 'profile', 'rmcb_list', '_self_ref_fk')
-        list_serializer_class = BufferListSerializer
