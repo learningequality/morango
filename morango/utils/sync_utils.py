@@ -161,7 +161,7 @@ def _deserialize_from_store(profile):
                 while len(dirty_children) > 0:
                     for store_model in dirty_children:
                         store_model._deserialize_store_model()
-                        # we update a store model after we have deserialized it
+                        # we update a store model after we have deserialized it to be able to mark it as a clean parent
                         store_model.dirty_bit = False
                         store_model.save(update_fields=['dirty_bit'])
 
