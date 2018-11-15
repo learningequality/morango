@@ -325,9 +325,10 @@ class Store(AbstractStore):
                 for fk_id in fk_ids:
                     try:
                         st_model = Store.objects.get(id=fk_id)
-                        if st_model.hard_delete:
-                            app_model._update_hard_deleted_models()
-                        if st_model.delete:
+                        if st_model.deleted:
+                            # if hard deleted, propagate to store model
+                            if st_model.hard_delete:
+                                app_model._update_hard_deleted_models()
                             valid = True  # mark deletion as being validated
                             app_model._update_deleted_models()
                     except Store.DoesNotExist:

@@ -84,10 +84,12 @@ def _serialize_into_store(profile, filter=None):
                     # update last saved bys for this store model
                     store_model.last_saved_instance = current_id.id
                     store_model.last_saved_counter = current_id.counter
+                    # update deleted flags in case it was previously deleted
                     store_model.deleted = False
+                    store_model.hard_delete = False
 
-                    # update fields for this store model
-                    store_model.save(update_fields=['serialized', 'last_saved_instance', 'last_saved_counter', 'conflicting_serialized_data', 'deleted'])
+                    # update this model
+                    store_model.save()
 
                 except Store.DoesNotExist:
                     kwargs = {
@@ -133,7 +135,7 @@ def _serialize_into_store(profile, filter=None):
         # handle logic for hard deletion models
         hard_delete_ids = HardDeletedModels.objects.filter(profile=profile).values_list('id', flat=True)
         hard_delete_store_records = Store.objects.filter(id__in=hard_delete_ids)
-        hard_delete_store_records.update(hard_delete=True, serialized='', conflicting_serialized_data='')
+        hard_delete_store_records.update(hard_delete=True, serialized='{}', conflicting_serialized_data='')
         HardDeletedModels.objects.filter(profile=profile).delete()
 
         # update our own database max counters after serialization
