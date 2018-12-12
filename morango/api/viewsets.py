@@ -12,6 +12,7 @@ from ipware.ip import get_ip
 from morango.certificates import Filter
 from morango.crypto import SharedKey
 from morango.models import Buffer, DatabaseMaxCounter, InstanceIDModel, RecordMaxCounterBuffer
+from morango.validation import validate_and_create_buffer_data
 from morango.utils.sync_utils import (_dequeue_into_store, _queue_into_buffer,
                                       _serialize_into_store)
 from rest_framework import (decorators, mixins, pagination, response, status,
@@ -389,45 +390,10 @@ class BufferViewSet(mixins.ListModelMixin, viewsets.GenericViewSet):
                 "All pushed records must be associated with the same TransferSession.",
                 status=status.HTTP_403_FORBIDDEN
             )
+        errors = validate_and_create_buffer_data(data, transfer_session)
 
-        rmcb_list = []
-        buffer_list = []
-        for record in data:
-            # ensure the provided model_uuid matches the expected/computed id
-            try:
-                Model = _profile_models[record["profile"]][record["model_name"]]
-            except KeyError:
-                Model = SyncableModel
-
-            partition = record['partition'].replace(record['model_uuid'], Model.ID_PLACEHOLDER)
-            expected_model_uuid = Model.compute_namespaced_id(partition, record["source_id"], record["model_name"])
-            if expected_model_uuid != record["model_uuid"]:
-                return response.Response({"model_uuid": "Does not match results of calling {}.compute_namespaced_id".format(Model.__class__.__name__)}, status=status.HTTP_400_BAD_REQUEST)
-
-            # ensure the profile is marked onto the buffer record
-            record["profile"] = transfer_session.sync_session.profile
-
-            # ensure the partition is within the transfer session's filter
-            if not transfer_session.get_filter().contains_partition(record["partition"]):
-                return response.Response({"partition": "Partition {} is not contained within filter for TransferSession ({})".format(record["partition"], transfer_session.filter)}, status=status.HTTP_400_BAD_REQUEST)
-
-            # ensure that all nested RMCB models are properly associated with this record and transfer session
-            for rmcb in record.pop('rmcb_list'):
-                if rmcb["transfer_session"] != transfer_session.id:
-                    return response.Response({"rmcb_list": "Transfer session on RMCB ({}) does not match Buffer's TransferSession ({})".format(rmcb["transfer_session"], transfer_session)}, status=status.HTTP_400_BAD_REQUEST)
-                if rmcb["model_uuid"] != record["model_uuid"]:
-                    return response.Response({"rmcb_list": "Model UUID on RMCB ({}) does not match Buffer's Model UUID ({})".format(rmcb["model_uuid"], record["model_uuid"])}, status=status.HTTP_400_BAD_REQUEST)
-                rmcb['transfer_session_id'] = rmcb.pop('transfer_session')
-                rmcb_list += [RecordMaxCounterBuffer(**rmcb)]
-
-            record['transfer_session_id'] = record.pop('transfer_session')
-            buffer_list += [Buffer(**record)]
-
-        with transaction.atomic():
-            transfer_session.records_transferred += len(data)
-            transfer_session.save()
-            Buffer.objects.bulk_create(buffer_list)
-            RecordMaxCounterBuffer.objects.bulk_create(rmcb_list)
+        if errors:
+            return response.Response(errors, status=status.HTTP_400_BAD_REQUEST)
 
         return response.Response(status=status.HTTP_201_CREATED)
 
