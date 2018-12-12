@@ -87,7 +87,7 @@ def _serialize_into_store(profile, filter=None):
                     store_model.last_saved_counter = current_id.counter
                     # update deleted flags in case it was previously deleted
                     store_model.deleted = False
-                    store_model.hard_delete = False
+                    store_model.hard_deleted = False
 
                     # update this model
                     store_model.save()
@@ -134,9 +134,9 @@ def _serialize_into_store(profile, filter=None):
         DeletedModels.objects.filter(profile=profile).delete()
 
         # handle logic for hard deletion models
-        hard_delete_ids = HardDeletedModels.objects.filter(profile=profile).values_list('id', flat=True)
-        hard_delete_store_records = Store.objects.filter(id__in=hard_delete_ids)
-        hard_delete_store_records.update(hard_delete=True, serialized='{}', conflicting_serialized_data='')
+        hard_deleted_ids = HardDeletedModels.objects.filter(profile=profile).values_list('id', flat=True)
+        hard_deleted_store_records = Store.objects.filter(id__in=hard_deleted_ids)
+        hard_deleted_store_records.update(hard_deleted=True, serialized='{}', conflicting_serialized_data='')
         HardDeletedModels.objects.filter(profile=profile).delete()
 
         # update our own database max counters after serialization
@@ -236,9 +236,9 @@ def _queue_into_buffer(transfersession):
     # execute raw sql to take all records that match condition, to be put into buffer for transfer
     with connection.cursor() as cursor:
         queue_buffer = """INSERT INTO {outgoing_buffer}
-                        (model_uuid, serialized, deleted, last_saved_instance, last_saved_counter, hard_delete,
+                        (model_uuid, serialized, deleted, last_saved_instance, last_saved_counter, hard_deleted,
                          model_name, profile, partition, source_id, conflicting_serialized_data, transfer_session_id, _self_ref_fk)
-                        SELECT id, serialized, deleted, last_saved_instance, last_saved_counter, hard_delete, model_name, profile, partition, source_id, conflicting_serialized_data, '{transfer_session_id}', _self_ref_fk
+                        SELECT id, serialized, deleted, last_saved_instance, last_saved_counter, hard_deleted, model_name, profile, partition, source_id, conflicting_serialized_data, '{transfer_session_id}', _self_ref_fk
                         FROM {store} WHERE {condition}""".format(outgoing_buffer=Buffer._meta.db_table,
                                                                  transfer_session_id=transfersession.id,
                                                                  condition=where_condition,

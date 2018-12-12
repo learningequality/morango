@@ -237,7 +237,7 @@ class AbstractStore(models.Model):
     serialized = models.TextField(blank=True)
     deleted = models.BooleanField(default=False)
     # flag to let other devices know to purge this data
-    hard_delete = models.BooleanField(default=False)
+    hard_deleted = models.BooleanField(default=False)
 
     # ID of last InstanceIDModel and its corresponding counter at time of serialization
     last_saved_instance = UUIDField()
@@ -298,7 +298,7 @@ class Store(AbstractStore):
         # if store model marked as deleted, attempt to delete in app layer
         if self.deleted:
             # if hard deleted, propagate to related models
-            if self.hard_delete:
+            if self.hard_deleted:
                 try:
                     klass_model.objects.get(id=self.id).delete(hard_delete=True)
                 except klass_model.DoesNotExist:
@@ -327,7 +327,7 @@ class Store(AbstractStore):
                         st_model = Store.objects.get(id=fk_id)
                         if st_model.deleted:
                             # if hard deleted, propagate to store model
-                            if st_model.hard_delete:
+                            if st_model.hard_deleted:
                                 app_model._update_hard_deleted_models()
                             valid = True  # mark deletion as being validated
                             app_model._update_deleted_models()

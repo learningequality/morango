@@ -22,12 +22,12 @@ class Migration(migrations.Migration):
         ),
         migrations.AddField(
             model_name='buffer',
-            name='hard_delete',
+            name='hard_deleted',
             field=models.BooleanField(default=False),
         ),
         migrations.AddField(
             model_name='store',
-            name='hard_delete',
+            name='hard_deleted',
             field=models.BooleanField(default=False),
         ),
     ]

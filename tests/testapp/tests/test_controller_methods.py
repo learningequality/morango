@@ -214,12 +214,12 @@ class SerializeIntoStoreTestCase(TestCase):
         self.mc.serialize_into_store()
         user.delete(hard_delete=True)
         self.mc.serialize_into_store()
-        self.assertTrue(Store.objects.get(id=user_id).hard_delete)
+        self.assertTrue(Store.objects.get(id=user_id).hard_deleted)
         # recreate object with same id
         user = MyUser.objects.create(username='user')
         # ensure hard deleted flag is updated after recreation
         self.mc.serialize_into_store()
-        self.assertFalse(Store.objects.get(id=user_id).hard_delete)
+        self.assertFalse(Store.objects.get(id=user_id).hard_deleted)
 
     def test_hard_delete_wipes_serialized(self):
         user = MyUser.objects.create(username='user')
@@ -232,7 +232,7 @@ class SerializeIntoStoreTestCase(TestCase):
         user.delete(hard_delete=True)  # cascade hard delete
         self.mc.serialize_into_store()
         st.refresh_from_db()
-        self.assertEqual(st.serialized, '')
+        self.assertEqual(st.serialized, '{}')
         self.assertEqual(st.conflicting_serialized_data, '')
 
     def test_in_app_hard_delete_propagates(self):
@@ -247,16 +247,16 @@ class SerializeIntoStoreTestCase(TestCase):
         # updates store log to be hard_deleted
         self.mc.serialize_into_store()
         store_log.refresh_from_db()
-        self.assertTrue(store_log.hard_delete)
-        self.assertEqual(store_log.serialized, '')
+        self.assertTrue(store_log.hard_deleted)
+        self.assertEqual(store_log.serialized, '{}')
 
     def test_store_hard_delete_propagates(self):
         user = MyUser(username='user')
         user.save(update_dirty_bit_to=False)
         log = SummaryLog(user=user)
         log.save(update_dirty_bit_to=False)
-        StoreModelFacilityFactory(model_name="user", id=user.id, serialized=json.dumps(user.serialize()), hard_delete=True, deleted=True)
-        # make sure hard_delete propagates to related models even if they are not hard_deleted
+        StoreModelFacilityFactory(model_name="user", id=user.id, serialized=json.dumps(user.serialize()), hard_deleted=True, deleted=True)
+        # make sure hard_deleted propagates to related models even if they are not hard_deleted
         self.mc.deserialize_from_store()
         self.assertTrue(HardDeletedModels.objects.filter(id=log.id).exists())
 
@@ -390,13 +390,18 @@ class DeserializationFromStoreIntoAppTestCase(TestCase):
         self.assertTrue(st.dirty_bit)
 
     def test_invalid_model_leaves_store_dirty_bit(self):
-        user = MyUser.objects.create(username='a'*21)
-        st = StoreModelFacilityFactory(model_name="user", id=user.id, serialized=json.dumps(user.serialize()))
+        user = MyUser(username='a'*21)
+        st = StoreModelFacilityFactory(model_name="user", id=uuid.uuid4().hex, serialized=json.dumps(user.serialize()))
         self.mc.deserialize_from_store()
         st.refresh_from_db()
         self.assertTrue(st.dirty_bit)
 
     def test_deleted_model_propagates_to_store_record(self):
+        """
+        It could be the case that we have two store records, one that is deleted and the other that has a fk pointing to the deleted record.
+        When we deserialize, we want to ensure that the record with the fk pointer also gets the deleted flag set, while also not
+        deserializing the data into a model.
+        """
         # user will be deleted
         user = MyUser(username='user')
         user.save(update_dirty_bit_to=False)
@@ -413,20 +418,25 @@ class DeserializationFromStoreIntoAppTestCase(TestCase):
         self.assertTrue(Store.objects.get(id=log.id).deleted)
 
     def test_hard_deleted_model_propagates_to_store_record(self):
+        """
+        It could be the case that we have two store records, one that is hard deleted and the other that has a fk pointing to the hard deleted record.
+        When we deserialize, we want to ensure that the record with the fk pointer also gets the hard deleted flag set, while also not
+        deserializing the data into a model.
+        """
         # user will be deleted
         user = MyUser(username='user')
         user.save(update_dirty_bit_to=False)
         # log may be synced in from other device
         log = SummaryLog(user_id=user.id)
         log.id = log.calculate_uuid()
-        StoreModelFacilityFactory(model_name="user", id=user.id, serialized=json.dumps(user.serialize()), deleted=True, hard_delete=True)
+        StoreModelFacilityFactory(model_name="user", id=user.id, serialized=json.dumps(user.serialize()), deleted=True, hard_deleted=True)
         StoreModelFacilityFactory(model_name="contentsummarylog", id=log.id, serialized=json.dumps(log.serialize()))
         # make sure delete propagates to store due to deleted foreign key
         self.mc.deserialize_from_store()
         # have to serialize to update deleted models
         self.mc.serialize_into_store()
         self.assertFalse(SummaryLog.objects.filter(id=log.id).exists())
-        self.assertTrue(Store.objects.get(id=log.id).hard_delete)
+        self.assertTrue(Store.objects.get(id=log.id).hard_deleted)
 
 
 class SelfReferentialFKDeserializationTestCase(TestCase):

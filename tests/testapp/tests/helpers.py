@@ -178,7 +178,7 @@ def create_buffer_and_store_dummy_data(transfer_session_id):
     # buffer5: last_saved => F: 2
     # RMCBs A: 1, F: 2, G: 3, H: 4
     BufferFactory(serialized="", last_saved_instance=data['model7_rmcb_ids'][1], last_saved_counter=2, model_uuid=data['model7'],
-                  transfer_session_id=transfer_session_id, hard_delete=True)
+                  transfer_session_id=transfer_session_id, hard_deleted=True)
     create_rmcb_data(1, 2, 3, 4, data['model7_rmcb_ids'], data['model7'], transfer_session_id)
 
     # example data for ff
