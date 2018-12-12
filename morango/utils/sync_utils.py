@@ -62,9 +62,10 @@ def _serialize_into_store(profile, filter=None):
             klass_queryset = klass_model.objects.filter(_morango_dirty_bit=True)
             if prefix_condition:
                 klass_queryset = klass_queryset.filter(prefix_condition)
+            store_records_dict = Store.objects.in_bulk(id_list=klass_queryset.values_list('id', flat=True))
             for app_model in klass_queryset:
                 try:
-                    store_model = Store.objects.get(id=app_model.id)
+                    store_model = store_records_dict[app_model.id]
 
                     # if store record dirty and app record dirty, append store serialized to conflicting data
                     if store_model.dirty_bit:
@@ -91,7 +92,7 @@ def _serialize_into_store(profile, filter=None):
                     # update this model
                     store_model.save()
 
-                except Store.DoesNotExist:
+                except KeyError:
                     kwargs = {
                         'id': app_model.id,
                         'serialized': DjangoJSONEncoder().encode(app_model.serialize()),
@@ -170,6 +171,7 @@ def _deserialize_from_store(profile):
                 # keep iterating until size of dirty_children is 0
                 while len(dirty_children) > 0:
                     for store_model in dirty_children:
+
                         if store_model._deserialize_store_model():
                             # we update a store model after we have deserialized it to be able to mark it as a clean parent
                             store_model.dirty_bit = False

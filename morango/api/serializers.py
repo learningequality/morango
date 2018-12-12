@@ -71,6 +71,21 @@ class RecordMaxCounterBufferSerializer(serializers.ModelSerializer):
         fields = ('transfer_session', 'model_uuid', 'instance_id', 'counter')
 
 
+class BufferListSerializer(serializers.ListSerializer):
+
+    def create(self, validated_data):
+        # bulk create implementation
+        rmcb_list = []
+        buffer_list = []
+        for attrs in validated_data:
+            rmcb_list += [RecordMaxCounterBuffer(**rmcb_data) for rmcb_data in attrs.pop('rmcb_list')]
+            buffer_list += [Buffer(**attrs)]
+        with transaction.atomic():
+            buffers = Buffer.objects.bulk_create(buffer_list)
+            RecordMaxCounterBuffer.objects.bulk_create(rmcb_list)
+        return buffers
+
+
 class BufferSerializer(serializers.ModelSerializer):
 
     rmcb_list = RecordMaxCounterBufferSerializer(many=True)
@@ -115,3 +130,4 @@ class BufferSerializer(serializers.ModelSerializer):
     class Meta:
         model = Buffer
         fields = ('serialized', 'deleted', 'last_saved_instance', 'last_saved_counter', 'hard_delete', 'partition', 'source_id', 'model_name', 'conflicting_serialized_data', 'model_uuid', 'transfer_session', 'profile', 'rmcb_list', '_self_ref_fk')
+        list_serializer_class = BufferListSerializer
