@@ -153,6 +153,7 @@ def _deserialize_from_store(profile):
     # we first serialize to avoid deserialization merge conflicts
     _serialize_into_store(profile)
 
+    fk_cache = {}
     with transaction.atomic():
         syncable_dict = _profile_models[profile]
         excluded_list = []
@@ -172,7 +173,7 @@ def _deserialize_from_store(profile):
                 while len(dirty_children) > 0:
                     for store_model in dirty_children:
 
-                        if store_model._deserialize_store_model():
+                        if store_model._deserialize_store_model(fk_cache):
                             # we update a store model after we have deserialized it to be able to mark it as a clean parent
                             store_model.dirty_bit = False
                             store_model.save(update_fields=['dirty_bit'])
@@ -185,7 +186,7 @@ def _deserialize_from_store(profile):
                     dirty_children = Store.objects.filter(dirty_bit=True, profile=profile, _self_ref_fk__in=clean_parents).filter(query)
             else:
                 for store_model in Store.objects.filter(model_name=model_name, profile=profile, dirty_bit=True):
-                    if store_model._deserialize_store_model():
+                    if store_model._deserialize_store_model(fk_cache):
                         pass
                     else:
                         # if the app model did not validate, we leave the store dirty bit set

@@ -9,22 +9,14 @@ import uuid
 
 from django.conf import settings
 from django.core import exceptions
-from django.core.cache import cache
 from django.db.models import signals
-<<<<<<< HEAD
-from django.core import exceptions
-from django.db import connection, models, transaction
-=======
-from django.core.exceptions import ObjectDoesNotExist
 from django.db import connection, models, transaction, router
->>>>>>> Add cached version of clean fields
 from django.db.models import F, Func, TextField, Value
 from django.db.models.functions import Cast
 from django.utils import timezone, six
 from morango.utils.register_models import _profile_models
 from morango.util import mute_signals
 from django.db.models.deletion import Collector
-from django.db import router
 from morango.utils.morango_mptt import MorangoMPTTModel
 from django.db.models.fields.related import ForeignKey
 
@@ -291,7 +283,7 @@ class Store(AbstractStore):
 
     objects = StoreManager()
 
-    def _deserialize_store_model(self):
+    def _deserialize_store_model(self, fk_cache):
         """
         When deserializing a store model, we look at the deleted flags to know if we should delete the app model.
         Upon loading the app model in memory we validate the app models fields, if any errors occurs we follow
@@ -321,7 +313,7 @@ class Store(AbstractStore):
 
             try:
                 # validate and save the model
-                app_model.clean_fields()
+                app_model.cached_clean_fields(fk_cache)
                 with mute_signals(signals.pre_save, signals.post_save):
                     app_model.save(update_dirty_bit_to=False)
                 return valid
@@ -529,8 +521,9 @@ class SyncableModel(UUIDModelMixin):
                     f.validate(raw_value, self)
                 except exceptions.ValidationError:
                     pass
-                fk_lookup_cache[key] = 1
-                excluded_fields.append(f.name)
+                else:
+                    fk_lookup_cache[key] = 1
+                    excluded_fields.append(f.name)
         self.clean_fields(exclude=excluded_fields)
 
     def serialize(self):
