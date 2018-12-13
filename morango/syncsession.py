@@ -4,7 +4,6 @@ import socket
 import uuid
 
 from django.conf import settings
-from django.core import exceptions
 from django.utils import timezone
 from django.utils.six import iteritems
 from morango.api.serializers import BufferSerializer
@@ -27,6 +26,7 @@ from morango.utils.sync_utils import _dequeue_into_store
 from morango.utils.sync_utils import _queue_into_buffer
 from morango.utils.sync_utils import _serialize_into_store
 from morango.validation import validate_and_create_buffer_data
+from rest_framework.exceptions import ValidationError
 from six.moves.urllib.parse import urljoin
 from six.moves.urllib.parse import urlparse
 
@@ -348,14 +348,15 @@ class SyncClient(object):
             # ensure the transfer session allows pulls, and is same across records
             transfer_session = TransferSession.objects.get(id=data[0]["transfer_session"])
             if transfer_session.push:
-                    "Specified TransferSession does not allow pulling."
+                    raise ValidationError("Specified TransferSession does not allow pulling.")
 
             if len(set(rec["transfer_session"] for rec in data)) > 1:
-                    "All pulled records must be associated with the same TransferSession."
+                    raise ValidationError("All pulled records must be associated with the same TransferSession.")
 
-            errors = validate_and_create_buffer_data(data, transfer_session)
-            if errors:
-                raise exceptions.ValidationError(errors)
+            if self.current_transfer_session.id != transfer_session.id:
+                raise ValidationError("Specified TransferSession does not match this SyncClient's current TransferSession.")
+
+            validate_and_create_buffer_data(data, self.current_transfer_session)
 
     def _push_records(self, chunk_size=500, callback=None):
         # paginate buffered records so we do not load them all into memory

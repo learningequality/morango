@@ -390,10 +390,7 @@ class BufferViewSet(mixins.ListModelMixin, viewsets.GenericViewSet):
                 "All pushed records must be associated with the same TransferSession.",
                 status=status.HTTP_403_FORBIDDEN
             )
-        errors = validate_and_create_buffer_data(data, transfer_session)
-
-        if errors:
-            return response.Response(errors, status=status.HTTP_400_BAD_REQUEST)
+        validate_and_create_buffer_data(data, transfer_session)
 
         return response.Response(status=status.HTTP_201_CREATED)
 
