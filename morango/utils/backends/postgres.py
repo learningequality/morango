@@ -34,11 +34,11 @@ class SQLWrapper(BaseSQLWrapper):
 
     def _dequeuing_merge_conflict_buffer(self, cursor, current_id, transfersession_id):
         # transfer buffer serialized into conflicting store
-        merge_conflict_store = """UPDATE {store} as store SET (serialized, deleted, last_saved_instance, last_saved_counter, model_name,
+        merge_conflict_store = """UPDATE {store} as store SET (serialized, deleted, last_saved_instance, last_saved_counter, hard_deleted, model_name,
                                                         profile, partition, source_id, conflicting_serialized_data, dirty_bit, _self_ref_fk)
-                                            = (store.serialized, store.deleted OR buffer.deleted, '{current_instance_id}',
-                                                   {current_instance_counter}, store.model_name, store.profile, store.partition, store.source_id,
-                                                   buffer.serialized || '\n' || store.conflicting_serialized_data, TRUE, store._self_ref_fk)
+                                            = (CASE buffer.hard_deleted WHEN TRUE THEN '' ELSE store.serialized END, store.deleted OR buffer.deleted, '{current_instance_id}',
+                                                   {current_instance_counter}, store.hard_deleted, store.model_name, store.profile, store.partition, store.source_id,
+                                                   CASE buffer.hard_deleted WHEN TRUE THEN '' ELSE buffer.serialized || '\n' || store.conflicting_serialized_data END, TRUE, store._self_ref_fk)
                                             /*Scope to a single record.*/
                                             FROM {buffer} AS buffer
                                             WHERE store.id = buffer.model_uuid
@@ -101,25 +101,25 @@ class SQLWrapper(BaseSQLWrapper):
         insert_remaining_buffer = """
             WITH new_values as
             (
-                SELECT buffer.model_uuid, buffer.serialized, buffer.deleted, buffer.last_saved_instance, buffer.last_saved_counter,
+                SELECT buffer.model_uuid, buffer.serialized, buffer.deleted, buffer.last_saved_instance, buffer.last_saved_counter, buffer.hard_deleted,
                        buffer.model_name, buffer.profile, buffer.partition, buffer.source_id, buffer.conflicting_serialized_data, buffer._self_ref_fk
                 FROM {buffer} as buffer
                 WHERE buffer.transfer_session_id = '{transfer_session_id}'
             ),
             updated as
             (
-                UPDATE {store} store SET (serialized, deleted, last_saved_instance, last_saved_counter,
+                UPDATE {store} store SET (serialized, deleted, last_saved_instance, last_saved_counter, hard_deleted,
                                      model_name, profile, partition, source_id, conflicting_serialized_data, dirty_bit, _self_ref_fk)
-                                    = (nv.serialized, nv.deleted, nv.last_saved_instance, nv.last_saved_counter,
+                                    = (nv.serialized, nv.deleted, nv.last_saved_instance, nv.last_saved_counter, nv.hard_deleted,
                                        nv.model_name, nv.profile, nv.partition, nv.source_id, nv.conflicting_serialized_data, TRUE,
                                        nv._self_ref_fk)
                 FROM new_values nv
                 WHERE nv.model_uuid = store.id
                 returning store.*
             )
-            INSERT INTO {store}(id, serialized, deleted, last_saved_instance, last_saved_counter,
+            INSERT INTO {store}(id, serialized, deleted, last_saved_instance, last_saved_counter, hard_deleted,
                                 model_name, profile, partition, source_id, conflicting_serialized_data, dirty_bit, _self_ref_fk)
-            SELECT ut.model_uuid, ut.serialized, ut.deleted, ut.last_saved_instance, ut.last_saved_counter,
+            SELECT ut.model_uuid, ut.serialized, ut.deleted, ut.last_saved_instance, ut.last_saved_counter, ut.hard_deleted,
                        ut.model_name, ut.profile, ut.partition, ut.source_id, ut.conflicting_serialized_data, TRUE,
                        ut._self_ref_fk
             FROM new_values ut

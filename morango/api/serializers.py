@@ -72,9 +72,8 @@ class RecordMaxCounterBufferSerializer(serializers.ModelSerializer):
 
 
 class BufferSerializer(serializers.ModelSerializer):
-
     rmcb_list = RecordMaxCounterBufferSerializer(many=True)
 
     class Meta:
         model = Buffer
-        fields = ('serialized', 'deleted', 'last_saved_instance', 'last_saved_counter', 'partition', 'source_id', 'model_name', 'conflicting_serialized_data', 'model_uuid', 'transfer_session', 'profile', 'rmcb_list', '_self_ref_fk')
+        fields = ('serialized', 'deleted', 'last_saved_instance', 'last_saved_counter', 'hard_deleted', 'partition', 'source_id', 'model_name', 'conflicting_serialized_data', 'model_uuid', 'transfer_session', 'profile', 'rmcb_list', '_self_ref_fk')

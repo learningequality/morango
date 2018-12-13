@@ -166,6 +166,21 @@ def create_buffer_and_store_dummy_data(transfer_session_id):
                   transfer_session_id=transfer_session_id)
     create_rmcb_data(1, 2, 3, 4, data['model5_rmcb_ids'], data['model5'], transfer_session_id)
 
+    # example data for merge conflict with hard delete(rmcb.counter <= rmc.counter)
+    data['model7'] = '8' * 32
+    data['model7_rmc_ids'] = setUpIds()
+    # store5: last_saved => C: 2
+    # RMCs A: 3, B: 1, C: 2, D: 3
+    StoreFactory(serialized="store", last_saved_instance=data['model7_rmc_ids'][2], last_saved_counter=2, id=data['model7'],
+                 conflicting_serialized_data="store")
+    create_rmc_data(3, 1, 2, 3, data['model7_rmc_ids'], data['model7'])
+    data['model7_rmcb_ids'] = setUpIds()
+    # buffer5: last_saved => F: 2
+    # RMCBs A: 1, F: 2, G: 3, H: 4
+    BufferFactory(serialized="", last_saved_instance=data['model7_rmcb_ids'][1], last_saved_counter=2, model_uuid=data['model7'],
+                  transfer_session_id=transfer_session_id, hard_deleted=True)
+    create_rmcb_data(1, 2, 3, 4, data['model7_rmcb_ids'], data['model7'], transfer_session_id)
+
     # example data for ff
     data['model3'] = 'c' * 32
     data['model3_rmc_ids'] = setUpIds()
