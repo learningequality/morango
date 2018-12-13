@@ -1,7 +1,8 @@
 import base64
+import copy
 import json
-import sys
 import mock
+import sys
 import uuid
 
 from django.core.urlresolvers import reverse
@@ -10,12 +11,21 @@ from django.utils import timezone
 from rest_framework.test import APITestCase as BaseTestCase
 
 from django.test.utils import override_settings
-from morango.api.serializers import CertificateSerializer, InstanceIDSerializer, BufferSerializer
-from morango.certificates import Certificate, ScopeDefinition, Key, Nonce
-from morango.errors import CertificateScopeNotSubset, CertificateSignatureInvalid, CertificateIDInvalid, CertificateProfileInvalid, CertificateRootScopeInvalid
-from morango.models import InstanceIDModel, SyncSession, TransferSession, Buffer, RecordMaxCounterBuffer
-from morango.utils.register_models import _profile_models
+from morango.api.serializers import BufferSerializer
+from morango.api.serializers import CertificateSerializer
+from morango.api.serializers import InstanceIDSerializer
+from morango.certificates import Certificate
+from morango.certificates import Key
+from morango.certificates import Nonce
+from morango.certificates import ScopeDefinition
 from morango.crypto import SharedKey
+from morango.models import Buffer
+from morango.models import InstanceIDModel
+from morango.models import RecordMaxCounterBuffer
+from morango.models import SyncSession
+from morango.models import TransferSession
+from morango.utils.register_models import _profile_models
+from morango.validation import validate_and_create_buffer_data
 
 from facility_profile.models import MyUser
 
@@ -747,7 +757,7 @@ class BufferEndpointTestCase(CertificateTestCaseMixin, APITestCase):
         rec_1 = self.build_buffer_item(push=False, filter=self.default_push_filter)
         rec_2 = self.build_buffer_item(transfer_session=rec_1.transfer_session)
         rec_3 = self.build_buffer_item(transfer_session=rec_1.transfer_session)
-        self.make_buffer_post_request([rec_1, rec_2, rec_3], expected_status=400)
+        self.make_buffer_post_request([rec_1, rec_2, rec_3], expected_status=403)
 
     def create_records_for_pulling(self, count=3, **kwargs):
 
@@ -800,23 +810,25 @@ class BufferEndpointTestCase(CertificateTestCaseMixin, APITestCase):
             if isinstance(data, dict) and "results" in data:
                 data = data["results"]
 
-            # deserialize the records
-            serialized_recs = BufferSerializer(data=data, many=True)
+            # load up the target model uuids
+            model_uuids = [d["model_uuid"] for d in data]
 
             # delete "local" buffer records to avoid uniqueness constraint failures in validation
-            Buffer.objects.filter(transfer_session_id=t_id, model_uuid__in=[d["model_uuid"] for d in data]).delete()
+            Buffer.objects.filter(transfer_session_id=t_id, model_uuid__in=model_uuids).delete()
 
-            # ensure the push records validate
-            self.assertTrue(serialized_recs.is_valid())
+            # run the validation logic to ensure no errors were returned
+            errors = validate_and_create_buffer_data(data, TransferSession.objects.get(id=t_id))
+            self.assertFalse(errors)
+
+            # check that the correct number of buffer items were created
+            self.assertEqual(expected_count, Buffer.objects.filter(transfer_session_id=t_id, model_uuid__in=model_uuids).count())
 
             # check that the correct number of buffer items was returned
-            self.assertEqual(expected_count, len(serialized_recs.validated_data))
+            self.assertEqual(expected_count, len(data))
+            for record in data:
+                self.assertEqual(3, len(record["rmcb_list"]))
 
-            # check that the correct number of buffer items was returned
-            for data in serialized_recs.validated_data:
-                self.assertEqual(3, len(data["rmcb_list"]))
-
-            return serialized_recs
+            return data
 
     def test_pull_valid_buffer_list(self):
 

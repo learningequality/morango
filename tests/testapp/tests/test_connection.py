@@ -208,6 +208,8 @@ class SyncClientTestCase(TestCase):
 
     @mock_patch_decorator
     def test_pull_records(self):
+        self.syncclient.current_transfer_session.push = False
+        self.syncclient.current_transfer_session.save()
         resp = self.build_buffer_items(self.syncclient.current_transfer_session)
         NetworkSyncConnection._request.return_value.json.return_value = json.loads(resp)
         Buffer.objects.filter(transfer_session=self.syncclient.current_transfer_session).delete()

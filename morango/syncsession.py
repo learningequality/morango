@@ -4,16 +4,31 @@ import socket
 import uuid
 
 from django.conf import settings
-from django.db import transaction
 from django.utils import timezone
 from django.utils.six import iteritems
-from morango.api.serializers import BufferSerializer, CertificateSerializer, InstanceIDSerializer
-from morango.certificates import Certificate, Key, Filter
+from morango.api.serializers import BufferSerializer
+from morango.api.serializers import CertificateSerializer
+from morango.api.serializers import InstanceIDSerializer
+from morango.certificates import Certificate
+from morango.certificates import Filter
+from morango.certificates import Key
 from morango.constants import api_urls
-from morango.errors import CertificateSignatureInvalid, MorangoError, MorangoServerDoesNotAllowNewCertPush
-from morango.models import Buffer, InstanceIDModel, RecordMaxCounterBuffer, SyncSession, TransferSession, DatabaseMaxCounter
-from morango.utils.sync_utils import _serialize_into_store, _queue_into_buffer, _dequeue_into_store
-from six.moves.urllib.parse import urljoin, urlparse
+from morango.errors import CertificateSignatureInvalid
+from morango.errors import MorangoError
+from morango.errors import MorangoServerDoesNotAllowNewCertPush
+from morango.models import Buffer
+from morango.models import DatabaseMaxCounter
+from morango.models import InstanceIDModel
+from morango.models import RecordMaxCounterBuffer
+from morango.models import SyncSession
+from morango.models import TransferSession
+from morango.utils.sync_utils import _dequeue_into_store
+from morango.utils.sync_utils import _queue_into_buffer
+from morango.utils.sync_utils import _serialize_into_store
+from morango.validation import validate_and_create_buffer_data
+from rest_framework.exceptions import ValidationError
+from six.moves.urllib.parse import urljoin
+from six.moves.urllib.parse import urlparse
 
 from django.core.paginator import Paginator
 
@@ -333,16 +348,18 @@ class SyncClient(object):
             if isinstance(data, dict) and "results" in data:
                 data = data["results"]
 
-            # deserialize the records
-            serialized_recs = BufferSerializer(data=data, many=True)
+            # ensure the transfer session allows pulls, and is same across records
+            transfer_session = TransferSession.objects.get(id=data[0]["transfer_session"])
+            if transfer_session.push:
+                    raise ValidationError("Specified TransferSession does not allow pulling.")
 
-            # validate records
-            if serialized_recs.is_valid(raise_exception=True):
-                serialized_recs.save()
+            if len(set(rec["transfer_session"] for rec in data)) > 1:
+                    raise ValidationError("All pulled records must be associated with the same TransferSession.")
 
-            # update the size of the records transferred
-            self.current_transfer_session.records_transferred += chunk_size
-            self.current_transfer_session.save()
+            if self.current_transfer_session.id != transfer_session.id:
+                raise ValidationError("Specified TransferSession does not match this SyncClient's current TransferSession.")
+
+            validate_and_create_buffer_data(data, self.current_transfer_session)
 
     def _push_records(self, chunk_size=500, callback=None):
         # paginate buffered records so we do not load them all into memory

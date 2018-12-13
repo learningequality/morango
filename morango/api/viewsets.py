@@ -12,6 +12,7 @@ from ipware.ip import get_ip
 from morango.certificates import Filter
 from morango.crypto import SharedKey
 from morango.models import Buffer, DatabaseMaxCounter, InstanceIDModel, RecordMaxCounterBuffer
+from morango.validation import validate_and_create_buffer_data
 from morango.utils.sync_utils import (_dequeue_into_store, _queue_into_buffer,
                                       _serialize_into_store)
 from rest_framework import (decorators, mixins, pagination, response, status,
@@ -19,6 +20,8 @@ from rest_framework import (decorators, mixins, pagination, response, status,
 
 from . import permissions, serializers
 from .. import certificates, errors, models
+from ..utils.register_models import _profile_models
+from ..models import SyncableModel, TransferSession
 
 
 class CertificateChainViewSet(viewsets.ViewSet):
@@ -375,30 +378,21 @@ class BufferViewSet(mixins.ListModelMixin, viewsets.GenericViewSet):
 
     def create(self, request):
         data = request.data if isinstance(request.data, list) else [request.data]
-        serial_data = serializers.BufferSerializer(data=data, many=True)
-        if serial_data.is_valid():
+        # ensure the transfer session allows pushes, and is same across records
+        transfer_session = TransferSession.objects.get(id=data[0]["transfer_session"])
+        if not transfer_session.push:
+            return response.Response(
+                "Specified TransferSession does not allow pushes.",
+                status=status.HTTP_403_FORBIDDEN
+            )
+        if len(set(rec["transfer_session"] for rec in data)) > 1:
+            return response.Response(
+                "All pushed records must be associated with the same TransferSession.",
+                status=status.HTTP_403_FORBIDDEN
+            )
+        validate_and_create_buffer_data(data, transfer_session)
 
-            # ensure the transfer session allows pushes, and is same across records
-            transfer_session = serial_data.validated_data[0]["transfer_session"]
-            if not transfer_session.push:
-                return response.Response(
-                    "Specified TransferSession does not allow pushes.",
-                    status=status.HTTP_403_FORBIDDEN
-                )
-            if len(set(rec["transfer_session"] for rec in serial_data.data)) > 1:
-                return response.Response(
-                    "All pushed records must be associated with the same TransferSession.",
-                    status=status.HTTP_403_FORBIDDEN
-                )
-
-            serial_data.save()
-            transfer_session.records_transferred += len(data)
-            transfer_session.save()
-            return response.Response(status=status.HTTP_201_CREATED)
-
-        else:
-
-            return response.Response(serial_data.errors, status=status.HTTP_400_BAD_REQUEST)
+        return response.Response(status=status.HTTP_201_CREATED)
 
     def get_queryset(self):
 
