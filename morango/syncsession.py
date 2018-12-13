@@ -87,7 +87,10 @@ class NetworkSyncConnection(Connection):
     def create_sync_session(self, client_cert, server_cert):
         # if server cert does not exist locally, retrieve it from server
         if not Certificate.objects.filter(id=server_cert.id).exists():
-            self._get_certificate_chain(server_cert)
+            cert_chain_response = self._get_certificate_chain(server_cert)
+
+            # upon receiving cert chain from server, we attempt to save the chain into our records
+            Certificate.save_certificate_chain(cert_chain_response.json(), expected_last_id=server_cert.id)
 
         # request the server for a one-time-use nonce
         nonce_resp = self._get_nonce()

@@ -8,7 +8,7 @@ from django.db.models import F, Q, CharField, Func, TextField, Value
 from django.db.models.functions import Cast
 from django.utils.six import iteritems
 from morango.certificates import Filter
-from morango.models import (Buffer, DatabaseMaxCounter, DeletedModels,
+from morango.models import (Buffer, DatabaseMaxCounter, DeletedModels, HardDeletedModels,
                             InstanceIDModel, RecordMaxCounter,
                             RecordMaxCounterBuffer, Store)
 from morango.utils.register_models import _profile_models
@@ -85,10 +85,12 @@ def _serialize_into_store(profile, filter=None):
                     # update last saved bys for this store model
                     store_model.last_saved_instance = current_id.id
                     store_model.last_saved_counter = current_id.counter
+                    # update deleted flags in case it was previously deleted
                     store_model.deleted = False
+                    store_model.hard_deleted = False
 
-                    # update fields for this store model
-                    store_model.save(update_fields=['serialized', 'last_saved_instance', 'last_saved_counter', 'conflicting_serialized_data', 'deleted'])
+                    # update this model
+                    store_model.save()
 
                 except KeyError:
                     kwargs = {
@@ -130,6 +132,13 @@ def _serialize_into_store(profile, filter=None):
         RecordMaxCounter.objects.bulk_create([RecordMaxCounter(store_model_id=r_id, instance_id=current_id.id, counter=current_id.counter) for r_id in new_rmc_ids])
         # clear deleted models table for this profile
         DeletedModels.objects.filter(profile=profile).delete()
+
+        # handle logic for hard deletion models
+        hard_deleted_ids = HardDeletedModels.objects.filter(profile=profile).values_list('id', flat=True)
+        hard_deleted_store_records = Store.objects.filter(id__in=hard_deleted_ids)
+        hard_deleted_store_records.update(hard_deleted=True, serialized='{}', conflicting_serialized_data='')
+        HardDeletedModels.objects.filter(profile=profile).delete()
+
         # update our own database max counters after serialization
         if not filter:
             DatabaseMaxCounter.objects.update_or_create(instance_id=current_id.id, partition="", defaults={'counter': current_id.counter})
@@ -146,6 +155,7 @@ def _deserialize_from_store(profile):
 
     with transaction.atomic():
         syncable_dict = _profile_models[profile]
+        excluded_list = []
         # iterate through classes which are in foreign key dependency order
         for model_name, klass_model in iteritems(syncable_dict):
             # handle cases where a class has a single FK reference to itself
@@ -161,20 +171,29 @@ def _deserialize_from_store(profile):
                 # keep iterating until size of dirty_children is 0
                 while len(dirty_children) > 0:
                     for store_model in dirty_children:
-                        store_model._deserialize_store_model()
-                        # we update a store model after we have deserialized it to be able to mark it as a clean parent
-                        store_model.dirty_bit = False
-                        store_model.save(update_fields=['dirty_bit'])
+
+                        if store_model._deserialize_store_model():
+                            # we update a store model after we have deserialized it to be able to mark it as a clean parent
+                            store_model.dirty_bit = False
+                            store_model.save(update_fields=['dirty_bit'])
+                        else:
+                            # if the app model did not validate, we leave the store dirty bit set
+                            excluded_list.append(store_model.id)
 
                     # update lists with new clean parents and dirty children
                     clean_parents = Store.objects.filter(dirty_bit=False, profile=profile).filter(query).char_ids_list()
                     dirty_children = Store.objects.filter(dirty_bit=True, profile=profile, _self_ref_fk__in=clean_parents).filter(query)
             else:
                 for store_model in Store.objects.filter(model_name=model_name, profile=profile, dirty_bit=True):
-                    store_model._deserialize_store_model()
+                    if store_model._deserialize_store_model():
+                        pass
+                    else:
+                        # if the app model did not validate, we leave the store dirty bit set
+                        excluded_list.append(store_model.id)
 
-        # clear dirty bit for all store models for this profile
-        Store.objects.filter(profile=profile, dirty_bit=True).update(dirty_bit=False)
+        # clear dirty bit for all store models for this profile except for models that did not validate
+        Store.objects.exclude(id__in=excluded_list).filter(profile=profile, dirty_bit=True).update(dirty_bit=False)
+
 
 @transaction.atomic()
 def _queue_into_buffer(transfersession):
@@ -217,9 +236,9 @@ def _queue_into_buffer(transfersession):
     # execute raw sql to take all records that match condition, to be put into buffer for transfer
     with connection.cursor() as cursor:
         queue_buffer = """INSERT INTO {outgoing_buffer}
-                        (model_uuid, serialized, deleted, last_saved_instance, last_saved_counter,
+                        (model_uuid, serialized, deleted, last_saved_instance, last_saved_counter, hard_deleted,
                          model_name, profile, partition, source_id, conflicting_serialized_data, transfer_session_id, _self_ref_fk)
-                        SELECT id, serialized, deleted, last_saved_instance, last_saved_counter, model_name, profile, partition, source_id, conflicting_serialized_data, '{transfer_session_id}', _self_ref_fk
+                        SELECT id, serialized, deleted, last_saved_instance, last_saved_counter, hard_deleted, model_name, profile, partition, source_id, conflicting_serialized_data, '{transfer_session_id}', _self_ref_fk
                         FROM {store} WHERE {condition}""".format(outgoing_buffer=Buffer._meta.db_table,
                                                                  transfer_session_id=transfersession.id,
                                                                  condition=where_condition,

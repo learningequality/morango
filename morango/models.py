@@ -9,14 +9,17 @@ import uuid
 
 from django.conf import settings
 from django.db.models import signals
-from django.core.exceptions import ObjectDoesNotExist
+from django.core import exceptions
 from django.db import connection, models, transaction
 from django.db.models import F, Func, TextField, Value
 from django.db.models.functions import Cast
-from django.utils import timezone
-from django.utils.six import iteritems
+from django.utils import timezone, six
 from morango.utils.register_models import _profile_models
 from morango.util import mute_signals
+from django.db.models.deletion import Collector
+from django.db import router
+from morango.utils.morango_mptt import MorangoMPTTModel
+from django.db.models.fields.related import ForeignKey
 
 from .certificates import Certificate, Filter, Nonce, ScopeDefinition
 from .manager import SyncableModelManager
@@ -211,6 +214,16 @@ class DeletedModels(models.Model):
     profile = models.CharField(max_length=40)
 
 
+class HardDeletedModels(models.Model):
+    """
+    ``HardDeletedModels`` helps us keep track of models where all their data
+    must be purged (`serialized` is nullified).
+    """
+
+    id = UUIDField(primary_key=True)
+    profile = models.CharField(max_length=40)
+
+
 class AbstractStore(models.Model):
     """
     ``AbstractStore`` is a base model for storing serialized data.
@@ -223,6 +236,8 @@ class AbstractStore(models.Model):
 
     serialized = models.TextField(blank=True)
     deleted = models.BooleanField(default=False)
+    # flag to let other devices know to purge this data
+    hard_deleted = models.BooleanField(default=False)
 
     # ID of last InstanceIDModel and its corresponding counter at time of serialization
     last_saved_instance = UUIDField()
@@ -246,10 +261,10 @@ class StoreQueryset(models.QuerySet):
 
     def char_ids_list(self):
         return (self.annotate(id_cast=Cast('id', TextField())) \
-               # remove dashes from char uuid
-               .annotate(fixed_id=Func(F('id_cast'), Value('-'), Value(''), function='replace',)) \
-               # return as list
-               .values_list("fixed_id", flat=True))
+                # remove dashes from char uuid
+                .annotate(fixed_id=Func(F('id_cast'), Value('-'), Value(''), function='replace',)) \
+                # return as list
+                .values_list("fixed_id", flat=True))
 
 
 class StoreManager(models.Manager):
@@ -270,21 +285,56 @@ class Store(AbstractStore):
     objects = StoreManager()
 
     def _deserialize_store_model(self):
+        """
+        When deserializing a store model, we look at the deleted flags to know if we should delete the app model.
+        Upon loading the app model in memory we validate the app models fields, if any errors occurs we follow
+        foreign key relationships to see if the related model has been deleted to propagate that deletion to the target app model.
+        If there are no errors, we save the app model.
+
+        :return: ``bool`` whether the object was successfully deleted or saved
+        """
+        valid = True
         klass_model = _profile_models[self.profile][self.model_name]
         # if store model marked as deleted, attempt to delete in app layer
         if self.deleted:
-            klass_model.objects.filter(id=self.id).delete()
-        # inflate model and attempt to save
+            # if hard deleted, propagate to related models
+            if self.hard_deleted:
+                try:
+                    klass_model.objects.get(id=self.id).delete(hard_delete=True)
+                except klass_model.DoesNotExist:
+                    pass
+            else:
+                klass_model.objects.filter(id=self.id).delete()
+            return valid  # mark deletion as being validated
         else:
+            # load model into memory
             app_model = klass_model.deserialize(json.loads(self.serialized))
             app_model._morango_source_id = self.source_id
             app_model._morango_partition = self.partition
+
             try:
+                # validate and save the model
+                app_model.clean_fields()
                 with mute_signals(signals.pre_save, signals.post_save):
                     app_model.save(update_dirty_bit_to=False)
-            # if unable to save due to missing FKs, mark model as deleted
-            except ObjectDoesNotExist:
-                app_model._update_deleted_models()
+                return valid
+            except exceptions.ValidationError:
+                valid = False
+                # check FKs in store to see if any of those models were deleted or hard_deleted to propagate to this model
+                fk_ids = [getattr(app_model, field.attname) for field in app_model._meta.fields if isinstance(field, ForeignKey)]
+                for fk_id in fk_ids:
+                    try:
+                        st_model = Store.objects.get(id=fk_id)
+                        if st_model.deleted:
+                            # if hard deleted, propagate to store model
+                            if st_model.hard_deleted:
+                                app_model._update_hard_deleted_models()
+                            valid = True  # mark deletion as being validated
+                            app_model._update_deleted_models()
+                    except Store.DoesNotExist:
+                        pass
+                return valid
+
 
 class Buffer(AbstractStore):
     """
@@ -334,7 +384,7 @@ class DatabaseMaxCounter(AbstractCounter):
     def update_fsics(cls, fsics, sync_filter):
         internal_fsic = DatabaseMaxCounter.calculate_filter_max_counters(sync_filter)
         updated_fsic = {}
-        for key, value in iteritems(fsics):
+        for key, value in six.iteritems(fsics):
             if key in internal_fsic:
                 # if same instance id, update fsic with larger value
                 if fsics[key] > internal_fsic[key]:
@@ -344,7 +394,7 @@ class DatabaseMaxCounter(AbstractCounter):
                 updated_fsic[key] = fsics[key]
 
         # load database max counters
-        for (key, value) in iteritems(updated_fsic):
+        for (key, value) in six.iteritems(updated_fsic):
             for f in sync_filter:
                 DatabaseMaxCounter.objects.update_or_create(instance_id=key, partition=f, defaults={'counter': value})
 
@@ -428,6 +478,10 @@ class SyncableModel(UUIDModelMixin):
         DeletedModels.objects.update_or_create(defaults={'id': self.id, 'profile': self.morango_profile},
                                                id=self.id)
 
+    def _update_hard_deleted_models(self):
+        HardDeletedModels.objects.update_or_create(defaults={'id': self.id, 'profile': self.morango_profile},
+                                                   id=self.id)
+
     def save(self, update_dirty_bit_to=True, *args, **kwargs):
         if update_dirty_bit_to is None:
             pass  # don't do anything with the dirty bit
@@ -436,6 +490,23 @@ class SyncableModel(UUIDModelMixin):
         elif not update_dirty_bit_to:
             self._morango_dirty_bit = False
         super(SyncableModel, self).save(*args, **kwargs)
+
+    def delete(self, using=None, keep_parents=False, hard_delete=False, *args, **kwargs):
+        using = using or router.db_for_write(self.__class__, instance=self)
+        assert self._get_pk_val() is not None, (
+            "%s object can't be deleted because its %s attribute is set to None." %
+            (self._meta.object_name, self._meta.pk.attname)
+        )
+        collector = Collector(using=using)
+        collector.collect([self], keep_parents=keep_parents)
+        with transaction.atomic():
+            if hard_delete:
+                # set hard deletion for all related models
+                for model, instances in six.iteritems(collector.data):
+                    if issubclass(model, SyncableModel) or issubclass(model, MorangoMPTTModel):
+                        for obj in instances:
+                            obj._update_hard_deleted_models()
+            return collector.delete()
 
     def serialize(self):
         """All concrete fields of the ``SyncableModel`` subclass, except for those specifically blacklisted, are returned in a dict."""
