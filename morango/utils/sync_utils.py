@@ -13,6 +13,9 @@ from morango.models import (Buffer, DatabaseMaxCounter, DeletedModels, HardDelet
                             RecordMaxCounterBuffer, Store)
 from morango.utils.register_models import _profile_models
 from morango.utils.backends.utils import load_backend
+from django.db.models import signals
+from morango.util import mute_signals
+
 
 DBBackend = load_backend(connection).SQLWrapper()
 
@@ -171,8 +174,11 @@ def _deserialize_from_store(profile):
                 # keep iterating until size of dirty_children is 0
                 while len(dirty_children) > 0:
                     for store_model in dirty_children:
-
-                        if store_model._deserialize_store_model():
+                        (app_model, valid) = store_model._deserialize_store_model()
+                        if valid:
+                            if app_model:
+                                with mute_signals(signals.pre_save, signals.post_save):
+                                    app_model.save(update_dirty_bit_to=False)
                             # we update a store model after we have deserialized it to be able to mark it as a clean parent
                             store_model.dirty_bit = False
                             store_model.save(update_fields=['dirty_bit'])
@@ -184,12 +190,32 @@ def _deserialize_from_store(profile):
                     clean_parents = Store.objects.filter(dirty_bit=False, profile=profile).filter(query).char_ids_list()
                     dirty_children = Store.objects.filter(dirty_bit=True, profile=profile, _self_ref_fk__in=clean_parents).filter(query)
             else:
+                # array for holding db values from the fields of each model for this class
+                db_values = []
+                fields = klass_model._meta.fields
                 for store_model in Store.objects.filter(model_name=model_name, profile=profile, dirty_bit=True):
-                    if store_model._deserialize_store_model():
-                        pass
+                    (app_model, valid) = store_model._deserialize_store_model()
+                    # if the model correctly validates from clean_fields call or it was deleted
+                    if valid:
+                        # if the model was not deleted
+                        if app_model:
+                            for f in fields:
+                                db_values.append(getattr(app_model, f.attname))
                     else:
                         # if the app model did not validate, we leave the store dirty bit set
                         excluded_list.append(store_model.id)
+
+                if db_values:
+                    # number of rows to update
+                    num_of_rows = len(db_values) // len(fields)
+                    # create '%s' placeholders for a single row
+                    placeholder_tuple = tuple(['%s' for _ in range(len(fields))])
+                    # create list of the '%s' tuple placeholders based on number of rows to update
+                    placeholder_list = [str(placeholder_tuple) for _ in range(num_of_rows)]
+                    # convert this list to a string to be passed into raw sql query
+                    placeholder_str = ', '.join(placeholder_list).replace("'", '')
+                    with connection.cursor() as cursor:
+                        DBBackend._bulk_insert_into_app_models(cursor, klass_model._meta.db_table, fields, db_values, placeholder_str)
 
         # clear dirty bit for all store models for this profile except for models that did not validate
         Store.objects.exclude(id__in=excluded_list).filter(profile=profile, dirty_bit=True).update(dirty_bit=False)

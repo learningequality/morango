@@ -6,6 +6,14 @@ from morango.models import (Buffer, RecordMaxCounter, RecordMaxCounterBuffer,
 class SQLWrapper(BaseSQLWrapper):
     backend = 'sqlite'
 
+    def _bulk_insert_into_app_models(self, cursor, app_model, fields, db_values, placeholder_str):
+        fields = str(tuple(str(f.attname) for f in fields)).replace("'", '')
+        insert = """REPLACE INTO {app_model} {fields}
+                    VALUES {placeholder_str}
+        """.format(app_model=app_model, fields=fields, placeholder_str=placeholder_str)
+        # use DB-APIs parameter substitution
+        cursor.execute(insert, db_values)
+
     def _dequeuing_merge_conflict_rmcb(self, cursor, transfersession_id):
         # transfer record max counters for records with merge conflicts + perform max
         merge_conflict_rmc = """REPLACE INTO {rmc} (instance_id, counter, store_model_id)

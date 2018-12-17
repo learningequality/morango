@@ -438,6 +438,22 @@ class DeserializationFromStoreIntoAppTestCase(TestCase):
         self.assertFalse(SummaryLog.objects.filter(id=log.id).exists())
         self.assertTrue(Store.objects.get(id=log.id).hard_deleted)
 
+    def test_regular_model_deserialization(self):
+        # deserialization should be able to handle multiple records
+        user = MyUser(username='test', password='password')
+        user2 = MyUser(username='test2', password='password')
+        user.save(update_dirty_bit_to=False)
+        user2.save(update_dirty_bit_to=False)
+        user.username = 'changed'
+        user2.username = 'changed2'
+        StoreModelFacilityFactory(id=user.id, serialized=json.dumps(user.serialize()), model_name="user")
+        StoreModelFacilityFactory(id=user2.id, serialized=json.dumps(user2.serialize()), model_name="user")
+        self.mc.deserialize_from_store()
+        self.assertFalse(MyUser.objects.filter(username='test').exists())
+        self.assertFalse(MyUser.objects.filter(username='test2').exists())
+        self.assertTrue(MyUser.objects.filter(username='changed').exists())
+        self.assertTrue(MyUser.objects.filter(username='changed2').exists())
+
 
 class SelfReferentialFKDeserializationTestCase(TestCase):
 
