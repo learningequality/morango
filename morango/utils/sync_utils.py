@@ -174,15 +174,15 @@ def _deserialize_from_store(profile):
                 # keep iterating until size of dirty_children is 0
                 while len(dirty_children) > 0:
                     for store_model in dirty_children:
-                        (app_model, valid) = store_model._deserialize_store_model()
-                        if valid:
+                        try:
+                            app_model = store_model._deserialize_store_model()
                             if app_model:
                                 with mute_signals(signals.pre_save, signals.post_save):
                                     app_model.save(update_dirty_bit_to=False)
                             # we update a store model after we have deserialized it to be able to mark it as a clean parent
                             store_model.dirty_bit = False
                             store_model.save(update_fields=['dirty_bit'])
-                        else:
+                        except exceptions.ValidationError:
                             # if the app model did not validate, we leave the store dirty bit set
                             excluded_list.append(store_model.id)
 
@@ -194,14 +194,14 @@ def _deserialize_from_store(profile):
                 db_values = []
                 fields = klass_model._meta.fields
                 for store_model in Store.objects.filter(model_name=model_name, profile=profile, dirty_bit=True):
-                    (app_model, valid) = store_model._deserialize_store_model()
-                    # if the model correctly validates from clean_fields call or it was deleted
-                    if valid:
-                        # if the model was not deleted
+                    try:
+                        app_model = store_model._deserialize_store_model()
+                        # if the model was not deleted add its field values to the list
                         if app_model:
                             for f in fields:
                                 db_values.append(getattr(app_model, f.attname))
                     else:
+                    except exceptions.ValidationError:
                         # if the app model did not validate, we leave the store dirty bit set
                         excluded_list.append(store_model.id)
 
