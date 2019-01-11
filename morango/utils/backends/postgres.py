@@ -7,12 +7,14 @@ from django.db import connection
 class SQLWrapper(BaseSQLWrapper):
     backend = 'postgresql'
 
-    def _bulk_insert_into_app_models(self, cursor, app_model, fields, db_values, placeholder_str):
+    def _bulk_insert_into_app_models(self, cursor, app_model, fields, db_values, placeholder_list):
+        # convert this list to a string to be passed into raw sql query
+        placeholder_str = ', '.join(placeholder_list).replace("'", '')
         # cast the values in the SET statement to their appropiate postgres db types
         set_casted_values = ', '.join(map(lambda f: '{f} = nv.{f}::{type}'.format(f=f.attname, type=f.rel_db_type(connection)), fields))
         # cast the values in the SELECT statement to their appropiate posgtres db types
         select_casted_values = ', '.join(map(lambda f: '{f}::{type}'.format(f=f.attname, type=f.rel_db_type(connection)), fields))
-        # cast the pk to a UUID type from a Char type so postgres doesn't complain
+        # cast the pk to the correct field type for this model
         pk = [f for f in fields if f.primary_key][0]
         fields = str(tuple(str(f.attname) for f in fields)).replace("'", '')
 
@@ -39,7 +41,7 @@ class SQLWrapper(BaseSQLWrapper):
                    set_values=set_casted_values,
                    select_fields=select_casted_values,
                    id_type=pk.rel_db_type(connection))
-        # use DB-APIs parameter substitution
+        # use DB-APIs parameter substitution (2nd parameter expects a sequence)
         cursor.execute(insert, db_values)
 
     def _dequeuing_merge_conflict_rmcb(self, cursor, transfersession_id):

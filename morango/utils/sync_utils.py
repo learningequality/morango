@@ -220,10 +220,8 @@ def _deserialize_from_store(profile):
                     placeholder_tuple = tuple(['%s' for _ in range(len(fields))])
                     # create list of the '%s' tuple placeholders based on number of rows to update
                     placeholder_list = [str(placeholder_tuple) for _ in range(num_of_rows)]
-                    # convert this list to a string to be passed into raw sql query
-                    placeholder_str = ', '.join(placeholder_list).replace("'", '')
                     with connection.cursor() as cursor:
-                        DBBackend._bulk_insert_into_app_models(cursor, klass_model._meta.db_table, fields, db_values, placeholder_str)
+                        DBBackend._bulk_insert_into_app_models(cursor, klass_model._meta.db_table, fields, db_values, placeholder_list)
 
         # clear dirty bit for all store models for this profile except for models that did not validate
         Store.objects.exclude(id__in=excluded_list).filter(profile=profile, dirty_bit=True).update(dirty_bit=False)
