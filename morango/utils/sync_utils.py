@@ -202,13 +202,8 @@ def _deserialize_from_store(profile):
                         if app_model:
                             for f in fields:
                                 value = getattr(app_model, f.attname)
-                                # convert any non-string python value to a string if it uses a TEXT field under the db hood
-                                if isinstance(f, models.TextField) or isinstance(f, models.CharField):
-                                    if isinstance(value, list) or isinstance(value, dict):
-                                        value = json.dumps(value)
-                                    elif not isinstance(value, six.string_types):
-                                        value = str(value)
-                                db_values.append(value)
+                                db_value = f.get_db_prep_value(value, connection)
+                                db_values.append(db_value)
                     except exceptions.ValidationError:
                         # if the app model did not validate, we leave the store dirty bit set
                         excluded_list.append(store_model.id)
