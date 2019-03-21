@@ -2,9 +2,47 @@ from morango.utils.backends.base import BaseSQLWrapper
 from morango.models import (Buffer, RecordMaxCounter, RecordMaxCounterBuffer,
                             Store)
 
+from django.db import connection
 
 class SQLWrapper(BaseSQLWrapper):
     backend = 'postgresql'
+
+    def _bulk_insert_into_app_models(self, cursor, app_model, fields, db_values, placeholder_list):
+        # convert this list to a string to be passed into raw sql query
+        placeholder_str = ', '.join(placeholder_list).replace("'", '')
+        # cast the values in the SET statement to their appropiate postgres db types
+        set_casted_values = ', '.join(map(lambda f: '{f} = nv.{f}::{type}'.format(f=f.attname, type=f.rel_db_type(connection)), fields))
+        # cast the values in the SELECT statement to their appropiate posgtres db types
+        select_casted_values = ', '.join(map(lambda f: '{f}::{type}'.format(f=f.attname, type=f.rel_db_type(connection)), fields))
+        # cast the pk to the correct field type for this model
+        pk = [f for f in fields if f.primary_key][0]
+        fields = str(tuple(str(f.attname) for f in fields)).replace("'", '')
+
+        insert = """
+            WITH new_values {fields} as
+            (
+                VALUES {placeholder_str}
+            ),
+            updated as
+            (
+                UPDATE {app_model} model
+                SET {set_values}
+                FROM new_values nv
+                WHERE model.id = nv.id::{id_type}
+                returning model.*
+            )
+            INSERT INTO {app_model} {fields}
+            SELECT {select_fields}
+            FROM new_values ut
+            WHERE ut.id::{id_type} not in (SELECT id FROM updated)
+        """.format(app_model=app_model,
+                   fields=fields,
+                   placeholder_str=placeholder_str,
+                   set_values=set_casted_values,
+                   select_fields=select_casted_values,
+                   id_type=pk.rel_db_type(connection))
+        # use DB-APIs parameter substitution (2nd parameter expects a sequence)
+        cursor.execute(insert, db_values)
 
     def _dequeuing_merge_conflict_rmcb(self, cursor, transfersession_id):
         # transfer record max counters for records with merge conflicts + perform max
