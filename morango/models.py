@@ -6,6 +6,7 @@ import os
 import platform
 import sys
 import uuid
+import logging
 
 from django.conf import settings
 from django.core import exceptions
@@ -15,7 +16,6 @@ from django.db.models import F, Func, TextField, Value
 from django.db.models.functions import Cast
 from django.utils import timezone, six
 from morango.utils.register_models import _profile_models
-from morango.util import mute_signals
 from django.db.models.deletion import Collector
 from morango.utils.morango_mptt import MorangoMPTTModel
 from django.db.models.fields.related import ForeignKey
@@ -24,6 +24,8 @@ from .certificates import Certificate, Filter, Nonce, ScopeDefinition
 from .manager import SyncableModelManager
 from .utils import proquint
 from .utils.uuids import UUIDField, UUIDModelMixin, sha2_uuid
+
+logger = logging.getLogger(__name__)
 
 
 class DatabaseIDManager(models.Manager):
@@ -288,11 +290,10 @@ class Store(AbstractStore):
         When deserializing a store model, we look at the deleted flags to know if we should delete the app model.
         Upon loading the app model in memory we validate the app models fields, if any errors occurs we follow
         foreign key relationships to see if the related model has been deleted to propagate that deletion to the target app model.
-        If there are no errors, we save the app model.
-
-        :return: ``bool`` whether the object was successfully deleted or saved
+        We return:
+        None => if the model was deleted successfully
+        model => if the model validates successfully
         """
-        valid = True
         klass_model = _profile_models[self.profile][self.model_name]
         # if store model marked as deleted, attempt to delete in app layer
         if self.deleted:
@@ -304,21 +305,20 @@ class Store(AbstractStore):
                     pass
             else:
                 klass_model.objects.filter(id=self.id).delete()
-            return valid  # mark deletion as being validated
+            return None
         else:
             # load model into memory
             app_model = klass_model.deserialize(json.loads(self.serialized))
             app_model._morango_source_id = self.source_id
             app_model._morango_partition = self.partition
+            app_model._morango_dirty_bit = False
 
             try:
-                # validate and save the model
+                # validate and return the model
                 app_model.cached_clean_fields(fk_cache)
-                with mute_signals(signals.pre_save, signals.post_save):
-                    app_model.save(update_dirty_bit_to=False)
-                return valid
-            except exceptions.ValidationError:
-                valid = False
+                return app_model
+            except exceptions.ValidationError as e:
+                logger.warn("Validation error for {model} with id {id}: {error}".format(model=klass_model.__name__, id=app_model.id, error=e))
                 # check FKs in store to see if any of those models were deleted or hard_deleted to propagate to this model
                 fk_ids = [getattr(app_model, field.attname) for field in app_model._meta.fields if isinstance(field, ForeignKey)]
                 for fk_id in fk_ids:
@@ -328,12 +328,11 @@ class Store(AbstractStore):
                             # if hard deleted, propagate to store model
                             if st_model.hard_deleted:
                                 app_model._update_hard_deleted_models()
-                            valid = True  # mark deletion as being validated
                             app_model._update_deleted_models()
+                            return None
                     except Store.DoesNotExist:
                         pass
-                return valid
-
+                raise e
 
 class Buffer(AbstractStore):
     """
@@ -512,8 +511,8 @@ class SyncableModel(UUIDModelMixin):
         fk_fields = [field for field in self._meta.fields if isinstance(field, models.ForeignKey)]
         for f in fk_fields:
             raw_value = getattr(self, f.attname)
+            key = 'morango_{id}_{db_table}_foreignkey'.format(db_table=f.related_model._meta.db_table, id=raw_value)
             try:
-                key = 'morango_{id}_{db_table}_foreignkey'.format(db_table=f.related_model._meta.db_table, id=raw_value)
                 fk_lookup_cache[key]
                 excluded_fields.append(f.name)
             except KeyError:
