@@ -10,13 +10,13 @@ import logging
 
 from django.conf import settings
 from django.core import exceptions
-from django.db import connection, models, transaction
+from django.db.models import signals
+from django.db import connection, models, transaction, router
 from django.db.models import F, Func, TextField, Value
 from django.db.models.functions import Cast
 from django.utils import timezone, six
 from morango.utils.register_models import _profile_models
 from django.db.models.deletion import Collector
-from django.db import router
 from morango.utils.morango_mptt import MorangoMPTTModel
 from django.db.models.fields.related import ForeignKey
 
@@ -285,7 +285,7 @@ class Store(AbstractStore):
 
     objects = StoreManager()
 
-    def _deserialize_store_model(self):
+    def _deserialize_store_model(self, fk_cache):
         """
         When deserializing a store model, we look at the deleted flags to know if we should delete the app model.
         Upon loading the app model in memory we validate the app models fields, if any errors occurs we follow
@@ -314,8 +314,8 @@ class Store(AbstractStore):
             app_model._morango_dirty_bit = False
 
             try:
-                # validate the model
-                app_model.clean_fields()
+                # validate and return the model
+                app_model.cached_clean_fields(fk_cache)
                 return app_model
             except exceptions.ValidationError as e:
                 logger.warn("Validation error for {model} with id {id}: {error}".format(model=klass_model.__name__, id=app_model.id, error=e))
@@ -505,6 +505,25 @@ class SyncableModel(UUIDModelMixin):
                         for obj in instances:
                             obj._update_hard_deleted_models()
             return collector.delete()
+
+    def cached_clean_fields(self, fk_lookup_cache):
+        excluded_fields = []
+        fk_fields = [field for field in self._meta.fields if isinstance(field, models.ForeignKey)]
+        for f in fk_fields:
+            raw_value = getattr(self, f.attname)
+            key = 'morango_{id}_{db_table}_foreignkey'.format(db_table=f.related_model._meta.db_table, id=raw_value)
+            try:
+                fk_lookup_cache[key]
+                excluded_fields.append(f.name)
+            except KeyError:
+                try:
+                    f.validate(raw_value, self)
+                except exceptions.ValidationError:
+                    pass
+                else:
+                    fk_lookup_cache[key] = 1
+                    excluded_fields.append(f.name)
+        self.clean_fields(exclude=excluded_fields)
 
     def serialize(self):
         """All concrete fields of the ``SyncableModel`` subclass, except for those specifically blacklisted, are returned in a dict."""

@@ -158,6 +158,7 @@ def _deserialize_from_store(profile):
     # we first serialize to avoid deserialization merge conflicts
     _serialize_into_store(profile)
 
+    fk_cache = {}
     with transaction.atomic():
         syncable_dict = _profile_models[profile]
         excluded_list = []
@@ -177,7 +178,7 @@ def _deserialize_from_store(profile):
                 while len(dirty_children) > 0:
                     for store_model in dirty_children:
                         try:
-                            app_model = store_model._deserialize_store_model()
+                            app_model = store_model._deserialize_store_model(fk_cache)
                             if app_model:
                                 with mute_signals(signals.pre_save, signals.post_save):
                                     app_model.save(update_dirty_bit_to=False)
@@ -197,7 +198,7 @@ def _deserialize_from_store(profile):
                 fields = klass_model._meta.fields
                 for store_model in Store.objects.filter(model_name=model_name, profile=profile, dirty_bit=True):
                     try:
-                        app_model = store_model._deserialize_store_model()
+                        app_model = store_model._deserialize_store_model(fk_cache)
                         # if the model was not deleted add its field values to the list
                         if app_model:
                             for f in fields:
