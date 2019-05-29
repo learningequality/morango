@@ -22,6 +22,16 @@ from . import permissions, serializers
 from .. import certificates, errors, models
 from ..utils.register_models import _profile_models
 from ..models import SyncableModel, TransferSession
+from rest_framework.parsers import JSONParser
+from morango.util import CAPABILITIES
+from morango.constants.capabilities import GZIP_BUFFER_POST
+
+
+if GZIP_BUFFER_POST in CAPABILITIES:
+    from morango.parsers import GzipParser
+    parsers = (GzipParser, JSONParser)
+else:
+    parsers = (JSONParser,)
 
 
 class CertificateChainViewSet(viewsets.ViewSet):
@@ -342,7 +352,6 @@ class TransferSessionViewSet(viewsets.ModelViewSet):
 
             # queue records to get ready for pulling
             _queue_into_buffer(transfersession)
-
             # update records_total on transfer session object
             records_total = Buffer.objects.filter(transfer_session=transfersession).count()
             transfersession.records_total = records_total
@@ -375,6 +384,7 @@ class BufferViewSet(mixins.ListModelMixin, viewsets.GenericViewSet):
     permission_classes = (permissions.BufferPermissions,)
     serializer_class = serializers.BufferSerializer
     pagination_class = pagination.LimitOffsetPagination
+    parser_classes = parsers
 
     def create(self, request):
         data = request.data if isinstance(request.data, list) else [request.data]
@@ -408,7 +418,8 @@ class MorangoInfoViewSet(viewsets.ViewSet):
         m_info = {'instance_hash': id_model.get_proquint(),
                   'instance_id': id_model.id,
                   'system_os': platform.system(),
-                  'version': morango.__version__}
+                  'version': morango.__version__,
+                  'capabilities': CAPABILITIES}
         return response.Response(m_info)
 
 

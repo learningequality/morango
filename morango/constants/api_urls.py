@@ -11,3 +11,4 @@ SYNCSESSION = BASE_API + "syncsessions/"
 TRANSFERSESSION = BASE_API + "transfersessions/"
 BUFFER = BASE_API + "buffers/"
 PUBLIC_KEY = BASE_API + "publickey/"
+INFO = BASE_API + 'morangoinfo/1/'
