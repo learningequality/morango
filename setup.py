@@ -1,12 +1,14 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
-from __future__ import absolute_import, print_function, unicode_literals
+from __future__ import absolute_import
+from __future__ import print_function
+from __future__ import unicode_literals
 
 import os
 
-try: # for pip >= 10
+try:  # for pip >= 10
     from pip._internal.req import parse_requirements
-except ImportError: # for pip <= 9.0.3
+except ImportError:  # for pip <= 9.0.3
     from pip.req import parse_requirements
 
 from setuptools import find_packages, setup
