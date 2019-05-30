@@ -117,7 +117,10 @@ class NetworkSyncConnection(Connection):
         if data_is_gzipped:
             resp = requests.request(method, url, data=data, params=params, auth=auth, headers={'content-type': 'application/gzip'})
         else:
-            resp = requests.request(method, url, json=data, params=params, auth=auth)
+            if method == "GET":
+                resp = requests.request(method, url, params=params, auth=auth)
+            else:
+                resp = requests.request(method, url, json=data, params=params, auth=auth)
         resp.raise_for_status()
         return resp
 
