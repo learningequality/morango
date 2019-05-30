@@ -61,7 +61,7 @@ def _get_client_ip_for_server(server_host, server_port):
     return IP
 
 
-# Used from https://github.com/django/django/blob/1.11.20/django/utils/text.py#L295
+# borrowed from https://github.com/django/django/blob/1.11.20/django/utils/text.py#L295
 def compress_string(s, compresslevel=9):
     zbuf = BytesIO()
     with GzipFile(mode='wb', compresslevel=compresslevel, fileobj=zbuf, mtime=0) as zfile:
@@ -90,11 +90,9 @@ class NetworkSyncConnection(Connection):
         # ping server at url with info request
         info_url = urljoin(self.base_url, api_urls.INFO)
         self.server_info = requests.get(info_url).json()
-        self.capabilities = set()
-        if self.server_info.get('capabilities'):
-            self.capabilities = CAPABILITIES.intersection(set(self.server_info['capabilities']))
+        self.capabilities = CAPABILITIES.intersection(self.server_info.get('capabilities', []))
 
-    def _request(self, endpoint, method="GET", lookup=None, data={}, params={}, userargs=None, password=None, gzip=False):
+    def _request(self, endpoint, method="GET", lookup=None, data={}, params={}, userargs=None, password=None, data_is_gzipped=False):
         """
         Generic request method designed to handle any morango endpoint.
 
@@ -116,7 +114,7 @@ class NetworkSyncConnection(Connection):
             lookup = lookup + '/'
         url = urljoin(urljoin(self.base_url, endpoint), lookup)
         auth = (userargs, password) if userargs else None
-        if gzip:
+        if data_is_gzipped:
             resp = requests.request(method, url, data=data, params=params, auth=auth, headers={'content-type': 'application/gzip'})
         else:
             resp = requests.request(method, url, json=data, params=params, auth=auth)
@@ -303,12 +301,12 @@ class NetworkSyncConnection(Connection):
     def _push_record_chunk(self, serialized_recs):
         # push a chunk of records to the server side
         data = serialized_recs
-        GZIP = GZIP_BUFFER_POST in self.capabilities
+        use_gzip = GZIP_BUFFER_POST in self.capabilities
         # gzip the data if both client and server have gzipping capabilities
-        if GZIP:
+        if use_gzip:
             data = json.dumps([dict(el) for el in serialized_recs])
             data = compress_string(bytes(data.encode('utf-8')), compresslevel=self.compresslevel)
-        return self._request(api_urls.BUFFER, method="POST", data=data, gzip=GZIP)
+        return self._request(api_urls.BUFFER, method="POST", data=data, data_is_gzipped=use_gzip)
 
     def _pull_record_chunk(self, chunk_size, transfer_session):
         # pull records from server for given transfer session

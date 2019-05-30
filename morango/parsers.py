@@ -1,5 +1,4 @@
 from rest_framework.parsers import BaseParser
-import gzip
 import json
 import io
 
@@ -13,6 +12,7 @@ class GzipParser(BaseParser):
         """
         Parses the incoming bytestream by decompressing the gzipped data and returns the resulting data as a dictionary.
         """
+        import gzip
         with gzip.GzipFile(fileobj=io.BytesIO(stream.read())) as f:
             data = f.read()
         return json.loads(data.decode('utf-8'))

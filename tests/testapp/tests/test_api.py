@@ -748,7 +748,7 @@ class BufferEndpointTestCase(CertificateTestCaseMixin, APITestCase):
 
     def test_push_valid_gzipped_buffer_chunk(self):
         rec_1 = self.build_buffer_item(push=True, filter=self.default_push_filter)
-        rec_2 = self.build_buffer_item(transfer_session=rec_1.transfer_session)
+        rec_2 = self.build_buffer_item(serialized=u'unicode', transfer_session=rec_1.transfer_session)
         rec_3 = self.build_buffer_item(transfer_session=rec_1.transfer_session)
         self.make_buffer_post_request([rec_1, rec_2, rec_3], expected_status=201, gzip=True)
 
