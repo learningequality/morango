@@ -1,5 +1,4 @@
 import base64
-import copy
 import json
 import mock
 import sys
@@ -28,6 +27,8 @@ from morango.utils.register_models import _profile_models
 from morango.validation import validate_and_create_buffer_data
 
 from facility_profile.models import MyUser
+from morango.syncsession import compress_string
+
 
 # A weird hack because of http://bugs.python.org/issue17866
 if sys.version_info >= (3,):
@@ -716,17 +717,27 @@ class BufferEndpointTestCase(CertificateTestCaseMixin, APITestCase):
 
         return buffermodel
 
-    def make_buffer_post_request(self, buffers, expected_status=201):
+    def make_buffer_post_request(self, buffers, expected_status=201, gzip=False):
         serialized_recs = BufferSerializer(buffers, many=True)
 
         # extract that data that is to be posted
         data = serialized_recs.data
+        headers = {
+            'format': 'json'
+        }
+
+        # gzip the content before sending the request
+        if gzip:
+            new_data = json.dumps([dict(el) for el in data])
+            data = compress_string(bytes(new_data.encode('utf-8')))
+            headers['content_type'] = 'application/gzip'
+            headers['format'] = None
 
         # delete the records from the DB so we don't conflict when we POST
         Buffer.objects.all().delete()
         RecordMaxCounterBuffer.objects.all().delete()
 
-        response = self.client.post(reverse('buffers-list'), data, format='json')
+        response = self.client.post(reverse('buffers-list'), data, **headers)
         self.assertEqual(response.status_code, expected_status)
         if expected_status == 201:
             # check that the buffer items were created
@@ -734,6 +745,12 @@ class BufferEndpointTestCase(CertificateTestCaseMixin, APITestCase):
         else:
             # check that the buffer items were not created
             self.assertEqual(Buffer.objects.count(), 0)
+
+    def test_push_valid_gzipped_buffer_chunk(self):
+        rec_1 = self.build_buffer_item(push=True, filter=self.default_push_filter)
+        rec_2 = self.build_buffer_item(serialized=u'unicode', transfer_session=rec_1.transfer_session)
+        rec_3 = self.build_buffer_item(transfer_session=rec_1.transfer_session)
+        self.make_buffer_post_request([rec_1, rec_2, rec_3], expected_status=201, gzip=True)
 
     def test_push_valid_buffer_chunk(self):
         rec_1 = self.build_buffer_item(push=True, filter=self.default_push_filter)

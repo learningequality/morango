@@ -31,6 +31,12 @@ from six.moves.urllib.parse import urljoin
 from six.moves.urllib.parse import urlparse
 
 from django.core.paginator import Paginator
+from io import BytesIO
+from morango.util import CAPABILITIES
+from morango.constants.capabilities import GZIP_BUFFER_POST
+
+if GZIP_BUFFER_POST in CAPABILITIES:
+    from gzip import GzipFile
 
 
 def _join_with_logical_operator(lst, operator):
@@ -55,6 +61,14 @@ def _get_client_ip_for_server(server_host, server_port):
     return IP
 
 
+# borrowed from https://github.com/django/django/blob/1.11.20/django/utils/text.py#L295
+def compress_string(s, compresslevel=9):
+    zbuf = BytesIO()
+    with GzipFile(mode='wb', compresslevel=compresslevel, fileobj=zbuf, mtime=0) as zfile:
+        zfile.write(s)
+    return zbuf.getvalue()
+
+
 class Connection(object):
     """
     Abstraction around a connection with a syncing peer (network or disk),
@@ -70,10 +84,15 @@ class Connection(object):
 
 class NetworkSyncConnection(Connection):
 
-    def __init__(self, base_url=''):
+    def __init__(self, base_url='', compresslevel=9):
         self.base_url = base_url
+        self.compresslevel = compresslevel
+        # ping server at url with info request
+        info_url = urljoin(self.base_url, api_urls.INFO)
+        self.server_info = requests.get(info_url).json()
+        self.capabilities = CAPABILITIES.intersection(self.server_info.get('capabilities', []))
 
-    def _request(self, endpoint, method="GET", lookup=None, data={}, params={}, userargs=None, password=None):
+    def _request(self, endpoint, method="GET", lookup=None, data={}, params={}, userargs=None, password=None, data_is_gzipped=False):
         """
         Generic request method designed to handle any morango endpoint.
 
@@ -95,11 +114,14 @@ class NetworkSyncConnection(Connection):
             lookup = lookup + '/'
         url = urljoin(urljoin(self.base_url, endpoint), lookup)
         auth = (userargs, password) if userargs else None
-        resp = requests.request(method, url, json=data, params=params, auth=auth)
+        if data_is_gzipped:
+            resp = requests.request(method, url, data=data, params=params, auth=auth, headers={'content-type': 'application/gzip'})
+        else:
+            resp = requests.request(method, url, json=data, params=params, auth=auth)
         resp.raise_for_status()
         return resp
 
-    def create_sync_session(self, client_cert, server_cert):
+    def create_sync_session(self, client_cert, server_cert, chunk_size=500):
         # if server cert does not exist locally, retrieve it from server
         if not Certificate.objects.filter(id=server_cert.id).exists():
             cert_chain_response = self._get_certificate_chain(server_cert)
@@ -160,7 +182,7 @@ class NetworkSyncConnection(Connection):
         }
         sync_session = SyncSession.objects.create(**data)
 
-        return SyncClient(self, sync_session)
+        return SyncClient(self, sync_session, chunk_size=chunk_size)
 
     def get_remote_certificates(self, primary_partition, scope_def_id=None):
         remote_certs = []
@@ -278,7 +300,13 @@ class NetworkSyncConnection(Connection):
 
     def _push_record_chunk(self, serialized_recs):
         # push a chunk of records to the server side
-        return self._request(api_urls.BUFFER, method="POST", data=serialized_recs)
+        data = serialized_recs
+        use_gzip = GZIP_BUFFER_POST in self.capabilities
+        # gzip the data if both client and server have gzipping capabilities
+        if use_gzip:
+            data = json.dumps([dict(el) for el in serialized_recs])
+            data = compress_string(bytes(data.encode('utf-8')), compresslevel=self.compresslevel)
+        return self._request(api_urls.BUFFER, method="POST", data=data, data_is_gzipped=use_gzip)
 
     def _pull_record_chunk(self, chunk_size, transfer_session):
         # pull records from server for given transfer session
@@ -290,9 +318,10 @@ class SyncClient(object):
     """
     Controller to support client in initiating syncing and performing related operations.
     """
-    def __init__(self, sync_connection, sync_session):
+    def __init__(self, sync_connection, sync_session, chunk_size=500):
         self.sync_connection = sync_connection
         self.sync_session = sync_session
+        self.chunk_size = chunk_size
         self.current_transfer_session = None
 
     def initiate_push(self, sync_filter):
@@ -311,7 +340,7 @@ class SyncClient(object):
         self.sync_connection._update_transfer_session({'records_total': records_total}, self.current_transfer_session)
 
         # push records to server
-        self._push_records()
+        self._push_records(chunk_size=self.chunk_size)
 
         # upon successful completion of pushing records, proceed to delete buffered records
         Buffer.objects.filter(transfer_session=self.current_transfer_session).delete()
@@ -328,7 +357,7 @@ class SyncClient(object):
             return
 
         # pull records and close transfer session upon completion
-        self._pull_records()
+        self._pull_records(chunk_size=self.chunk_size)
         self._dequeue_into_store()
 
         # update database max counters but use latest fsics on client

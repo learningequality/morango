@@ -4,8 +4,21 @@ import sqlite3
 import os
 
 from morango.constants.file import SQLITE_VARIABLE_FILE_CACHE
+from morango.constants.capabilities import GZIP_BUFFER_POST
 
 logger = logging.getLogger(__name__)
+
+def get_capabilities():
+    capabilities = set()
+    try:
+        import gzip  # noqa
+        capabilities.add(GZIP_BUFFER_POST)
+    except ImportError:
+        pass
+    return capabilities
+
+
+CAPABILITIES = get_capabilities()
 
 
 # taken from https://github.com/FactoryBoy/factory_boy/blob/master/factory/django.py#L256

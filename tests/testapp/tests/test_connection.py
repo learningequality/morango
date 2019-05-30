@@ -2,7 +2,7 @@ import json
 import mock
 import uuid
 
-from django.test import TestCase
+# from django.test import TestCase
 from django.test.utils import override_settings
 from django.utils import timezone
 from facility_profile.models import SummaryLog
@@ -162,13 +162,13 @@ class NetworkSyncConnectionTestCase(LiveServerTestCase):
         self.assertEqual(data[1]['id'], self.subset_cert.id)
 
 
-class SyncClientTestCase(TestCase):
+class SyncClientTestCase(LiveServerTestCase):
 
     def setUp(self):
         session = SyncSession.objects.create(id=uuid.uuid4().hex, profile="facilitydata", last_activity_timestamp=timezone.now())
         transfer_session = TransferSession.objects.create(id=uuid.uuid4().hex, sync_session=session, filter='partition',
                                                           push=True, last_activity_timestamp=timezone.now(), records_total=3)
-        conn = NetworkSyncConnection()
+        conn = NetworkSyncConnection(base_url=self.live_server_url)
         self.syncclient = SyncClient(conn, session)
         self.syncclient.current_transfer_session = transfer_session
         self.chunk_size = 3
