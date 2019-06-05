@@ -7,24 +7,11 @@ from django.db import migrations
 
 class Migration(migrations.Migration):
 
-    dependencies = [
-        ('morango', '0003_auto_20170519_0543'),
-    ]
+    dependencies = [("morango", "0003_auto_20170519_0543")]
 
     operations = [
-        migrations.RemoveField(
-            model_name='scopedefinition',
-            name='key',
-        ),
-        migrations.RemoveField(
-            model_name='scopedefinition',
-            name='serialized',
-        ),
-        migrations.RemoveField(
-            model_name='scopedefinition',
-            name='signature',
-        ),
-        migrations.DeleteModel(
-            name='TrustedKey',
-        ),
+        migrations.RemoveField(model_name="scopedefinition", name="key"),
+        migrations.RemoveField(model_name="scopedefinition", name="serialized"),
+        migrations.RemoveField(model_name="scopedefinition", name="signature"),
+        migrations.DeleteModel(name="TrustedKey"),
     ]

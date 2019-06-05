@@ -1,7 +1,7 @@
 from django.db.models.signals import post_delete
 from django.dispatch import receiver
 
-from .models import DeletedModels, SyncableModel
+from .models import SyncableModel
 
 
 @receiver(post_delete)

@@ -1,5 +1,6 @@
 from morango.syncsession import NetworkSyncConnection
-from morango.utils.sync_utils import _serialize_into_store, _deserialize_from_store
+from morango.utils.sync_utils import _deserialize_from_store
+from morango.utils.sync_utils import _serialize_into_store
 
 
 def _self_referential_fk(klass_model):
@@ -14,7 +15,6 @@ def _self_referential_fk(klass_model):
 
 
 class MorangoProfileController(object):
-
     def __init__(self, profile):
         assert profile, "profile needs to be defined."
         self.profile = profile

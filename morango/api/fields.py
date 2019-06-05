@@ -4,7 +4,6 @@ from ..crypto import Key
 
 
 class PublicKeyField(serializers.Field):
-
     def to_representation(self, obj):
         return str(obj)
 

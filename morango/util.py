@@ -1,17 +1,19 @@
 import functools
 import logging
-import sqlite3
 import os
+import sqlite3
 
-from morango.constants.file import SQLITE_VARIABLE_FILE_CACHE
 from morango.constants.capabilities import GZIP_BUFFER_POST
+from morango.constants.file import SQLITE_VARIABLE_FILE_CACHE
 
 logger = logging.getLogger(__name__)
+
 
 def get_capabilities():
     capabilities = set()
     try:
         import gzip  # noqa
+
         capabilities.add(GZIP_BUFFER_POST)
     except ImportError:
         pass
@@ -44,8 +46,7 @@ class mute_signals(object):
 
     def __enter__(self):
         for signal in self.signals:
-            logger.debug('mute_signals: Disabling signal handlers %r',
-                         signal.receivers)
+            logger.debug("mute_signals: Disabling signal handlers %r", signal.receivers)
 
             # Note that we're using implementation details of
             # django.signals, since arguments to signal.connect()
@@ -55,8 +56,7 @@ class mute_signals(object):
 
     def __exit__(self, exc_type, exc_value, traceback):
         for signal, receivers in self.paused.items():
-            logger.debug('mute_signals: Restoring signal handlers %r',
-                         receivers)
+            logger.debug("mute_signals: Restoring signal handlers %r", receivers)
 
             signal.receivers = receivers
             with signal.lock:
@@ -75,7 +75,9 @@ class mute_signals(object):
             # A mute_signals() object is not reentrant; use a copy every time.
             with self.copy():
                 return callable_obj(*args, **kwargs)
+
         return wrapper
+
 
 def max_parameter_substitution():
     """
@@ -85,23 +87,27 @@ def max_parameter_substitution():
     """
     if os.path.isfile(SQLITE_VARIABLE_FILE_CACHE):
         return
-    conn = sqlite3.connect(':memory:')
+    conn = sqlite3.connect(":memory:")
     low = 1
-    high = 1000  # hard limit for SQLITE_MAX_VARIABLE_NUMBER <http://www.sqlite.org/limits.html>
-    conn.execute('CREATE TABLE T1 (id C1)')
+    high = (
+        1000
+    )  # hard limit for SQLITE_MAX_VARIABLE_NUMBER <http://www.sqlite.org/limits.html>
+    conn.execute("CREATE TABLE T1 (id C1)")
     while low < high - 1:
         guess = (low + high) // 2
         try:
-            statement = 'select * from T1 where id in (%s)' % ','.join(['?' for _ in range(guess)])
+            statement = "select * from T1 where id in (%s)" % ",".join(
+                ["?" for _ in range(guess)]
+            )
             values = [i for i in range(guess)]
             conn.execute(statement, values)
         except sqlite3.DatabaseError as ex:
-            if 'too many SQL variables' in str(ex):
+            if "too many SQL variables" in str(ex):
                 high = guess
             else:
                 raise
         else:
             low = guess
     conn.close()
-    with open(SQLITE_VARIABLE_FILE_CACHE, 'w') as file:
+    with open(SQLITE_VARIABLE_FILE_CACHE, "w") as file:
         file.write(str(low))

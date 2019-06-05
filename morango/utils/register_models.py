@@ -3,20 +3,26 @@
 like to inherit from to make their data syncable. This method takes care of registering morango
 data structures on a per-profile basis.
 """
-
 from collections import OrderedDict
+
 from django.db.models.fields.related import ForeignKey
 from django.utils.six import iteritems
 
-from morango.errors import (
-    InvalidMorangoModelConfiguration, InvalidMPTTManager, InvalidMPTTQuerySet, InvalidSyncableManager, InvalidSyncableQueryset, UnsupportedFieldType
-)
+from morango.errors import InvalidMorangoModelConfiguration
+from morango.errors import InvalidMPTTManager
+from morango.errors import InvalidMPTTQuerySet
+from morango.errors import InvalidSyncableManager
+from morango.errors import InvalidSyncableQueryset
+from morango.errors import UnsupportedFieldType
 
 _profile_models = {}
 
 
 def _get_foreign_key_classes(m):
-    return set([field.rel.to for field in m._meta.fields if isinstance(field, ForeignKey)])
+    return set(
+        [field.rel.to for field in m._meta.fields if isinstance(field, ForeignKey)]
+    )
+
 
 def _multiple_self_ref_fk_check(class_model):
     """
@@ -30,6 +36,7 @@ def _multiple_self_ref_fk_check(class_model):
             self_fk.append(class_model)
     return False
 
+
 def _insert_model_into_profile_dict(model, profile):
     # When we add models to be synced, we need to make sure
     #   that models that depend on other models are synced AFTER
@@ -39,11 +46,17 @@ def _insert_model_into_profile_dict(model, profile):
     foreign_key_classes = _get_foreign_key_classes(model)
 
     # add any more specified dependencies
-    if hasattr(model, 'morango_model_dependencies'):
-        foreign_key_classes = foreign_key_classes | set(model.morango_model_dependencies)
+    if hasattr(model, "morango_model_dependencies"):
+        foreign_key_classes = foreign_key_classes | set(
+            model.morango_model_dependencies
+        )
 
     # Find all the existing models that this new model refers to.
-    class_indices = [_profile_models[profile].index(cls) for cls in foreign_key_classes if cls in _profile_models[profile]]
+    class_indices = [
+        _profile_models[profile].index(cls)
+        for cls in foreign_key_classes
+        if cls in _profile_models[profile]
+    ]
 
     # Insert just after the last dependency found,
     #   or at the front if no dependencies
@@ -53,7 +66,7 @@ def _insert_model_into_profile_dict(model, profile):
     _profile_models[profile].insert(insert_after_idx, model)
 
 
-def add_syncable_models():
+def add_syncable_models():  # noqa: C901
     """
     Per profile, adds each model to a dictionary mapping the morango model name to its model class.
     We sort by ForeignKey dependencies to safely sync data.
@@ -70,31 +83,64 @@ def add_syncable_models():
         if issubclass(model_class, SyncableModel):
             name = model_class.__name__
             if _multiple_self_ref_fk_check(model_class):
-                raise InvalidMorangoModelConfiguration("Syncing models with more than 1 self referential ForeignKey is not supported.")
+                raise InvalidMorangoModelConfiguration(
+                    "Syncing models with more than 1 self referential ForeignKey is not supported."
+                )
             try:
                 from mptt import models
-                from morango.utils.morango_mptt import MorangoMPTTModel, MorangoMPTTTreeManager, MorangoTreeQuerySet
+                from morango.utils.morango_mptt import (
+                    MorangoMPTTModel,
+                    MorangoMPTTTreeManager,
+                    MorangoTreeQuerySet,
+                )
+
                 # mptt syncable model checks
                 if issubclass(model_class, models.MPTTModel):
                     if not issubclass(model_class, MorangoMPTTModel):
-                        raise InvalidMorangoModelConfiguration("{} that inherits from MPTTModel, should instead inherit from MorangoMPTTModel.".format(name))
+                        raise InvalidMorangoModelConfiguration(
+                            "{} that inherits from MPTTModel, should instead inherit from MorangoMPTTModel.".format(
+                                name
+                            )
+                        )
                     if not isinstance(model_class.objects, MorangoMPTTTreeManager):
-                        raise InvalidMPTTManager("Manager for {} must inherit from MorangoMPTTTreeManager.".format(name))
+                        raise InvalidMPTTManager(
+                            "Manager for {} must inherit from MorangoMPTTTreeManager.".format(
+                                name
+                            )
+                        )
                     if not isinstance(model_class.objects.none(), MorangoTreeQuerySet):
-                        raise InvalidMPTTQuerySet("Queryset for {} model must inherit from MorangoTreeQuerySet.".format(name))
+                        raise InvalidMPTTQuerySet(
+                            "Queryset for {} model must inherit from MorangoTreeQuerySet.".format(
+                                name
+                            )
+                        )
             except ImportError:
                 pass
             # syncable model checks
             if not isinstance(model_class.objects, SyncableModelManager):
-                raise InvalidSyncableManager("Manager for {} must inherit from SyncableModelManager.".format(name))
+                raise InvalidSyncableManager(
+                    "Manager for {} must inherit from SyncableModelManager.".format(
+                        name
+                    )
+                )
             if not isinstance(model_class.objects.none(), SyncableModelQuerySet):
-                raise InvalidSyncableQueryset("Queryset for {} model must inherit from SyncableModelQuerySet.".format(name))
+                raise InvalidSyncableQueryset(
+                    "Queryset for {} model must inherit from SyncableModelQuerySet.".format(
+                        name
+                    )
+                )
             if model_class._meta.many_to_many:
-                raise UnsupportedFieldType("{} model with a ManyToManyField is not supported in morango.")
-            if not hasattr(model_class, 'morango_model_name'):
-                raise InvalidMorangoModelConfiguration("{} model must define a morango_model_name attribute".format(name))
-            if not hasattr(model_class, 'morango_profile'):
-                raise InvalidMorangoModelConfiguration("{} model must define a morango_profile attribute".format(name))
+                raise UnsupportedFieldType(
+                    "{} model with a ManyToManyField is not supported in morango."
+                )
+            if not hasattr(model_class, "morango_model_name"):
+                raise InvalidMorangoModelConfiguration(
+                    "{} model must define a morango_model_name attribute".format(name)
+                )
+            if not hasattr(model_class, "morango_profile"):
+                raise InvalidMorangoModelConfiguration(
+                    "{} model must define a morango_profile attribute".format(name)
+                )
 
             # create empty list to hold model classes for profile if not yet created
             profile = model_class.morango_profile

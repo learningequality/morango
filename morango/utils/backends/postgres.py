@@ -1,22 +1,41 @@
-from morango.utils.backends.base import BaseSQLWrapper
-from morango.models import (Buffer, RecordMaxCounter, RecordMaxCounterBuffer,
-                            Store)
-
 from django.db import connection
 
-class SQLWrapper(BaseSQLWrapper):
-    backend = 'postgresql'
+from morango.models import Buffer
+from morango.models import RecordMaxCounter
+from morango.models import RecordMaxCounterBuffer
+from morango.models import Store
+from morango.utils.backends.base import BaseSQLWrapper
 
-    def _bulk_insert_into_app_models(self, cursor, app_model, fields, db_values, placeholder_list):
+
+class SQLWrapper(BaseSQLWrapper):
+    backend = "postgresql"
+
+    def _bulk_insert_into_app_models(
+        self, cursor, app_model, fields, db_values, placeholder_list
+    ):
         # convert this list to a string to be passed into raw sql query
-        placeholder_str = ', '.join(placeholder_list).replace("'", '')
+        placeholder_str = ", ".join(placeholder_list).replace("'", "")
         # cast the values in the SET statement to their appropiate postgres db types
-        set_casted_values = ', '.join(map(lambda f: '{f} = nv.{f}::{type}'.format(f=f.attname, type=f.rel_db_type(connection)), fields))
+        set_casted_values = ", ".join(
+            map(
+                lambda f: "{f} = nv.{f}::{type}".format(
+                    f=f.attname, type=f.rel_db_type(connection)
+                ),
+                fields,
+            )
+        )
         # cast the values in the SELECT statement to their appropiate posgtres db types
-        select_casted_values = ', '.join(map(lambda f: '{f}::{type}'.format(f=f.attname, type=f.rel_db_type(connection)), fields))
+        select_casted_values = ", ".join(
+            map(
+                lambda f: "{f}::{type}".format(
+                    f=f.attname, type=f.rel_db_type(connection)
+                ),
+                fields,
+            )
+        )
         # cast the pk to the correct field type for this model
         pk = [f for f in fields if f.primary_key][0]
-        fields = str(tuple(str(f.attname) for f in fields)).replace("'", '')
+        fields = str(tuple(str(f.attname) for f in fields)).replace("'", "")
 
         insert = """
             WITH new_values {fields} as
@@ -35,12 +54,14 @@ class SQLWrapper(BaseSQLWrapper):
             SELECT {select_fields}
             FROM new_values ut
             WHERE ut.id::{id_type} not in (SELECT id FROM updated)
-        """.format(app_model=app_model,
-                   fields=fields,
-                   placeholder_str=placeholder_str,
-                   set_values=set_casted_values,
-                   select_fields=select_casted_values,
-                   id_type=pk.rel_db_type(connection))
+        """.format(
+            app_model=app_model,
+            fields=fields,
+            placeholder_str=placeholder_str,
+            set_values=set_casted_values,
+            select_fields=select_casted_values,
+            id_type=pk.rel_db_type(connection),
+        )
         # use DB-APIs parameter substitution (2nd parameter expects a sequence)
         cursor.execute(insert, db_values)
 
@@ -62,11 +83,13 @@ class SQLWrapper(BaseSQLWrapper):
                                                                                   AND store.last_saved_instance = rmcb2.instance_id
                                                                                   AND store.last_saved_counter <= rmcb2.counter
                                                                                   AND rmcb2.transfer_session_id = '{transfer_session_id}')
-                               """.format(buffer=Buffer._meta.db_table,
-                                          store=Store._meta.db_table,
-                                          rmc=RecordMaxCounter._meta.db_table,
-                                          rmcb=RecordMaxCounterBuffer._meta.db_table,
-                                          transfer_session_id=transfersession_id)
+                               """.format(
+            buffer=Buffer._meta.db_table,
+            store=Store._meta.db_table,
+            rmc=RecordMaxCounter._meta.db_table,
+            rmcb=RecordMaxCounterBuffer._meta.db_table,
+            transfer_session_id=transfersession_id,
+        )
 
         cursor.execute(merge_conflict_rmc)
 
@@ -86,17 +109,21 @@ class SQLWrapper(BaseSQLWrapper):
                                                                                           AND store.last_saved_instance = rmcb2.instance_id
                                                                                           AND store.last_saved_counter <= rmcb2.counter
                                                                                           AND rmcb2.transfer_session_id = '{transfer_session_id}')
-                                      """.format(buffer=Buffer._meta.db_table,
-                                                 rmcb=RecordMaxCounterBuffer._meta.db_table,
-                                                 store=Store._meta.db_table,
-                                                 rmc=RecordMaxCounter._meta.db_table,
-                                                 transfer_session_id=transfersession_id,
-                                                 current_instance_id=current_id.id,
-                                                 current_instance_counter=current_id.counter)
+                                      """.format(
+            buffer=Buffer._meta.db_table,
+            rmcb=RecordMaxCounterBuffer._meta.db_table,
+            store=Store._meta.db_table,
+            rmc=RecordMaxCounter._meta.db_table,
+            transfer_session_id=transfersession_id,
+            current_instance_id=current_id.id,
+            current_instance_counter=current_id.counter,
+        )
 
         cursor.execute(merge_conflict_store)
 
-    def _dequeuing_update_rmcs_last_saved_by(self, cursor, current_id, transfersession_id):
+    def _dequeuing_update_rmcs_last_saved_by(
+        self, cursor, current_id, transfersession_id
+    ):
         # update or create rmc for merge conflicts with local instance id
         merge_conflict_store = """
                 WITH new_values as
@@ -124,13 +151,15 @@ class SQLWrapper(BaseSQLWrapper):
             SELECT '{current_instance_id}'::uuid, {current_instance_counter}, ut.id
             FROM new_values ut
             WHERE ut.id not in (SELECT store_model_id FROM updated)
-        """.format(buffer=Buffer._meta.db_table,
-                   rmcb=RecordMaxCounterBuffer._meta.db_table,
-                   store=Store._meta.db_table,
-                   rmc=RecordMaxCounter._meta.db_table,
-                   transfer_session_id=transfersession_id,
-                   current_instance_id=current_id.id,
-                   current_instance_counter=current_id.counter)
+        """.format(
+            buffer=Buffer._meta.db_table,
+            rmcb=RecordMaxCounterBuffer._meta.db_table,
+            store=Store._meta.db_table,
+            rmc=RecordMaxCounter._meta.db_table,
+            transfer_session_id=transfersession_id,
+            current_instance_id=current_id.id,
+            current_instance_counter=current_id.counter,
+        )
 
         cursor.execute(merge_conflict_store)
 
@@ -162,9 +191,11 @@ class SQLWrapper(BaseSQLWrapper):
                        ut._self_ref_fk
             FROM new_values ut
             WHERE ut.model_uuid not in (SELECT id FROM updated)
-        """.format(buffer=Buffer._meta.db_table,
-                   store=Store._meta.db_table,
-                   transfer_session_id=transfersession_id)
+        """.format(
+            buffer=Buffer._meta.db_table,
+            store=Store._meta.db_table,
+            transfer_session_id=transfersession_id,
+        )
 
         cursor.execute(insert_remaining_buffer)
 
@@ -190,8 +221,10 @@ class SQLWrapper(BaseSQLWrapper):
             FROM new_values ut
             WHERE (ut.model_uuid, ut.rmcb_instance_id)
             not in (SELECT store_model_id, instance_id FROM updated)
-            """.format(rmc=RecordMaxCounter._meta.db_table,
-                       rmcb=RecordMaxCounterBuffer._meta.db_table,
-                       transfer_session_id=transfersession_id)
+            """.format(
+            rmc=RecordMaxCounter._meta.db_table,
+            rmcb=RecordMaxCounterBuffer._meta.db_table,
+            transfer_session_id=transfersession_id,
+        )
 
         cursor.execute(insert_remaining_rmcb)
