@@ -3,7 +3,7 @@ humanhash: Human-readable representations of digests.
 The simplest ways to use this module are the :func:`humanize` and :func:`uuid`
 functions. For tighter control over the output, see :class:`HumanHasher`.
 """
-from argparse import ArgumentError
+import uuid
 
 # Copyright (c) 2014 SUNET. All rights reserved.
 #
@@ -39,19 +39,16 @@ Copyright (c) 2014 SUNET. All rights reserved.
 See the source file for complete license statement.
 """
 
-import uuid
+__version__ = "0.1.0"
+__copyright__ = "SUNET"
+__organization__ = "SUNET"
+__license__ = "BSD"
+__authors__ = ["Fredrik Thulin"]
 
-__version__ = '0.1.0'
-__copyright__ = 'SUNET'
-__organization__ = 'SUNET'
-__license__ = 'BSD'
-__authors__ = ['Fredrik Thulin']
+__all__ = []
 
-__all__ = [
-]
-
-CONSONANTS = 'bdfghjklmnprstvz'
-VOWELS = 'aiou'
+CONSONANTS = "bdfghjklmnprstvz"
+VOWELS = "aiou"
 
 
 def from_int(data):
@@ -62,21 +59,21 @@ def from_int(data):
     :rtype: string
     """
     if not isinstance(data, int) and not isinstance(data, long):
-        raise TypeError('Input must be integer')
+        raise TypeError("Input must be integer")
 
     res = []
     while data > 0 or not res:
         for j in range(5):
             if not j % 2:
-                res += CONSONANTS[(data & 0xf)]
+                res += CONSONANTS[(data & 0xF)]
                 data >>= 4
             else:
                 res += VOWELS[(data & 0x3)]
                 data >>= 2
         if data > 0:
-            res += '-'
+            res += "-"
     res.reverse()
-    return ''.join(res)
+    return "".join(res)
 
 
 def to_int(data):
@@ -87,12 +84,12 @@ def to_int(data):
     :rtype: int
     """
     if not isinstance(data, basestring):
-        raise TypeError('Input must be string')
+        raise TypeError("Input must be string")
 
     res = 0
-    for part in data.split('-'):
+    for part in data.split("-"):
         if len(part) != 5:
-            raise ValueError('Malformed proquint')
+            raise ValueError("Malformed proquint")
         for j in range(5):
             try:
                 if not j % 2:
@@ -102,7 +99,7 @@ def to_int(data):
                     res <<= 2
                     res |= VOWELS.index(part[j])
             except ValueError:
-                raise ValueError('Unknown character \'{!s}\' in proquint'.format(part[j]))
+                raise ValueError("Unknown character '{!s}' in proquint".format(part[j]))
     return res
 
 
@@ -111,4 +108,4 @@ def generate():
     :returns: proquint
     :rtype: int
     """
-    return from_int(int(uuid.uuid4().hex[:8], 16)).replace('-', '')
+    return from_int(int(uuid.uuid4().hex[:8], 16)).replace("-", "")

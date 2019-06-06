@@ -1,19 +1,27 @@
 from __future__ import unicode_literals
 
 import json
-import mptt
-import mptt.models
-from django.utils.six import string_types
 import string
 
+import mptt.models
 from django.core.management import call_command
-from django.db import models, transaction
+from django.db import models
+from django.db import transaction
 from django.utils import timezone
+from django.utils.six import string_types
 from future.utils import python_2_unicode_compatible
 
-from .crypto import Key, PrivateKeyField, PublicKeyField
+from .crypto import Key
+from .crypto import PrivateKeyField
+from .crypto import PublicKeyField
+from .errors import CertificateIDInvalid
+from .errors import CertificateProfileInvalid
+from .errors import CertificateRootScopeInvalid
+from .errors import CertificateScopeNotSubset
+from .errors import CertificateSignatureInvalid
+from .errors import NonceDoesNotExist
+from .errors import NonceExpired
 from .utils.uuids import UUIDModelMixin
-from .errors import CertificateScopeNotSubset, CertificateSignatureInvalid, CertificateIDInvalid, CertificateProfileInvalid, CertificateRootScopeInvalid, NonceDoesNotExist, NonceExpired
 
 
 @python_2_unicode_compatible
@@ -29,7 +37,9 @@ class Certificate(mptt.models.MPTTModel, UUIDModelMixin):
     # scope of this certificate, and version of the scope, along with associated params
     scope_definition = models.ForeignKey("ScopeDefinition")
     scope_version = models.IntegerField()
-    scope_params = models.TextField()  # JSON dict of values to insert into scope definitions
+    scope_params = (
+        models.TextField()
+    )  # JSON dict of values to insert into scope definitions
 
     # track the certificate's public key so we can verify any certificates it signs
     public_key = PublicKeyField()
@@ -54,7 +64,9 @@ class Certificate(mptt.models.MPTTModel, UUIDModelMixin):
     def private_key(self, value):
         self._private_key = value
         if value and not self.public_key:
-            self.public_key = Key(public_key_string=self._private_key.get_public_key_string())
+            self.public_key = Key(
+                public_key_string=self._private_key.get_public_key_string()
+            )
 
     @classmethod
     def generate_root_certificate(cls, scope_def_id, **extra_scope_params):
@@ -70,11 +82,15 @@ class Certificate(mptt.models.MPTTModel, UUIDModelMixin):
         cert.scope_version = scope_def.version
         cert.profile = scope_def.profile
         primary_scope_param_key = scope_def.primary_scope_param_key
-        assert primary_scope_param_key, "Root cert can only be created for ScopeDefinition that has primary_scope_param_key defined"
+        assert (
+            primary_scope_param_key
+        ), "Root cert can only be created for ScopeDefinition that has primary_scope_param_key defined"
 
         # generate a key and extract the public key component
         cert.private_key = Key()
-        cert.public_key = Key(public_key_string=cert.private_key.get_public_key_string())
+        cert.public_key = Key(
+            public_key_string=cert.private_key.get_public_key_string()
+        )
 
         # calculate the certificate's ID on the basis of the profile and public key
         cert.id = cert.calculate_uuid()
@@ -116,7 +132,7 @@ class Certificate(mptt.models.MPTTModel, UUIDModelMixin):
             id=data["id"],
             parent_id=data["parent_id"],
             profile=data["profile"],
-            salt=data.get('salt') or '',
+            salt=data.get("salt") or "",
             scope_definition_id=data["scope_definition_id"],
             scope_version=data["scope_version"],
             scope_params=data["scope_params"],
@@ -138,7 +154,11 @@ class Certificate(mptt.models.MPTTModel, UUIDModelMixin):
 
         # check that the certificate's ID is properly calculated
         if self.id != self.calculate_uuid():
-            raise CertificateIDInvalid("Certificate ID is {} but should be {}".format(self.id, self.calculate_uuid()))
+            raise CertificateIDInvalid(
+                "Certificate ID is {} but should be {}".format(
+                    self.id, self.calculate_uuid()
+                )
+            )
 
         if not self.parent:  # self-signed root certificate
             # check that the certificate is properly self-signed
@@ -148,7 +168,11 @@ class Certificate(mptt.models.MPTTModel, UUIDModelMixin):
             scope = self.get_scope()
             for item in scope.read_filter + scope.write_filter:
                 if not item.startswith(self.id):
-                    raise CertificateRootScopeInvalid("Scope entry {} does not start with primary partition {}".format(item, self.id))
+                    raise CertificateRootScopeInvalid(
+                        "Scope entry {} does not start with primary partition {}".format(
+                            item, self.id
+                        )
+                    )
         else:  # non-root child certificate
             # check that the certificate is properly signed by its parent
             if not self.parent.verify(self.serialized, self.signature):
@@ -158,8 +182,11 @@ class Certificate(mptt.models.MPTTModel, UUIDModelMixin):
                 raise CertificateScopeNotSubset()
             # check that certificate is for same profile as parent
             if self.profile != self.parent.profile:
-                raise CertificateProfileInvalid("Certificate profile is {} but parent's is {}" \
-                                                .format(self.profile, self.parent.profile))
+                raise CertificateProfileInvalid(
+                    "Certificate profile is {} but parent's is {}".format(
+                        self.profile, self.parent.profile
+                    )
+                )
 
     @classmethod
     def save_certificate_chain(cls, cert_chain, expected_last_id=None):
@@ -192,7 +219,9 @@ class Certificate(mptt.models.MPTTModel, UUIDModelMixin):
         if len(cert_chain) > 1:
             cls.save_certificate_chain(cert_chain[:-1], expected_last_id=cert.parent_id)
         else:
-            assert not cert.parent_id, "First cert in chain must be a root cert (no parent)"
+            assert (
+                not cert.parent_id
+            ), "First cert in chain must be a root cert (no parent)"
 
         # ensure the certificate checks out (now that we know its parent, if any, is saved)
         cert.check_certificate()
@@ -203,7 +232,9 @@ class Certificate(mptt.models.MPTTModel, UUIDModelMixin):
         return cert
 
     def sign(self, value):
-        assert self.private_key, "Can only sign using certificates that have private keys"
+        assert (
+            self.private_key
+        ), "Can only sign using certificates that have private keys"
         return self.private_key.sign(value)
 
     def verify(self, value, signature):
@@ -292,7 +323,6 @@ class ScopeDefinition(models.Model):
 
 @python_2_unicode_compatible
 class Filter(object):
-
     def __init__(self, template, params={}):
         # ensure params have been deserialized
         if isinstance(params, string_types):
@@ -340,7 +370,6 @@ class Filter(object):
 
 
 class Scope(object):
-
     def __init__(self, definition, params):
         # turn the scope definition filter templates into Filter objects
         rw_filter = Filter(definition.read_write_filter_template, params)
@@ -358,4 +387,7 @@ class Scope(object):
         return self.is_subset_of(other)
 
     def __eq__(self, other):
-        return self.read_filter == other.read_filter and self.write_filter == other.write_filter
+        return (
+            self.read_filter == other.read_filter
+            and self.write_filter == other.write_filter
+        )

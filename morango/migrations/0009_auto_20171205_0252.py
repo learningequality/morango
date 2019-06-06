@@ -7,14 +7,10 @@ from django.db import migrations
 
 class Migration(migrations.Migration):
 
-    dependencies = [
-        ('morango', '0008_auto_20171114_2217'),
-    ]
+    dependencies = [("morango", "0008_auto_20171114_2217")]
 
     operations = [
         migrations.RenameField(
-            model_name='instanceidmodel',
-            old_name='macaddress',
-            new_name='node_id',
-        ),
+            model_name="instanceidmodel", old_name="macaddress", new_name="node_id"
+        )
     ]

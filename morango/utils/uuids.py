@@ -5,7 +5,7 @@ from django.db import models
 
 
 def sha2_uuid(*args):
-    return hashlib.sha256("::".join(args).encode('utf-8')).hexdigest()[:32]
+    return hashlib.sha256("::".join(args).encode("utf-8")).hexdigest()[:32]
 
 
 class UUIDField(models.CharField):
@@ -14,7 +14,7 @@ class UUIDField(models.CharField):
     """
 
     def __init__(self, *args, **kwargs):
-        kwargs['max_length'] = 32
+        kwargs["max_length"] = 32
         super(UUIDField, self).__init__(*args, **kwargs)
 
     def prepare_value(self, value):
@@ -24,7 +24,7 @@ class UUIDField(models.CharField):
 
     def deconstruct(self):
         name, path, args, kwargs = super(UUIDField, self).deconstruct()
-        del kwargs['max_length']
+        del kwargs["max_length"]
         return name, path, args, kwargs
 
     def get_internal_type(self):
@@ -37,7 +37,7 @@ class UUIDField(models.CharField):
             try:
                 value = uuid.UUID(value)
             except AttributeError:
-                raise TypeError(self.error_messages['invalid'] % {'value': value})
+                raise TypeError(self.error_messages["invalid"] % {"value": value})
         return value.hex
 
     def from_db_value(self, value, expression, connection, context):
@@ -84,17 +84,21 @@ class UUIDModelMixin(models.Model):
 
         # raise an error if no inputs to the UUID calculation were specified
         if self.uuid_input_fields is None:
-            raise NotImplementedError("""You must define either a 'uuid_input_fields' attribute
+            raise NotImplementedError(
+                """You must define either a 'uuid_input_fields' attribute
                 (with a tuple of field names) or override the 'calculate_uuid' method, on models
                 that inherit from UUIDModelMixin. If you want a fully random UUID, you can set
-                'uuid_input_fields' to the string 'RANDOM'.""")
+                'uuid_input_fields' to the string 'RANDOM'."""
+            )
 
         # if the UUID has been set to be random, return a random UUID
         if self.uuid_input_fields == "RANDOM":
             return uuid.uuid4().hex
 
         # if we got this far, uuid_input_fields should be a tuple
-        assert isinstance(self.uuid_input_fields, tuple), "'uuid_input_fields' must either be a tuple or the string 'RANDOM'"
+        assert isinstance(
+            self.uuid_input_fields, tuple
+        ), "'uuid_input_fields' must either be a tuple or the string 'RANDOM'"
 
         # calculate the input to the UUID function
         hashable_input_vals = []

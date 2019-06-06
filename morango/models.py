@@ -2,28 +2,37 @@ from __future__ import unicode_literals
 
 import hashlib
 import json
+import logging
 import os
 import platform
 import sys
 import uuid
-import logging
 
 from django.conf import settings
 from django.core import exceptions
-from django.db.models import signals
-from django.db import connection, models, transaction, router
-from django.db.models import F, Func, TextField, Value
-from django.db.models.functions import Cast
-from django.utils import timezone, six
-from morango.utils.register_models import _profile_models
+from django.db import connection
+from django.db import models
+from django.db import router
+from django.db import transaction
+from django.db.models import F
+from django.db.models import Func
+from django.db.models import TextField
+from django.db.models import Value
 from django.db.models.deletion import Collector
-from morango.utils.morango_mptt import MorangoMPTTModel
 from django.db.models.fields.related import ForeignKey
+from django.db.models.functions import Cast
+from django.utils import six
+from django.utils import timezone
 
-from .certificates import Certificate, Filter, Nonce, ScopeDefinition
+from .certificates import Certificate
+from .certificates import Filter
 from .manager import SyncableModelManager
 from .utils import proquint
-from .utils.uuids import UUIDField, UUIDModelMixin, sha2_uuid
+from .utils.uuids import sha2_uuid
+from .utils.uuids import UUIDField
+from .utils.uuids import UUIDModelMixin
+from morango.utils.morango_mptt import MorangoMPTTModel
+from morango.utils.register_models import _profile_models
 
 logger = logging.getLogger(__name__)
 
@@ -84,7 +93,15 @@ class InstanceIDModel(UUIDModelMixin):
     as well as its counter with all the records that were serialized at the time.
     """
 
-    uuid_input_fields = ("platform", "hostname", "sysversion", "node_id", "database_id", "db_path", "system_id")
+    uuid_input_fields = (
+        "platform",
+        "hostname",
+        "sysversion",
+        "node_id",
+        "database_id",
+        "db_path",
+        "system_id",
+    )
 
     platform = models.TextField()
     hostname = models.TextField()
@@ -104,7 +121,7 @@ class InstanceIDModel(UUIDModelMixin):
         # on Android, platform.platform() barfs, so we handle that safely here
         try:
             plat = platform.platform()
-        except:
+        except:  # noqa: E722
             plat = "Unknown (Android?)"
 
         kwargs = {
@@ -112,15 +129,17 @@ class InstanceIDModel(UUIDModelMixin):
             "hostname": platform.node(),
             "sysversion": sys.version,
             "database": DatabaseIDModel.get_or_create_current_database_id(),
-            "db_path": os.path.abspath(settings.DATABASES['default']['NAME']),
+            "db_path": os.path.abspath(settings.DATABASES["default"]["NAME"]),
             "system_id": os.environ.get("MORANGO_SYSTEM_ID", ""),
         }
 
         # try to get the MAC address, but exclude it if it was a fake (random) address
         mac = uuid.getnode()
         if (mac >> 40) % 2 == 0:  # 8th bit (of 48 bits, from left) is 1 if MAC is fake
-            hashable_identifier = "{}:{}".format(kwargs['database'].id, mac)
-            kwargs["node_id"] = hashlib.sha1(hashable_identifier.encode('utf-8')).hexdigest()[:20]
+            hashable_identifier = "{}:{}".format(kwargs["database"].id, mac)
+            kwargs["node_id"] = hashlib.sha1(
+                hashable_identifier.encode("utf-8")
+            ).hexdigest()[:20]
         else:
             kwargs["node_id"] = ""
 
@@ -136,7 +155,7 @@ class InstanceIDModel(UUIDModelMixin):
     @staticmethod
     @transaction.atomic
     def get_current_instance_and_increment_counter():
-        InstanceIDModel.objects.filter(current=True).update(counter=F('counter') + 1)
+        InstanceIDModel.objects.filter(current=True).update(counter=F("counter") + 1)
         return InstanceIDModel.objects.get(current=True)
 
     def get_proquint(self):
@@ -160,15 +179,23 @@ class SyncSession(models.Model):
     is_server = models.BooleanField(default=False)
 
     # track the certificates being used by each side for this session
-    client_certificate = models.ForeignKey(Certificate, blank=True, null=True, related_name="syncsessions_client")
-    server_certificate = models.ForeignKey(Certificate, blank=True, null=True, related_name="syncsessions_server")
+    client_certificate = models.ForeignKey(
+        Certificate, blank=True, null=True, related_name="syncsessions_client"
+    )
+    server_certificate = models.ForeignKey(
+        Certificate, blank=True, null=True, related_name="syncsessions_server"
+    )
 
     # track the morango profile this sync session is happening for
     profile = models.CharField(max_length=40)
 
     # information about the connection over which this sync session is happening
-    connection_kind = models.CharField(max_length=10, choices=[("network", "Network"), ("disk", "Disk")])
-    connection_path = models.CharField(max_length=1000)  # file path if kind=disk, and base URL of server if kind=network
+    connection_kind = models.CharField(
+        max_length=10, choices=[("network", "Network"), ("disk", "Disk")]
+    )
+    connection_path = models.CharField(
+        max_length=1000
+    )  # file path if kind=disk, and base URL of server if kind=network
 
     # for network connections, keep track of the IPs on either end
     client_ip = models.CharField(max_length=100, blank=True)
@@ -186,11 +213,17 @@ class TransferSession(models.Model):
     """
 
     id = UUIDField(primary_key=True)
-    filter = models.TextField()  # partition/filter to know what subset of data is to be synced
+    filter = (
+        models.TextField()
+    )  # partition/filter to know what subset of data is to be synced
     push = models.BooleanField()  # is session pushing or pulling data?
     active = models.BooleanField(default=True)  # is this transfer session still active?
-    records_transferred = models.IntegerField(default=0)  # track how many records have already been transferred
-    records_total = models.IntegerField(blank=True, null=True)  # total number of records to be synced across in this transfer
+    records_transferred = models.IntegerField(
+        default=0
+    )  # track how many records have already been transferred
+    records_total = models.IntegerField(
+        blank=True, null=True
+    )  # total number of records to be synced across in this transfer
     sync_session = models.ForeignKey(SyncSession)
 
     # track when the transfer session started and the last time there was activity on it
@@ -259,13 +292,16 @@ class AbstractStore(models.Model):
 
 
 class StoreQueryset(models.QuerySet):
-
     def char_ids_list(self):
-        return (self.annotate(id_cast=Cast('id', TextField())) \
-                # remove dashes from char uuid
-                .annotate(fixed_id=Func(F('id_cast'), Value('-'), Value(''), function='replace',)) \
-                # return as list
-                .values_list("fixed_id", flat=True))
+        return (
+            self.annotate(id_cast=Cast("id", TextField()))
+            # remove dashes from char uuid
+            .annotate(
+                fixed_id=Func(F("id_cast"), Value("-"), Value(""), function="replace")
+            )
+            # return as list
+            .values_list("fixed_id", flat=True)
+        )
 
 
 class StoreManager(models.Manager):
@@ -285,7 +321,7 @@ class Store(AbstractStore):
 
     objects = StoreManager()
 
-    def _deserialize_store_model(self, fk_cache):
+    def _deserialize_store_model(self, fk_cache):  # noqa: C901
         """
         When deserializing a store model, we look at the deleted flags to know if we should delete the app model.
         Upon loading the app model in memory we validate the app models fields, if any errors occurs we follow
@@ -318,9 +354,17 @@ class Store(AbstractStore):
                 app_model.cached_clean_fields(fk_cache)
                 return app_model
             except exceptions.ValidationError as e:
-                logger.warn("Validation error for {model} with id {id}: {error}".format(model=klass_model.__name__, id=app_model.id, error=e))
+                logger.warn(
+                    "Validation error for {model} with id {id}: {error}".format(
+                        model=klass_model.__name__, id=app_model.id, error=e
+                    )
+                )
                 # check FKs in store to see if any of those models were deleted or hard_deleted to propagate to this model
-                fk_ids = [getattr(app_model, field.attname) for field in app_model._meta.fields if isinstance(field, ForeignKey)]
+                fk_ids = [
+                    getattr(app_model, field.attname)
+                    for field in app_model._meta.fields
+                    if isinstance(field, ForeignKey)
+                ]
                 for fk_id in fk_ids:
                     try:
                         st_model = Store.objects.get(id=fk_id)
@@ -333,6 +377,7 @@ class Store(AbstractStore):
                     except Store.DoesNotExist:
                         pass
                 raise e
+
 
 class Buffer(AbstractStore):
     """
@@ -348,7 +393,9 @@ class Buffer(AbstractStore):
         unique_together = ("transfer_session", "model_uuid")
 
     def rmcb_list(self):
-        return RecordMaxCounterBuffer.objects.filter(model_uuid=self.model_uuid, transfer_session=self.transfer_session)
+        return RecordMaxCounterBuffer.objects.filter(
+            model_uuid=self.model_uuid, transfer_session=self.transfer_session
+        )
 
 
 class AbstractCounter(models.Model):
@@ -394,13 +441,17 @@ class DatabaseMaxCounter(AbstractCounter):
         # load database max counters
         for (key, value) in six.iteritems(updated_fsic):
             for f in sync_filter:
-                DatabaseMaxCounter.objects.update_or_create(instance_id=key, partition=f, defaults={'counter': value})
+                DatabaseMaxCounter.objects.update_or_create(
+                    instance_id=key, partition=f, defaults={"counter": value}
+                )
 
     @classmethod
     def calculate_filter_max_counters(cls, filters):
 
         # create string of prefixes to place into sql statement
-        condition = " UNION ".join(["SELECT CAST('{}' as TEXT) AS a".format(prefix) for prefix in filters])
+        condition = " UNION ".join(
+            ["SELECT CAST('{}' as TEXT) AS a".format(prefix) for prefix in filters]
+        )
 
         filter_max_calculation = """
         SELECT PMC.instance, MIN(PMC.counter)
@@ -413,14 +464,14 @@ class DatabaseMaxCounter(AbstractCounter):
             ) as PMC
         GROUP BY PMC.instance
         HAVING {count} = COUNT(PMC.filter_partition)
-        """.format(dmc_table=cls._meta.db_table,
-                   filter_list=condition,
-                   count=len(filters))
+        """.format(
+            dmc_table=cls._meta.db_table, filter_list=condition, count=len(filters)
+        )
 
         with connection.cursor() as cursor:
             cursor.execute(filter_max_calculation)
             # try to get hex value because postgres returns values as uuid
-            return {getattr(tup[0], 'hex', tup[0]): tup[1] for tup in cursor.fetchall()}
+            return {getattr(tup[0], "hex", tup[0]): tup[1] for tup in cursor.fetchall()}
 
 
 class RecordMaxCounter(AbstractCounter):
@@ -433,7 +484,7 @@ class RecordMaxCounter(AbstractCounter):
     store_model = models.ForeignKey(Store)
 
     class Meta:
-        unique_together = ('store_model', 'instance_id')
+        unique_together = ("store_model", "instance_id")
 
 
 class RecordMaxCounterBuffer(AbstractCounter):
@@ -455,7 +506,7 @@ class SyncableModel(UUIDModelMixin):
     # constant value to insert into partition strings in place of current model's ID, as needed (to avoid circularity)
     ID_PLACEHOLDER = "${id}"
 
-    _morango_internal_fields_not_to_serialize = ('_morango_dirty_bit',)
+    _morango_internal_fields_not_to_serialize = ("_morango_dirty_bit",)
     morango_model_dependencies = ()
     morango_fields_not_to_serialize = ()
     morango_profile = None
@@ -473,12 +524,14 @@ class SyncableModel(UUIDModelMixin):
         abstract = True
 
     def _update_deleted_models(self):
-        DeletedModels.objects.update_or_create(defaults={'id': self.id, 'profile': self.morango_profile},
-                                               id=self.id)
+        DeletedModels.objects.update_or_create(
+            defaults={"id": self.id, "profile": self.morango_profile}, id=self.id
+        )
 
     def _update_hard_deleted_models(self):
-        HardDeletedModels.objects.update_or_create(defaults={'id': self.id, 'profile': self.morango_profile},
-                                                   id=self.id)
+        HardDeletedModels.objects.update_or_create(
+            defaults={"id": self.id, "profile": self.morango_profile}, id=self.id
+        )
 
     def save(self, update_dirty_bit_to=True, *args, **kwargs):
         if update_dirty_bit_to is None:
@@ -489,11 +542,13 @@ class SyncableModel(UUIDModelMixin):
             self._morango_dirty_bit = False
         super(SyncableModel, self).save(*args, **kwargs)
 
-    def delete(self, using=None, keep_parents=False, hard_delete=False, *args, **kwargs):
+    def delete(
+        self, using=None, keep_parents=False, hard_delete=False, *args, **kwargs
+    ):
         using = using or router.db_for_write(self.__class__, instance=self)
         assert self._get_pk_val() is not None, (
-            "%s object can't be deleted because its %s attribute is set to None." %
-            (self._meta.object_name, self._meta.pk.attname)
+            "%s object can't be deleted because its %s attribute is set to None."
+            % (self._meta.object_name, self._meta.pk.attname)
         )
         collector = Collector(using=using)
         collector.collect([self], keep_parents=keep_parents)
@@ -501,17 +556,23 @@ class SyncableModel(UUIDModelMixin):
             if hard_delete:
                 # set hard deletion for all related models
                 for model, instances in six.iteritems(collector.data):
-                    if issubclass(model, SyncableModel) or issubclass(model, MorangoMPTTModel):
+                    if issubclass(model, SyncableModel) or issubclass(
+                        model, MorangoMPTTModel
+                    ):
                         for obj in instances:
                             obj._update_hard_deleted_models()
             return collector.delete()
 
     def cached_clean_fields(self, fk_lookup_cache):
         excluded_fields = []
-        fk_fields = [field for field in self._meta.fields if isinstance(field, models.ForeignKey)]
+        fk_fields = [
+            field for field in self._meta.fields if isinstance(field, models.ForeignKey)
+        ]
         for f in fk_fields:
             raw_value = getattr(self, f.attname)
-            key = 'morango_{id}_{db_table}_foreignkey'.format(db_table=f.related_model._meta.db_table, id=raw_value)
+            key = "morango_{id}_{db_table}_foreignkey".format(
+                db_table=f.related_model._meta.db_table, id=raw_value
+            )
             try:
                 fk_lookup_cache[key]
                 excluded_fields.append(f.name)
@@ -537,9 +598,13 @@ class SyncableModel(UUIDModelMixin):
             if f.attname in self._morango_internal_fields_not_to_serialize:
                 continue
             # case if model is morango mptt
-            if f.attname in getattr(self, '_internal_mptt_fields_not_to_serialize', '_internal_fields_not_to_serialize'):
+            if f.attname in getattr(
+                self,
+                "_internal_mptt_fields_not_to_serialize",
+                "_internal_fields_not_to_serialize",
+            ):
                 continue
-            if hasattr(f, 'value_from_object_json_compatible'):
+            if hasattr(f, "value_from_object_json_compatible"):
                 data[f.attname] = f.value_from_object_json_compatible(self)
             else:
                 data[f.attname] = f.value_from_object(self)
@@ -560,11 +625,15 @@ class SyncableModel(UUIDModelMixin):
 
     def calculate_source_id(self):
         """Should return a string that uniquely defines the model instance or `None` for a random uuid."""
-        raise NotImplementedError("You must define a 'calculate_source_id' method on models that inherit from SyncableModel.")
+        raise NotImplementedError(
+            "You must define a 'calculate_source_id' method on models that inherit from SyncableModel."
+        )
 
     def calculate_partition(self):
         """Should return a string specifying this model instance's partition, using `self.ID_PLACEHOLDER` in place of its own ID, if needed."""
-        raise NotImplementedError("You must define a 'calculate_partition' method on models that inherit from SyncableModel.")
+        raise NotImplementedError(
+            "You must define a 'calculate_partition' method on models that inherit from SyncableModel."
+        )
 
     @staticmethod
     def compute_namespaced_id(partition_value, source_id_value, model_name):
@@ -575,6 +644,10 @@ class SyncableModel(UUIDModelMixin):
         if self._morango_source_id is None:
             self._morango_source_id = uuid.uuid4().hex
 
-        namespaced_id = self.compute_namespaced_id(self.calculate_partition(), self._morango_source_id, self.morango_model_name)
-        self._morango_partition = self.calculate_partition().replace(self.ID_PLACEHOLDER, namespaced_id)
+        namespaced_id = self.compute_namespaced_id(
+            self.calculate_partition(), self._morango_source_id, self.morango_model_name
+        )
+        self._morango_partition = self.calculate_partition().replace(
+            self.ID_PLACEHOLDER, namespaced_id
+        )
         return namespaced_id

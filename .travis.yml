@@ -14,8 +14,7 @@ python:
   - "3.6"
 
 env:
-# Removed because linting PR coming up separately
-#  - LINT="yes"
+  - LINT="yes"
   - DJANGO="1.11" CRYPTOGRAPHY="1.2"
   - DJANGO="1.11" CRYPTOGRAPHY="1.8"
   - DJANGO="1.11" CRYPTOGRAPHY="2.0"

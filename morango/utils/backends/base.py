@@ -1,8 +1,10 @@
-from morango.models import Buffer, RecordMaxCounterBuffer, Store, RecordMaxCounter
+from morango.models import Buffer
+from morango.models import RecordMaxCounter
+from morango.models import RecordMaxCounterBuffer
+from morango.models import Store
 
 
 class BaseSQLWrapper(object):
-
     def _dequeuing_delete_rmcb_records(self, cursor, transfersession_id):
         # delete all RMCBs which are a reverse FF (store version newer than buffer version)
         delete_rmcb_records = """DELETE FROM {rmcb}
@@ -17,11 +19,13 @@ class BaseSQLWrapper(object):
                                  AND buffer.last_saved_counter <= rmc.counter
                                  AND rmcb.transfer_session_id = '{transfer_session_id}'
                                  AND buffer.transfer_session_id = '{transfer_session_id}')
-                                  """.format(buffer=Buffer._meta.db_table,
-                                             store=Store._meta.db_table,
-                                             rmc=RecordMaxCounter._meta.db_table,
-                                             rmcb=RecordMaxCounterBuffer._meta.db_table,
-                                             transfer_session_id=transfersession_id)
+                                  """.format(
+            buffer=Buffer._meta.db_table,
+            store=Store._meta.db_table,
+            rmc=RecordMaxCounter._meta.db_table,
+            rmcb=RecordMaxCounterBuffer._meta.db_table,
+            transfer_session_id=transfersession_id,
+        )
 
         cursor.execute(delete_rmcb_records)
 
@@ -37,21 +41,25 @@ class BaseSQLWrapper(object):
                                      AND buffer.last_saved_instance = rmc.instance_id
                                      AND buffer.last_saved_counter <= rmc.counter
                                      AND buffer.transfer_session_id = '{transfer_session_id}')
-                                  """.format(buffer=Buffer._meta.db_table,
-                                             store=Store._meta.db_table,
-                                             rmc=RecordMaxCounter._meta.db_table,
-                                             rmcb=RecordMaxCounterBuffer._meta.db_table,
-                                             transfer_session_id=transfersession_id)
+                                  """.format(
+            buffer=Buffer._meta.db_table,
+            store=Store._meta.db_table,
+            rmc=RecordMaxCounter._meta.db_table,
+            rmcb=RecordMaxCounterBuffer._meta.db_table,
+            transfer_session_id=transfersession_id,
+        )
         cursor.execute(delete_buffered_records)
 
     def _dequeuing_merge_conflict_rmcb(self, cursor, transfersession_id):
-        raise NotImplemented("Subclass must implement this method.")
+        raise NotImplementedError("Subclass must implement this method.")
 
     def _dequeuing_merge_conflict_buffer(self, cursor, current_id, transfersession_id):
-        raise NotImplemented("Subclass must implement this method.")
+        raise NotImplementedError("Subclass must implement this method.")
 
-    def _dequeuing_update_rmcs_last_saved_by(self, cursor, current_id, transfersession_id):
-        raise NotImplemented("Subclass must implement this method.")
+    def _dequeuing_update_rmcs_last_saved_by(
+        self, cursor, current_id, transfersession_id
+    ):
+        raise NotImplementedError("Subclass must implement this method.")
 
     def _dequeuing_delete_mc_buffer(self, cursor, transfersession_id):
         # delete records with merge conflicts from buffer
@@ -66,11 +74,13 @@ class BaseSQLWrapper(object):
                                                                                   AND store.last_saved_instance = rmcb.instance_id
                                                                                   AND store.last_saved_counter <= rmcb.counter
                                                                                   AND rmcb.transfer_session_id = '{transfer_session_id}'))
-                               """.format(buffer=Buffer._meta.db_table,
-                                          store=Store._meta.db_table,
-                                          rmc=RecordMaxCounter._meta.db_table,
-                                          rmcb=RecordMaxCounterBuffer._meta.db_table,
-                                          transfer_session_id=transfersession_id)
+                               """.format(
+            buffer=Buffer._meta.db_table,
+            store=Store._meta.db_table,
+            rmc=RecordMaxCounter._meta.db_table,
+            rmcb=RecordMaxCounterBuffer._meta.db_table,
+            transfer_session_id=transfersession_id,
+        )
         cursor.execute(delete_mc_buffer)
 
     def _dequeuing_delete_mc_rmcb(self, cursor, transfersession_id):
@@ -89,26 +99,30 @@ class BaseSQLWrapper(object):
                                                                                   AND store.last_saved_instance = rmcb2.instance_id
                                                                                   AND store.last_saved_counter <= rmcb2.counter
                                                                                   AND rmcb2.transfer_session_id = '{transfer_session_id}'))
-                               """.format(buffer=Buffer._meta.db_table,
-                                          store=Store._meta.db_table,
-                                          rmc=RecordMaxCounter._meta.db_table,
-                                          rmcb=RecordMaxCounterBuffer._meta.db_table,
-                                          transfer_session_id=transfersession_id)
+                               """.format(
+            buffer=Buffer._meta.db_table,
+            store=Store._meta.db_table,
+            rmc=RecordMaxCounter._meta.db_table,
+            rmcb=RecordMaxCounterBuffer._meta.db_table,
+            transfer_session_id=transfersession_id,
+        )
         cursor.execute(delete_mc_rmc)
 
     def _dequeuing_insert_remaining_buffer(self, cursor, transfersession_id):
-        raise NotImplemented("Subclass must implement this method.")
+        raise NotImplementedError("Subclass must implement this method.")
 
     def _dequeuing_insert_remaining_rmcb(self, cursor, transfersession_id):
-        raise NotImplemented("Subclass must implement this method.")
+        raise NotImplementedError("Subclass must implement this method.")
 
     def _dequeuing_delete_remaining_rmcb(self, cursor, transfersession_id):
         # delete the remaining rmcb for this transfer session
         delete_remaining_rmcb = """
                                 DELETE FROM {rmcb}
                                 WHERE {rmcb}.transfer_session_id = '{transfer_session_id}'
-                                """.format(rmcb=RecordMaxCounterBuffer._meta.db_table,
-                                           transfer_session_id=transfersession_id)
+                                """.format(
+            rmcb=RecordMaxCounterBuffer._meta.db_table,
+            transfer_session_id=transfersession_id,
+        )
 
         cursor.execute(delete_remaining_rmcb)
 
@@ -117,6 +131,7 @@ class BaseSQLWrapper(object):
         delete_remaining_buffer = """
                                   DELETE FROM {buffer}
                                   WHERE {buffer}.transfer_session_id = '{transfer_session_id}'
-                                  """.format(buffer=Buffer._meta.db_table,
-                                             transfer_session_id=transfersession_id)
+                                  """.format(
+            buffer=Buffer._meta.db_table, transfer_session_id=transfersession_id
+        )
         cursor.execute(delete_remaining_buffer)

@@ -1,28 +1,38 @@
 import hashlib
 import re
 import sys
-import rsa as PYRSA
 
-from django.db import models, transaction
+import rsa as PYRSA
+from django.db import models
+from django.db import transaction
 
 try:
     from M2Crypto import RSA as M2RSA
     from M2Crypto import BIO as M2BIO
+
     M2CRYPTO_EXISTS = True
-except:
+except ImportError:
     M2CRYPTO_EXISTS = False
 
 try:
     from cryptography.hazmat.backends import default_backend
     from cryptography import exceptions as crypto_exceptions
+
     crypto_backend = default_backend()
-    from cryptography.hazmat.primitives.asymmetric import rsa as crypto_rsa, padding as crypto_padding
-    from cryptography.hazmat.primitives import serialization as crypto_serialization, hashes as crypto_hashes
+    from cryptography.hazmat.primitives.asymmetric import (
+        rsa as crypto_rsa,
+        padding as crypto_padding,
+    )
+    from cryptography.hazmat.primitives import (
+        serialization as crypto_serialization,
+        hashes as crypto_hashes,
+    )
+
     # Ignore cryptography versions that do not support the 'sign' method
-    if not hasattr(crypto_rsa.RSAPrivateKey, 'sign'):
+    if not hasattr(crypto_rsa.RSAPrivateKey, "sign"):
         raise ImportError
     CRYPTOGRAPHY_EXISTS = True
-except:
+except ImportError:
     CRYPTOGRAPHY_EXISTS = False
 
 if sys.version_info[0] < 3:
@@ -35,7 +45,6 @@ PKCS8_HEADER = "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8A"
 
 
 class BaseKey(object):
-
     def __init__(self, private_key_string=None, public_key_string=None):
 
         if private_key_string:
@@ -51,7 +60,9 @@ class BaseKey(object):
     def sign(self, message):
 
         if not self._private_key:
-            raise Exception("Key object does not have a private key defined, and thus cannot be used to sign.")
+            raise Exception(
+                "Key object does not have a private key defined, and thus cannot be used to sign."
+            )
 
         message = self.ensure_bytes(message)
 
@@ -68,7 +79,9 @@ class BaseKey(object):
 
         # ensure we have a public key we can use use to verify
         if not self._public_key:
-            raise Exception("Key object does not have public key defined, and thus cannot be used to verify.")
+            raise Exception(
+                "Key object does not have public key defined, and thus cannot be used to verify."
+            )
 
         return self._verify(message, signature)
 
@@ -84,7 +97,7 @@ class BaseKey(object):
 
         # remove the PKCS#8 header so the key won't cause problems for older versions
         if pem_string.startswith(PKCS8_HEADER):
-            pem_string = pem_string[len(PKCS8_HEADER):]
+            pem_string = pem_string[len(PKCS8_HEADER) :]
 
         # remove newlines, to ensure consistency
         pem_string = pem_string.replace("\n", "")
@@ -107,21 +120,32 @@ class BaseKey(object):
 
         private_key_string = self.ensure_unicode(private_key_string)
 
-        private_key_string = self._add_pem_headers(private_key_string, "RSA PRIVATE KEY")
+        private_key_string = self._add_pem_headers(
+            private_key_string, "RSA PRIVATE KEY"
+        )
 
         self._set_private_key_string(private_key_string)
 
     def _remove_pem_headers(self, pem_string):
         if not pem_string.strip().startswith("-----"):
             return pem_string
-        return "\n".join([line for line in pem_string.split("\n") if line and not line.startswith("---")])
+        return "\n".join(
+            [
+                line
+                for line in pem_string.split("\n")
+                if line and not line.startswith("---")
+            ]
+        )
 
     def _add_pem_headers(self, pem_string, header_string):
         context = {
             "key": self._remove_pem_headers(pem_string),
             "header_string": header_string,
         }
-        return "-----BEGIN %(header_string)s-----\n%(key)s\n-----END %(header_string)s-----" % context
+        return (
+            "-----BEGIN %(header_string)s-----\n%(key)s\n-----END %(header_string)s-----"
+            % context
+        )
 
     def ensure_bytes(self, message):
         try:
@@ -147,7 +171,7 @@ class PythonRSAKey(BaseKey):
     def generate_new_key(self, keysize=2048):
         try:
             self._public_key, self._private_key = PYRSA.newkeys(keysize, poolsize=4)
-        except:
+        except:  # noqa: E722
             self._public_key, self._private_key = PYRSA.newkeys(keysize)
 
     def _sign(self, message):
@@ -172,7 +196,7 @@ class PythonRSAKey(BaseKey):
 
         # remove PKCS#8 header if it exists
         if public_key_string.startswith(PKCS8_HEADER):
-            public_key_string = public_key_string[len(PKCS8_HEADER):]
+            public_key_string = public_key_string[len(PKCS8_HEADER) :]
 
         # add the appropriate PEM header/footer
         public_key_string = self._add_pem_headers(public_key_string, "RSA PUBLIC KEY")
@@ -190,7 +214,7 @@ class M2CryptoKey(BaseKey):
     _private_key = None
 
     def generate_new_key(self, keysize=2048):
-        self._private_key = M2RSA.gen_key(keysize, 65537, lambda x,y,z: None)
+        self._private_key = M2RSA.gen_key(keysize, 65537, lambda x, y, z: None)
         self._public_key = M2RSA.RSA_pub(self._private_key.rsa)
 
     def _sign(self, message):
@@ -199,7 +223,9 @@ class M2CryptoKey(BaseKey):
     def _verify(self, message, signature):
 
         try:
-            self._public_key.verify(hashlib.sha256(message).digest(), signature, algo="sha256")
+            self._public_key.verify(
+                hashlib.sha256(message).digest(), signature, algo="sha256"
+            )
             return True
         except M2RSA.RSAError:
             return False
@@ -223,7 +249,9 @@ class M2CryptoKey(BaseKey):
         # add the appropriate PEM header/footer
         public_key_string = self._add_pem_headers(public_key_string, "PUBLIC KEY")
 
-        self._public_key = M2RSA.load_pub_key_bio(M2BIO.MemoryBuffer(self.ensure_bytes(public_key_string)))
+        self._public_key = M2RSA.load_pub_key_bio(
+            M2BIO.MemoryBuffer(self.ensure_bytes(public_key_string))
+        )
 
     def _set_private_key_string(self, private_key_string):
         self._private_key = M2RSA.load_key_string(self.ensure_bytes(private_key_string))
@@ -237,18 +265,20 @@ class CryptographyKey(BaseKey):
 
     def generate_new_key(self, keysize=2048):
         self._private_key = crypto_rsa.generate_private_key(
-            public_exponent=65537,
-            key_size=keysize,
-            backend=crypto_backend,
+            public_exponent=65537, key_size=keysize, backend=crypto_backend
         )
         self._public_key = self._private_key.public_key()
 
     def _sign(self, message):
-        return self._private_key.sign(message, crypto_padding.PKCS1v15(), crypto_hashes.SHA256())
+        return self._private_key.sign(
+            message, crypto_padding.PKCS1v15(), crypto_hashes.SHA256()
+        )
 
     def _verify(self, message, signature):
         try:
-            self._public_key.verify(signature, message, crypto_padding.PKCS1v15(), crypto_hashes.SHA256())
+            self._public_key.verify(
+                signature, message, crypto_padding.PKCS1v15(), crypto_hashes.SHA256()
+            )
             return True
         except crypto_exceptions.InvalidSignature:
             return False
@@ -280,26 +310,26 @@ class CryptographyKey(BaseKey):
         public_key_string = self._add_pem_headers(public_key_string, "PUBLIC KEY")
 
         self._public_key = crypto_serialization.load_pem_public_key(
-            self.ensure_bytes(public_key_string),
-            backend=crypto_backend,
+            self.ensure_bytes(public_key_string), backend=crypto_backend
         )
 
     def _set_private_key_string(self, private_key_string):
 
         self._private_key = crypto_serialization.load_pem_private_key(
-            self.ensure_bytes(private_key_string),
-            password=None,
-            backend=crypto_backend,
+            self.ensure_bytes(private_key_string), password=None, backend=crypto_backend
         )
         self._public_key = self._private_key.public_key()
 
 
 # alias the most-preferred key wrapper class we have available as `Key`
-Key = CryptographyKey if CRYPTOGRAPHY_EXISTS else (M2CryptoKey if M2CRYPTO_EXISTS else PythonRSAKey)
+Key = (
+    CryptographyKey
+    if CRYPTOGRAPHY_EXISTS
+    else (M2CryptoKey if M2CRYPTO_EXISTS else PythonRSAKey)
+)
 
 
 class RSAKeyBaseField(models.TextField):
-
     def __init__(self, *args, **kwargs):
         kwargs["max_length"] = 1000
         super(RSAKeyBaseField, self).__init__(*args, **kwargs)
@@ -311,7 +341,6 @@ class RSAKeyBaseField(models.TextField):
 
 
 class PublicKeyField(RSAKeyBaseField):
-
     def from_db_value(self, value, expression, connection, context):
         if not value:
             return None
@@ -331,7 +360,6 @@ class PublicKeyField(RSAKeyBaseField):
 
 
 class PrivateKeyField(RSAKeyBaseField):
-
     def from_db_value(self, value, expression, connection, context):
         if not value:
             return None
@@ -365,14 +393,14 @@ class SharedKey(models.Model):
             with transaction.atomic():
                 SharedKey.objects.filter(current=True).update(current=False)
                 key = Key()
-                return SharedKey.objects.create(public_key=key,
-                                                private_key=key,
-                                                current=True)
+                return SharedKey.objects.create(
+                    public_key=key, private_key=key, current=True
+                )
         # create a new shared key if one doesn't exist
         try:
             return SharedKey.objects.get(current=True)
         except SharedKey.DoesNotExist:
             key = Key()
-            return SharedKey.objects.create(public_key=key,
-                                            private_key=key,
-                                            current=True)
+            return SharedKey.objects.create(
+                public_key=key, private_key=key, current=True
+            )
