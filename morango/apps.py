@@ -5,7 +5,6 @@ import logging as logger
 from django.apps import AppConfig
 from django.db import connection
 
-from morango.util import max_parameter_substitution
 from morango.utils.register_models import add_syncable_models
 
 logging = logger.getLogger(__name__)
@@ -20,5 +19,3 @@ class MorangoConfig(AppConfig):
 
         # add models to be synced by profile
         add_syncable_models()
-        if "sqlite" in connection.vendor:
-            max_parameter_substitution()

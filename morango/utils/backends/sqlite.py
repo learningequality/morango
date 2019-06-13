@@ -1,22 +1,15 @@
 import os
 
-from morango.constants.file import SQLITE_VARIABLE_FILE_CACHE
 from morango.models import Buffer
 from morango.models import RecordMaxCounter
 from morango.models import RecordMaxCounterBuffer
 from morango.models import Store
+from morango.util import calculate_max_sqlite_variables
 from morango.utils.backends.base import BaseSQLWrapper
 
 
 class SQLWrapper(BaseSQLWrapper):
     backend = "sqlite"
-
-    def __init__(self):
-        if os.path.isfile(SQLITE_VARIABLE_FILE_CACHE):
-            with open(SQLITE_VARIABLE_FILE_CACHE) as file:
-                self.SQLITE_MAX_VARIABLE_NUMBER = int(file.read())
-        else:
-            self.SQLITE_MAX_VARIABLE_NUMBER = 999
 
     def _bulk_insert_into_app_models(
         self, cursor, app_model, fields, db_values, placeholder_list
@@ -27,7 +20,7 @@ class SQLWrapper(BaseSQLWrapper):
         where values=[1,2,3,4,5,6,7,8,9]
         """
         # calculate and create equal sized chunks of data to insert incrementally
-        num_of_rows_able_to_insert = self.SQLITE_MAX_VARIABLE_NUMBER // len(fields)
+        num_of_rows_able_to_insert = calculate_max_sqlite_variables() // len(fields)
         num_of_values_able_to_insert = num_of_rows_able_to_insert * len(fields)
         value_chunks = [
             db_values[x : x + num_of_values_able_to_insert]

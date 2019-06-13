@@ -3,8 +3,9 @@ import logging
 import os
 import sqlite3
 
+from django.utils.lru_cache import lru_cache
+
 from morango.constants.capabilities import GZIP_BUFFER_POST
-from morango.constants.file import SQLITE_VARIABLE_FILE_CACHE
 
 logger = logging.getLogger(__name__)
 
@@ -79,14 +80,14 @@ class mute_signals(object):
         return wrapper
 
 
-def max_parameter_substitution():
+@lru_cache(maxsize=1)
+def calculate_max_sqlite_variables():
     """
     SQLite has a limit on the max number of variables allowed for parameter substitution. This limit is usually 999, but
     can be compiled to a different number. This function calculates what the max is for the sqlite version running on the device.
     We use the calculated value to chunk our SQL bulk insert statements when deserializing from the store to the app layer.
+    Source: https://stackoverflow.com/questions/17872665/determine-maximum-number-of-columns-from-sqlite3
     """
-    if os.path.isfile(SQLITE_VARIABLE_FILE_CACHE):
-        return
     conn = sqlite3.connect(":memory:")
     low = 1
     high = (
@@ -109,5 +110,4 @@ def max_parameter_substitution():
         else:
             low = guess
     conn.close()
-    with open(SQLITE_VARIABLE_FILE_CACHE, "w") as file:
-        file.write(str(low))
+    return low
