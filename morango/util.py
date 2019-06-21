@@ -1,6 +1,5 @@
 import functools
 import logging
-import os
 import sqlite3
 
 from django.utils.lru_cache import lru_cache

@@ -3,7 +3,6 @@ from __future__ import unicode_literals
 import logging as logger
 
 from django.apps import AppConfig
-from django.db import connection
 
 from morango.utils.register_models import add_syncable_models
 
