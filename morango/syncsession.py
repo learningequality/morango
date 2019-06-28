@@ -9,6 +9,8 @@ from django.conf import settings
 from django.core.paginator import Paginator
 from django.utils import timezone
 from django.utils.six import iteritems
+from requests.adapters import HTTPAdapter
+from requests.packages.urllib3.util.retry import Retry
 from rest_framework.exceptions import ValidationError
 from six.moves.urllib.parse import urljoin
 from six.moves.urllib.parse import urlparse
@@ -35,6 +37,7 @@ from morango.utils.sync_utils import _dequeue_into_store
 from morango.utils.sync_utils import _queue_into_buffer
 from morango.utils.sync_utils import _serialize_into_store
 from morango.validation import validate_and_create_buffer_data
+
 
 if GZIP_BUFFER_POST in CAPABILITIES:
     from gzip import GzipFile
@@ -92,12 +95,22 @@ class Connection(object):
 
 
 class NetworkSyncConnection(Connection):
-    def __init__(self, base_url="", compresslevel=9):
+    def __init__(self, base_url="", compresslevel=9, retries=5, backoff_factor=0.3):
         self.base_url = base_url
         self.compresslevel = compresslevel
         # ping server at url with info request
         info_url = urljoin(self.base_url, api_urls.INFO)
-        self.server_info = requests.get(info_url).json()
+        # set up requests session with retry logic
+        self.session = requests.Session()
+        # sleep for {backoff factor} * (2 ^ ({number of total retries} - 1)) between requests
+        # with 5 retry attempts, sleep escalation becomes (0.6s, 1.2s, 1.8s, 2.4s, 3.0s)
+        retry = Retry(
+            total=retries, read=retries, connect=retries, backoff_factor=backoff_factor
+        )
+        adapter = HTTPAdapter(max_retries=retry)
+        self.session.mount("http://", adapter)
+        self.session.mount("https://", adapter)
+        self.server_info = self.session.get(info_url).json()
         self.capabilities = CAPABILITIES.intersection(
             self.server_info.get("capabilities", [])
         )
@@ -137,7 +150,7 @@ class NetworkSyncConnection(Connection):
         url = urljoin(urljoin(self.base_url, endpoint), lookup)
         auth = (userargs, password) if userargs else None
         if data_is_gzipped:
-            resp = requests.request(
+            resp = self.session.request(
                 method,
                 url,
                 data=data,
@@ -146,10 +159,11 @@ class NetworkSyncConnection(Connection):
                 headers={"content-type": "application/gzip"},
             )
         else:
+            # get requests may fail when including empty data payload
             if method == "GET":
-                resp = requests.request(method, url, params=params, auth=auth)
+                resp = self.session.request(method, url, params=params, auth=auth)
             else:
-                resp = requests.request(
+                resp = self.session.request(
                     method, url, json=data, params=params, auth=auth
                 )
         resp.raise_for_status()
