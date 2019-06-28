@@ -494,7 +494,7 @@ class RecordMaxCounterBuffer(AbstractCounter):
     """
 
     transfer_session = models.ForeignKey(TransferSession)
-    model_uuid = UUIDField()
+    model_uuid = UUIDField(db_index=True)
 
 
 class SyncableModel(UUIDModelMixin):
