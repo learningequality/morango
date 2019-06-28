@@ -1,4 +1,5 @@
 import json
+import logging
 import socket
 import uuid
 from io import BytesIO
@@ -37,6 +38,9 @@ from morango.validation import validate_and_create_buffer_data
 
 if GZIP_BUFFER_POST in CAPABILITIES:
     from gzip import GzipFile
+
+
+logger = logging.getLogger(__name__)
 
 
 def _join_with_logical_operator(lst, operator):
@@ -424,6 +428,7 @@ class SyncClient(object):
 
     def initiate_push(self, sync_filter):
 
+        logger.info("Initiating push sync")
         self._create_transfer_session(True, sync_filter)
 
         _queue_into_buffer(self.current_transfer_session)
@@ -433,16 +438,19 @@ class SyncClient(object):
             transfer_session=self.current_transfer_session
         ).count()
         if records_total == 0:
+            logger.info("There are no records to transfer")
             self._close_transfer_session()
             return
+        logger.info("{} records have been queued for transfer".format(records_total))
         self.current_transfer_session.records_total = records_total
         self.current_transfer_session.save()
         self.sync_connection._update_transfer_session(
             {"records_total": records_total}, self.current_transfer_session
         )
 
-        # push records to server
+        logger.info("Beginning pushing of data...")
         self._push_records(chunk_size=self.chunk_size)
+        logger.info("Completed push of data")
 
         # upon successful completion of pushing records, proceed to delete buffered records
         Buffer.objects.filter(transfer_session=self.current_transfer_session).delete()
@@ -454,15 +462,25 @@ class SyncClient(object):
         self._close_transfer_session()
 
     def initiate_pull(self, sync_filter):
+
+        logger.info("Initiating pull sync")
         self._create_transfer_session(False, sync_filter)
 
         if self.current_transfer_session.records_total == 0:
+            logger.info("There are no records to transfer")
             self._close_transfer_session()
             return
 
+        logger.info(
+            "{} records have been queued server side for transfer".format(
+                self.current_transfer_session.records_total
+            )
+        )
         # pull records and close transfer session upon completion
+        logger.info("Beginning pulling of data...")
         self._pull_records(chunk_size=self.chunk_size)
-        self._dequeue_into_store()
+        logger.info("Completed pull of data")
+        _dequeue_into_store(self.current_transfer_session)
 
         # update database max counters but use latest fsics on client
         DatabaseMaxCounter.update_fsics(
@@ -507,12 +525,18 @@ class SyncClient(object):
                 )
 
             validate_and_create_buffer_data(data, self.current_transfer_session)
+            logger.info(
+                "Received {}/{} records".format(
+                    self.current_transfer_session.records_transferred,
+                    self.current_transfer_session.records_total,
+                )
+            )
 
     def _push_records(self, chunk_size=500, callback=None):
         # paginate buffered records so we do not load them all into memory
         buffered_records = Buffer.objects.filter(
             transfer_session=self.current_transfer_session
-        )
+        ).order_by("pk")
         buffered_pages = Paginator(buffered_records, chunk_size)
         for count in buffered_pages.page_range:
 
@@ -521,10 +545,18 @@ class SyncClient(object):
                 buffered_pages.page(count).object_list, many=True
             )
             self.sync_connection._push_record_chunk(serialized_recs.data)
-
+            data_size = len(serialized_recs.data)
             # update records_transferred upon successful request
-            self.current_transfer_session.records_transferred += chunk_size
+            self.current_transfer_session.records_transferred += (
+                data_size if data_size < chunk_size else chunk_size
+            )
             self.current_transfer_session.save()
+            logger.info(
+                "Sent {}/{} records".format(
+                    self.current_transfer_session.records_transferred,
+                    self.current_transfer_session.records_total,
+                )
+            )
 
     def close_sync_session(self):
 
@@ -542,6 +574,7 @@ class SyncClient(object):
 
     def _create_transfer_session(self, push, filter):
 
+        logger.info("Creating transfer session")
         # build data for creating transfer session on server side
         data = {
             "id": uuid.uuid4().hex,
@@ -583,6 +616,7 @@ class SyncClient(object):
 
     def _close_transfer_session(self):
 
+        logger.info("Closing transfer session")
         # "delete" transfer session on server side
         self.sync_connection._close_transfer_session(self.current_transfer_session)
 
@@ -590,12 +624,3 @@ class SyncClient(object):
         self.current_transfer_session.active = False
         self.current_transfer_session.save()
         self.current_transfer_session = None
-
-    def _queue_into_buffer(self):
-        _queue_into_buffer(self.current_transfer_session)
-
-    def _dequeue_into_store(self):
-        """
-        Takes data from the buffers and merges into the store and record max counters.
-        """
-        _dequeue_into_store(self.current_transfer_session)

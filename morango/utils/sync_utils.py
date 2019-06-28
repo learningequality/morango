@@ -1,5 +1,6 @@
 import functools
 import json
+import logging
 
 from django.conf import settings
 from django.core import exceptions
@@ -23,6 +24,7 @@ from morango.util import mute_signals
 from morango.utils.backends.utils import load_backend
 from morango.utils.register_models import _profile_models
 
+logger = logging.getLogger(__name__)
 
 DBBackend = load_backend(connection).SQLWrapper()
 
@@ -63,6 +65,7 @@ def _serialize_into_store(profile, filter=None):
     """
     Takes data from app layer and serializes the models into the store.
     """
+    logger.info("Serializing records")
     # ensure that we write and retrieve the counter in one go for consistency
     current_id = InstanceIDModel.get_current_instance_and_increment_counter()
 
@@ -212,6 +215,7 @@ def _serialize_into_store(profile, filter=None):
                     partition=f,
                     defaults={"counter": current_id.counter},
                 )
+    logger.info("Serialization complete")
 
 
 def _deserialize_from_store(profile):
@@ -221,6 +225,7 @@ def _deserialize_from_store(profile):
     # we first serialize to avoid deserialization merge conflicts
     _serialize_into_store(profile)
 
+    logger.info("Deserializing records")
     fk_cache = {}
     with transaction.atomic():
         syncable_dict = _profile_models[profile]
@@ -309,6 +314,7 @@ def _deserialize_from_store(profile):
         Store.objects.exclude(id__in=excluded_list).filter(
             profile=profile, dirty_bit=True
         ).update(dirty_bit=False)
+    logger.info("Deserialization complete")
 
 
 @transaction.atomic()
@@ -316,6 +322,7 @@ def _queue_into_buffer(transfersession):
     """
     Takes a chunk of data from the store to be put into the buffer to be sent to another morango instance.
     """
+    logger.info("Queuing records for transfer")
     last_saved_by_conditions = []
     filter_prefixes = Filter(transfersession.filter)
     server_fsic = json.loads(transfersession.server_fsic)
@@ -390,6 +397,7 @@ def _queue_into_buffer(transfersession):
             outgoing_buffer=Buffer._meta.db_table,
         )
         cursor.execute(queue_rmc_buffer)
+    logger.info("Queuing complete")
 
 
 @transaction.atomic()
@@ -397,6 +405,7 @@ def _dequeue_into_store(transfersession):
     """
     Takes data from the buffers and merges into the store and record max counters.
     """
+    logger.info("Dequeuing records into store")
     with connection.cursor() as cursor:
         DBBackend._dequeuing_delete_rmcb_records(cursor, transfersession.id)
         DBBackend._dequeuing_delete_buffered_records(cursor, transfersession.id)
@@ -414,5 +423,6 @@ def _dequeue_into_store(transfersession):
         DBBackend._dequeuing_insert_remaining_rmcb(cursor, transfersession.id)
         DBBackend._dequeuing_delete_remaining_rmcb(cursor, transfersession.id)
         DBBackend._dequeuing_delete_remaining_buffer(cursor, transfersession.id)
+    logger.info("Dequeuing complete")
     if getattr(settings, "MORANGO_DESERIALIZE_AFTER_DEQUEUING", True):
         _deserialize_from_store(transfersession.sync_session.profile)
