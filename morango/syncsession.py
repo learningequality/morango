@@ -32,12 +32,12 @@ from morango.models import InstanceIDModel
 from morango.models import RecordMaxCounterBuffer
 from morango.models import SyncSession
 from morango.models import TransferSession
+from morango.session import SessionWrapper
 from morango.util import CAPABILITIES
 from morango.utils.sync_utils import _dequeue_into_store
 from morango.utils.sync_utils import _queue_into_buffer
 from morango.utils.sync_utils import _serialize_into_store
 from morango.validation import validate_and_create_buffer_data
-
 
 if GZIP_BUFFER_POST in CAPABILITIES:
     from gzip import GzipFile
@@ -95,84 +95,37 @@ class Connection(object):
 
 
 class NetworkSyncConnection(Connection):
-    def __init__(self, base_url="", compresslevel=9, retries=5, backoff_factor=0.3):
+    def __init__(self, base_url="", compresslevel=9, retries=7, backoff_factor=0.3):
         self.base_url = base_url
         self.compresslevel = compresslevel
-        # ping server at url with info request
-        info_url = urljoin(self.base_url, api_urls.INFO)
         # set up requests session with retry logic
-        self.session = requests.Session()
+        self.session = SessionWrapper()
         # sleep for {backoff factor} * (2 ^ ({number of total retries} - 1)) between requests
-        # with 5 retry attempts, sleep escalation becomes (0.6s, 1.2s, 1.8s, 2.4s, 3.0s)
-        retry = Retry(
-            total=retries, read=retries, connect=retries, backoff_factor=backoff_factor
-        )
+        # with 7 retry attempts, sleep escalation becomes (0.6s, 1.2s, ..., 38.4s)
+        retry = Retry(total=retries, backoff_factor=backoff_factor)
         adapter = HTTPAdapter(max_retries=retry)
         self.session.mount("http://", adapter)
         self.session.mount("https://", adapter)
-        self.server_info = self.session.get(info_url).json()
+        # get morango information about server
+        self.server_info = self.session.get(
+            urljoin(self.base_url, api_urls.INFO)
+        ).json()
         self.capabilities = CAPABILITIES.intersection(
             self.server_info.get("capabilities", [])
         )
 
-    def _request(
-        self,
-        endpoint,
-        method="GET",
-        lookup=None,
-        data={},
-        params={},
-        userargs=None,
-        password=None,
-        data_is_gzipped=False,
-    ):
-        """
-        Generic request method designed to handle any morango endpoint.
-
-        :param endpoint: constant representing which morango endpoint we are querying
-        :param method: HTTP verb/method for request
-        :param lookup: the pk value for the specific object we are querying
-        :param data: dict that will be form-encoded in request
-        :param params: dict to be sent as part of URL's query string
-        :param userargs: Authorization credentials
-        :param password:
-        :return: ``Response`` object from request
-        """
-        # convert user arguments into query str for passing to auth layer
-        if isinstance(userargs, dict):
-            userargs = "&".join(
-                ["{}={}".format(key, val) for (key, val) in iteritems(userargs)]
-            )
-
-        # build up url and send request
+    def urljoin(self, endpoint, lookup=None):
         if lookup:
             lookup = lookup + "/"
         url = urljoin(urljoin(self.base_url, endpoint), lookup)
-        auth = (userargs, password) if userargs else None
-        if data_is_gzipped:
-            resp = self.session.request(
-                method,
-                url,
-                data=data,
-                params=params,
-                auth=auth,
-                headers={"content-type": "application/gzip"},
-            )
-        else:
-            # get requests may fail when including empty data payload
-            if method == "GET":
-                resp = self.session.request(method, url, params=params, auth=auth)
-            else:
-                resp = self.session.request(
-                    method, url, json=data, params=params, auth=auth
-                )
-        resp.raise_for_status()
-        return resp
+        return url
 
     def create_sync_session(self, client_cert, server_cert, chunk_size=500):
         # if server cert does not exist locally, retrieve it from server
         if not Certificate.objects.filter(id=server_cert.id).exists():
-            cert_chain_response = self._get_certificate_chain(server_cert)
+            cert_chain_response = self._get_certificate_chain(
+                params={"ancestors_of": server_cert.id}
+            )
 
             # upon receiving cert chain from server, we attempt to save the chain into our records
             Certificate.save_certificate_chain(
@@ -181,7 +134,7 @@ class NetworkSyncConnection(Connection):
 
         # request the server for a one-time-use nonce
         nonce_resp = self._get_nonce()
-        nonce = json.loads(nonce_resp.content.decode())["id"]
+        nonce = nonce_resp.json()["id"]
 
         # if no hostname then url is actually an ip
         url = urlparse(self.base_url)
@@ -249,8 +202,8 @@ class NetworkSyncConnection(Connection):
     def get_remote_certificates(self, primary_partition, scope_def_id=None):
         remote_certs = []
         # request certs for this primary partition, where the server also has a private key for
-        remote_certs_resp = self._request(
-            api_urls.CERTIFICATE, params={"primary_partition": primary_partition}
+        remote_certs_resp = self._get_certificate_chain(
+            params={"primary_partition": primary_partition}
         )
 
         # inflate remote certs into a list of unsaved models
@@ -279,7 +232,9 @@ class NetworkSyncConnection(Connection):
     ):
         # if server cert does not exist locally, retrieve it from server
         if not Certificate.objects.filter(id=parent_cert.id).exists():
-            cert_chain_response = self._get_certificate_chain(parent_cert)
+            cert_chain_response = self._get_certificate_chain(
+                params={"ancestors_of": parent_cert.id}
+            )
 
             # upon receiving cert chain from server, we attempt to save the chain into our records
             Certificate.save_certificate_chain(
@@ -296,13 +251,7 @@ class NetworkSyncConnection(Connection):
             "scope_params": json.dumps(scope_params),
             "public_key": csr_key.get_public_key_string(),
         }
-        csr_resp = self._request(
-            api_urls.CERTIFICATE,
-            method="POST",
-            data=data,
-            userargs=userargs,
-            password=password,
-        )
+        csr_resp = self._certificate_signing(data, userargs, password)
         csr_data = csr_resp.json()
 
         # verify cert returned from server, and proceed to save into our records
@@ -357,67 +306,68 @@ class NetworkSyncConnection(Connection):
 
     def _get_public_key(self):
         try:
-            return self._request(api_urls.PUBLIC_KEY)
+            return self.session.get(self.urljoin(api_urls.PUBLIC_KEY))
         except requests.exceptions.HTTPError as e:
             if e.response.status_code == 403:
                 raise MorangoServerDoesNotAllowNewCertPush(str(e))
             else:
-                raise
+                raise e
 
     def _get_nonce(self):
-        return self._request(api_urls.NONCE, method="POST")
+        return self.session.post(self.urljoin(api_urls.NONCE))
 
-    def _get_certificate_chain(self, server_cert):
-        # get ancestors certificate chain for this server cert
-        return self._request(
-            api_urls.CERTIFICATE, params={"ancestors_of": server_cert.id}
+    def _get_certificate_chain(self, params):
+        return self.session.get(self.urljoin(api_urls.CERTIFICATE), params=params)
+
+    def _certificate_signing(self, data, userargs, password):
+        # convert user arguments into query str for passing to auth layer
+        if isinstance(userargs, dict):
+            userargs = "&".join(
+                ["{}={}".format(key, val) for (key, val) in iteritems(userargs)]
+            )
+        return self.session.post(
+            self.urljoin(api_urls.CERTIFICATE), json=data, auth=(userargs, password)
         )
 
     def _push_certificate_chain(self, data):
-        # push signed certificate chain to server
-        return self._request(api_urls.CERTIFICATE_CHAIN, method="POST", data=data)
+        return self.session.post(self.urljoin(api_urls.CERTIFICATE_CHAIN), json=data)
 
     def _create_sync_session(self, data):
-        return self._request(api_urls.SYNCSESSION, method="POST", data=data)
+        return self.session.post(self.urljoin(api_urls.SYNCSESSION), json=data)
 
     def _create_transfer_session(self, data):
-        # create transfer session on server
-        return self._request(api_urls.TRANSFERSESSION, method="POST", data=data)
+        return self.session.post(self.urljoin(api_urls.TRANSFERSESSION), json=data)
 
     def _update_transfer_session(self, data, transfer_session):
-        # update transfer session on server side with kwargs
-        return self._request(
-            api_urls.TRANSFERSESSION,
-            method="PATCH",
-            lookup=transfer_session.id,
-            data=data,
+        return self.session.patch(
+            self.urljoin(api_urls.TRANSFERSESSION, lookup=transfer_session.id),
+            json=data,
         )
 
     def _close_transfer_session(self, transfer_session):
-        # "delete" transfer session on server side
-        return self._request(
-            api_urls.TRANSFERSESSION, method="DELETE", lookup=transfer_session.id
+        return self.session.delete(
+            self.urljoin(api_urls.TRANSFERSESSION, lookup=transfer_session.id)
         )
 
     def _close_sync_session(self, sync_session):
-        # "delete" sync session on server side
-        return self._request(
-            api_urls.SYNCSESSION, method="DELETE", lookup=sync_session.id
+        return self.session.delete(
+            self.urljoin(api_urls.SYNCSESSION, lookup=sync_session.id)
         )
 
-    def _push_record_chunk(self, serialized_recs):
-        # push a chunk of records to the server side
-        data = serialized_recs
-        use_gzip = GZIP_BUFFER_POST in self.capabilities
+    def _push_record_chunk(self, data):
         # gzip the data if both client and server have gzipping capabilities
-        if use_gzip:
-            data = json.dumps([dict(el) for el in serialized_recs])
-            data = compress_string(
-                bytes(data.encode("utf-8")), compresslevel=self.compresslevel
+        if GZIP_BUFFER_POST in self.capabilities:
+            json_data = json.dumps([dict(el) for el in data])
+            gzipped_data = compress_string(
+                bytes(json_data.encode("utf-8")), compresslevel=self.compresslevel
             )
-        return self._request(
-            api_urls.BUFFER, method="POST", data=data, data_is_gzipped=use_gzip
-        )
+            return self.session.post(
+                self.urljoin(api_urls.BUFFER),
+                data=gzipped_data,
+                headers={"content-type": "application/gzip"},
+            )
+        else:
+            return self.session.post(self.urljoin(api_urls.BUFFER), json=data)
 
     def _pull_record_chunk(self, chunk_size, transfer_session):
         # pull records from server for given transfer session
@@ -426,7 +376,7 @@ class NetworkSyncConnection(Connection):
             "offset": transfer_session.records_transferred,
             "transfer_session_id": transfer_session.id,
         }
-        return self._request(api_urls.BUFFER, params=params)
+        return self.session.get(self.urljoin(api_urls.BUFFER), params=params)
 
 
 class SyncClient(object):
@@ -463,7 +413,7 @@ class SyncClient(object):
         )
 
         logger.info("Beginning pushing of data...")
-        self._push_records(chunk_size=self.chunk_size)
+        self._push_records()
         logger.info("Completed push of data")
 
         # upon successful completion of pushing records, proceed to delete buffered records
@@ -492,7 +442,7 @@ class SyncClient(object):
         )
         # pull records and close transfer session upon completion
         logger.info("Beginning pulling of data...")
-        self._pull_records(chunk_size=self.chunk_size)
+        self._pull_records()
         logger.info("Completed pull of data")
         _dequeue_into_store(self.current_transfer_session)
 
@@ -503,13 +453,13 @@ class SyncClient(object):
 
         self._close_transfer_session()
 
-    def _pull_records(self, chunk_size=500, callback=None):
+    def _pull_records(self, callback=None):
         while (
             self.current_transfer_session.records_transferred
             < self.current_transfer_session.records_total
         ):
             buffers_resp = self.sync_connection._pull_record_chunk(
-                chunk_size, self.current_transfer_session
+                self.chunk_size, self.current_transfer_session
             )
 
             # load the returned data from JSON
@@ -546,12 +496,12 @@ class SyncClient(object):
                 )
             )
 
-    def _push_records(self, chunk_size=500, callback=None):
+    def _push_records(self, callback=None):
         # paginate buffered records so we do not load them all into memory
         buffered_records = Buffer.objects.filter(
             transfer_session=self.current_transfer_session
         ).order_by("pk")
-        buffered_pages = Paginator(buffered_records, chunk_size)
+        buffered_pages = Paginator(buffered_records, self.chunk_size)
         for count in buffered_pages.page_range:
 
             # serialize and send records to server
@@ -559,11 +509,16 @@ class SyncClient(object):
                 buffered_pages.page(count).object_list, many=True
             )
             self.sync_connection._push_record_chunk(serialized_recs.data)
-            data_size = len(serialized_recs.data)
             # update records_transferred upon successful request
-            self.current_transfer_session.records_transferred += (
-                data_size if data_size < chunk_size else chunk_size
-            )
+            self.current_transfer_session.records_transferred += self.chunk_size
+            # ensure records transferred does not go over total records
+            if (
+                self.current_transfer_session.records_transferred
+                > self.current_transfer_session.records_total
+            ):
+                self.current_transfer_session.records_transferred = (
+                    self.current_transfer_session.records_total
+                )
             self.current_transfer_session.save()
             logger.info(
                 "Sent {}/{} records".format(
@@ -585,6 +540,8 @@ class SyncClient(object):
         self.sync_session.active = False
         self.sync_session.save()
         self.sync_session = None
+        # close adapters on requests session object
+        self.sync_connection.session.close()
 
     def _create_transfer_session(self, push, filter):
 
