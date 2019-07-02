@@ -131,6 +131,7 @@ class RecordMaxCounterBufferSerializer(serializers.ModelSerializer):
     class Meta:
         model = RecordMaxCounterBuffer
         fields = ("transfer_session", "model_uuid", "instance_id", "counter")
+        read_only_fields = fields
 
 
 class BufferSerializer(serializers.ModelSerializer):
@@ -154,3 +155,4 @@ class BufferSerializer(serializers.ModelSerializer):
             "rmcb_list",
             "_self_ref_fk",
         )
+        read_only_fields = fields
