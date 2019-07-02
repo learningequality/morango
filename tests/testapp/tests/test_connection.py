@@ -13,6 +13,7 @@ from morango.api.serializers import CertificateSerializer
 from morango.certificates import Certificate
 from morango.certificates import Key
 from morango.certificates import ScopeDefinition
+from morango.constants.capabilities import ALLOW_CERTIFICATE_PUSHING
 from morango.controller import MorangoProfileController
 from morango.crypto import SharedKey
 from morango.errors import CertificateSignatureInvalid
@@ -141,6 +142,7 @@ class NetworkSyncConnectionTestCase(LiveServerTestCase):
 
     @override_settings(ALLOW_CERTIFICATE_PUSHING=True)
     def test_push_signed_client_certificate_chain(self):
+        self.network_connection.capabilities = [ALLOW_CERTIFICATE_PUSHING]
         cert = self.network_connection.push_signed_client_certificate_chain(
             self.root_cert,
             self.subset_scope_def.id,
@@ -151,6 +153,7 @@ class NetworkSyncConnectionTestCase(LiveServerTestCase):
 
     @override_settings(ALLOW_CERTIFICATE_PUSHING=True)
     def test_push_signed_client_certificate_chain_publickey_error(self):
+        self.network_connection.capabilities = [ALLOW_CERTIFICATE_PUSHING]
         with mock.patch.object(NetworkSyncConnection, "_get_public_key"):
             NetworkSyncConnection._get_public_key.return_value.json.return_value = [
                 {"public_key": Key().get_public_key_string()}
@@ -165,6 +168,7 @@ class NetworkSyncConnectionTestCase(LiveServerTestCase):
 
     @override_settings(ALLOW_CERTIFICATE_PUSHING=True)
     def test_push_signed_client_certificate_chain_bad_cert(self):
+        self.network_connection.capabilities = [ALLOW_CERTIFICATE_PUSHING]
         with self.assertRaises(HTTPError) as e:
             self.network_connection.push_signed_client_certificate_chain(
                 self.root_cert, self.subset_scope_def.id, {"bad": "scope_params"}
@@ -174,6 +178,7 @@ class NetworkSyncConnectionTestCase(LiveServerTestCase):
     @override_settings(ALLOW_CERTIFICATE_PUSHING=True)
     @mock.patch.object(NetworkSyncConnection, "_get_nonce")
     def test_push_signed_client_certificate_chain_nonce_error(self, mock_nonce):
+        self.network_connection.capabilities = [ALLOW_CERTIFICATE_PUSHING]
         mock_nonce.return_value.json.return_value = {"id": uuid.uuid4().hex}
         with self.assertRaises(HTTPError) as e:
             self.network_connection.push_signed_client_certificate_chain(
@@ -260,7 +265,7 @@ class SyncClientTestCase(LiveServerTestCase):
         self.assertEqual(
             self.syncclient.current_transfer_session.records_transferred, 0
         )
-        self.syncclient._push_records(chunk_size=self.chunk_size)
+        self.syncclient._push_records()
         self.assertEqual(
             self.syncclient.current_transfer_session.records_transferred,
             self.chunk_size,
@@ -284,7 +289,7 @@ class SyncClientTestCase(LiveServerTestCase):
         self.assertEqual(
             self.syncclient.current_transfer_session.records_transferred, 0
         )
-        self.syncclient._pull_records(chunk_size=self.chunk_size)
+        self.syncclient._pull_records()
         self.assertEqual(
             Buffer.objects.filter(
                 transfer_session=self.syncclient.current_transfer_session

@@ -4,7 +4,6 @@ import socket
 import uuid
 from io import BytesIO
 
-import requests
 from django.conf import settings
 from django.core.paginator import Paginator
 from django.utils import timezone
@@ -22,6 +21,7 @@ from morango.certificates import Certificate
 from morango.certificates import Filter
 from morango.certificates import Key
 from morango.constants import api_urls
+from morango.constants.capabilities import ALLOW_CERTIFICATE_PUSHING
 from morango.constants.capabilities import GZIP_BUFFER_POST
 from morango.errors import CertificateSignatureInvalid
 from morango.errors import MorangoError
@@ -110,9 +110,7 @@ class NetworkSyncConnection(Connection):
         self.server_info = self.session.get(
             urljoin(self.base_url, api_urls.INFO)
         ).json()
-        self.capabilities = CAPABILITIES.intersection(
-            self.server_info.get("capabilities", [])
-        )
+        self.capabilities = self.server_info.get("capabilities", [])
 
     def urljoin(self, endpoint, lookup=None):
         if lookup:
@@ -266,6 +264,11 @@ class NetworkSyncConnection(Connection):
     def push_signed_client_certificate_chain(
         self, local_parent_cert, scope_definition_id, scope_params
     ):
+        if ALLOW_CERTIFICATE_PUSHING not in self.capabilities:
+            raise MorangoServerDoesNotAllowNewCertPush(
+                "Server does not allow certificate pushing"
+            )
+
         # grab shared public key of server
         publickey_response = self._get_public_key()
 
@@ -305,13 +308,7 @@ class NetworkSyncConnection(Connection):
         return certificate
 
     def _get_public_key(self):
-        try:
-            return self.session.get(self.urljoin(api_urls.PUBLIC_KEY))
-        except requests.exceptions.HTTPError as e:
-            if e.response.status_code == 403:
-                raise MorangoServerDoesNotAllowNewCertPush(str(e))
-            else:
-                raise e
+        return self.session.get(self.urljoin(api_urls.PUBLIC_KEY))
 
     def _get_nonce(self):
         return self.session.post(self.urljoin(api_urls.NONCE))
@@ -356,7 +353,7 @@ class NetworkSyncConnection(Connection):
 
     def _push_record_chunk(self, data):
         # gzip the data if both client and server have gzipping capabilities
-        if GZIP_BUFFER_POST in self.capabilities:
+        if GZIP_BUFFER_POST in self.capabilities and GZIP_BUFFER_POST in CAPABILITIES:
             json_data = json.dumps([dict(el) for el in data])
             gzipped_data = compress_string(
                 bytes(json_data.encode("utf-8")), compresslevel=self.compresslevel
