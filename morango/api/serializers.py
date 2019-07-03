@@ -103,12 +103,7 @@ class TransferSessionSerializer(serializers.ModelSerializer):
             "server_fsic",
             "client_fsic",
         )
-        read_only_fields = (
-            "start_timestamp",
-            "last_activity_timestamp",
-            "active",
-            "records_transferred",
-        )
+        read_only_fields = ("start_timestamp", "last_activity_timestamp", "active")
 
 
 class InstanceIDSerializer(serializers.ModelSerializer):
