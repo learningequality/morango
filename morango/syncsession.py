@@ -112,7 +112,7 @@ class NetworkSyncConnection(Connection):
         ).json()
         self.capabilities = self.server_info.get("capabilities", [])
 
-    def urljoin(self, endpoint, lookup=None):
+    def urlresolve(self, endpoint, lookup=None):
         if lookup:
             lookup = lookup + "/"
         url = urljoin(urljoin(self.base_url, endpoint), lookup)
@@ -308,13 +308,13 @@ class NetworkSyncConnection(Connection):
         return certificate
 
     def _get_public_key(self):
-        return self.session.get(self.urljoin(api_urls.PUBLIC_KEY))
+        return self.session.get(self.urlresolve(api_urls.PUBLIC_KEY))
 
     def _get_nonce(self):
-        return self.session.post(self.urljoin(api_urls.NONCE))
+        return self.session.post(self.urlresolve(api_urls.NONCE))
 
     def _get_certificate_chain(self, params):
-        return self.session.get(self.urljoin(api_urls.CERTIFICATE), params=params)
+        return self.session.get(self.urlresolve(api_urls.CERTIFICATE), params=params)
 
     def _certificate_signing(self, data, userargs, password):
         # convert user arguments into query str for passing to auth layer
@@ -323,32 +323,32 @@ class NetworkSyncConnection(Connection):
                 ["{}={}".format(key, val) for (key, val) in iteritems(userargs)]
             )
         return self.session.post(
-            self.urljoin(api_urls.CERTIFICATE), json=data, auth=(userargs, password)
+            self.urlresolve(api_urls.CERTIFICATE), json=data, auth=(userargs, password)
         )
 
     def _push_certificate_chain(self, data):
-        return self.session.post(self.urljoin(api_urls.CERTIFICATE_CHAIN), json=data)
+        return self.session.post(self.urlresolve(api_urls.CERTIFICATE_CHAIN), json=data)
 
     def _create_sync_session(self, data):
-        return self.session.post(self.urljoin(api_urls.SYNCSESSION), json=data)
+        return self.session.post(self.urlresolve(api_urls.SYNCSESSION), json=data)
 
     def _create_transfer_session(self, data):
-        return self.session.post(self.urljoin(api_urls.TRANSFERSESSION), json=data)
+        return self.session.post(self.urlresolve(api_urls.TRANSFERSESSION), json=data)
 
     def _update_transfer_session(self, data, transfer_session):
         return self.session.patch(
-            self.urljoin(api_urls.TRANSFERSESSION, lookup=transfer_session.id),
+            self.urlresolve(api_urls.TRANSFERSESSION, lookup=transfer_session.id),
             json=data,
         )
 
     def _close_transfer_session(self, transfer_session):
         return self.session.delete(
-            self.urljoin(api_urls.TRANSFERSESSION, lookup=transfer_session.id)
+            self.urlresolve(api_urls.TRANSFERSESSION, lookup=transfer_session.id)
         )
 
     def _close_sync_session(self, sync_session):
         return self.session.delete(
-            self.urljoin(api_urls.SYNCSESSION, lookup=sync_session.id)
+            self.urlresolve(api_urls.SYNCSESSION, lookup=sync_session.id)
         )
 
     def _push_record_chunk(self, data):
@@ -359,12 +359,12 @@ class NetworkSyncConnection(Connection):
                 bytes(json_data.encode("utf-8")), compresslevel=self.compresslevel
             )
             return self.session.post(
-                self.urljoin(api_urls.BUFFER),
+                self.urlresolve(api_urls.BUFFER),
                 data=gzipped_data,
                 headers={"content-type": "application/gzip"},
             )
         else:
-            return self.session.post(self.urljoin(api_urls.BUFFER), json=data)
+            return self.session.post(self.urlresolve(api_urls.BUFFER), json=data)
 
     def _pull_record_chunk(self, chunk_size, transfer_session):
         # pull records from server for given transfer session
@@ -373,7 +373,7 @@ class NetworkSyncConnection(Connection):
             "offset": transfer_session.records_transferred,
             "transfer_session_id": transfer_session.id,
         }
-        return self.session.get(self.urljoin(api_urls.BUFFER), params=params)
+        return self.session.get(self.urlresolve(api_urls.BUFFER), params=params)
 
 
 class SyncClient(object):
@@ -507,15 +507,10 @@ class SyncClient(object):
             )
             self.sync_connection._push_record_chunk(serialized_recs.data)
             # update records_transferred upon successful request
-            self.current_transfer_session.records_transferred += self.chunk_size
-            # ensure records transferred does not go over total records
-            if (
-                self.current_transfer_session.records_transferred
-                > self.current_transfer_session.records_total
-            ):
-                self.current_transfer_session.records_transferred = (
-                    self.current_transfer_session.records_total
-                )
+            self.current_transfer_session.records_transferred = min(
+                self.current_transfer_session.records_transferred + self.chunk_size,
+                self.current_transfer_session.records_total,
+            )
             self.current_transfer_session.save()
             logger.info(
                 "Sent {}/{} records".format(
