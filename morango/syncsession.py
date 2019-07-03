@@ -486,6 +486,13 @@ class SyncClient(object):
                 )
 
             validate_and_create_buffer_data(data, self.current_transfer_session)
+            # update the records transferred so client and server are in agreement
+            self.sync_connection._update_transfer_session(
+                {
+                    "records_transferred": self.current_transfer_session.records_transferred
+                },
+                self.current_transfer_session,
+            )
             logger.info(
                 "Received {}/{} records".format(
                     self.current_transfer_session.records_transferred,
