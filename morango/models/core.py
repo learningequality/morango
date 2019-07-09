@@ -24,15 +24,16 @@ from django.db.models.functions import Cast
 from django.utils import six
 from django.utils import timezone
 
+from .. import proquint
+from ..registry import syncable_models
 from .certificates import Certificate
 from .certificates import Filter
+from .fields.uuids import sha2_uuid
+from .fields.uuids import UUIDField
+from .fields.uuids import UUIDModelMixin
 from .manager import SyncableModelManager
-from .utils import proquint
-from .utils.uuids import sha2_uuid
-from .utils.uuids import UUIDField
-from .utils.uuids import UUIDModelMixin
-from morango.utils.morango_mptt import MorangoMPTTModel
-from morango.utils.register_models import _profile_models
+from .morango_mptt import MorangoMPTTModel
+
 
 logger = logging.getLogger(__name__)
 
@@ -330,7 +331,7 @@ class Store(AbstractStore):
         None => if the model was deleted successfully
         model => if the model validates successfully
         """
-        klass_model = _profile_models[self.profile][self.model_name]
+        klass_model = syncable_models.get_model(self.profile, self.model_name)
         # if store model marked as deleted, attempt to delete in app layer
         if self.deleted:
             # if hard deleted, propagate to related models

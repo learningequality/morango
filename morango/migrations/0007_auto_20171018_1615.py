@@ -10,7 +10,7 @@ from django.db import migrations
 from django.db import models
 from django.utils.timezone import utc
 
-import morango.utils.uuids
+import morango.models.fields.uuids
 
 
 class Migration(migrations.Migration):
@@ -23,7 +23,7 @@ class Migration(migrations.Migration):
             fields=[
                 (
                     "id",
-                    morango.utils.uuids.UUIDField(
+                    morango.models.fields.uuids.UUIDField(
                         editable=False, primary_key=True, serialize=False
                     ),
                 ),
@@ -210,12 +210,12 @@ class Migration(migrations.Migration):
         migrations.AlterField(
             model_name="syncsession",
             name="id",
-            field=morango.utils.uuids.UUIDField(primary_key=True, serialize=False),
+            field=morango.models.fields.uuids.UUIDField(primary_key=True, serialize=False),
         ),
         migrations.AlterField(
             model_name="transfersession",
             name="id",
-            field=morango.utils.uuids.UUIDField(primary_key=True, serialize=False),
+            field=morango.models.fields.uuids.UUIDField(primary_key=True, serialize=False),
         ),
         migrations.AlterField(
             model_name="transfersession",

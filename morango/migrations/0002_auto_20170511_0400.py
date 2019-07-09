@@ -6,7 +6,7 @@ import django.db.models.manager
 from django.db import migrations
 from django.db import models
 
-import morango.utils.uuids
+import morango.models.fields.uuids
 
 
 class Migration(migrations.Migration):
@@ -32,38 +32,38 @@ class Migration(migrations.Migration):
         migrations.AlterField(
             model_name="buffer",
             name="last_saved_instance",
-            field=morango.utils.uuids.UUIDField(),
+            field=morango.models.fields.uuids.UUIDField(),
         ),
         migrations.AlterField(
             model_name="certificate",
             name="id",
-            field=morango.utils.uuids.UUIDField(
+            field=morango.models.fields.uuids.UUIDField(
                 editable=False, primary_key=True, serialize=False
             ),
         ),
         migrations.AlterField(
             model_name="databaseidmodel",
             name="id",
-            field=morango.utils.uuids.UUIDField(
+            field=morango.models.fields.uuids.UUIDField(
                 editable=False, primary_key=True, serialize=False
             ),
         ),
         migrations.AlterField(
             model_name="instanceidmodel",
             name="id",
-            field=morango.utils.uuids.UUIDField(
+            field=morango.models.fields.uuids.UUIDField(
                 editable=False, primary_key=True, serialize=False
             ),
         ),
         migrations.AlterField(
             model_name="store",
             name="last_saved_instance",
-            field=morango.utils.uuids.UUIDField(),
+            field=morango.models.fields.uuids.UUIDField(),
         ),
         migrations.AlterField(
             model_name="trustedkey",
             name="id",
-            field=morango.utils.uuids.UUIDField(
+            field=morango.models.fields.uuids.UUIDField(
                 editable=False, primary_key=True, serialize=False
             ),
         ),

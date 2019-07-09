@@ -4,7 +4,7 @@ from __future__ import unicode_literals
 
 from django.db import migrations
 
-import morango.crypto
+import morango.models.fields.crypto
 
 
 class Migration(migrations.Migration):
@@ -18,7 +18,7 @@ class Migration(migrations.Migration):
         migrations.AlterField(
             model_name="certificate",
             name="_private_key",
-            field=morango.crypto.PrivateKeyField(
+            field=morango.models.fields.crypto.PrivateKeyField(
                 blank=True, db_column="private_key", null=True
             ),
         ),

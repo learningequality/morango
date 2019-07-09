@@ -1,10 +1,10 @@
 from django.db import connection
 
-from morango.models import Buffer
-from morango.models import RecordMaxCounter
-from morango.models import RecordMaxCounterBuffer
-from morango.models import Store
-from morango.utils.backends.base import BaseSQLWrapper
+from .base import BaseSQLWrapper
+from morango.models.core import Buffer
+from morango.models.core import RecordMaxCounter
+from morango.models.core import RecordMaxCounterBuffer
+from morango.models.core import Store
 
 
 class SQLWrapper(BaseSQLWrapper):

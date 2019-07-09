@@ -4,7 +4,7 @@ from __future__ import unicode_literals
 
 from django.db import migrations
 
-import morango.utils.uuids
+import morango.models.fields.uuids
 
 
 class Migration(migrations.Migration):
@@ -15,6 +15,6 @@ class Migration(migrations.Migration):
         migrations.AlterField(
             model_name="recordmaxcounterbuffer",
             name="model_uuid",
-            field=morango.utils.uuids.UUIDField(db_index=True),
+            field=morango.models.fields.uuids.UUIDField(db_index=True),
         )
     ]

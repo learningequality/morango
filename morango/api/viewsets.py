@@ -16,25 +16,24 @@ from rest_framework.parsers import JSONParser
 import morango
 from . import permissions
 from . import serializers
-from .. import certificates
 from .. import errors
-from .. import models
-from ..models import TransferSession
+from ..models import certificates
+from ..models import core
 from morango.constants.capabilities import GZIP_BUFFER_POST
-from morango.crypto import SharedKey
-from morango.models import Buffer
-from morango.models import DatabaseMaxCounter
-from morango.models import InstanceIDModel
-from morango.models import RecordMaxCounterBuffer
-from morango.util import CAPABILITIES
-from morango.utils.sync_utils import _dequeue_into_store
-from morango.utils.sync_utils import _queue_into_buffer
-from morango.utils.sync_utils import _serialize_into_store
-from morango.validation import validate_and_create_buffer_data
+from morango.models.core import Buffer
+from morango.models.core import DatabaseMaxCounter
+from morango.models.core import InstanceIDModel
+from morango.models.core import RecordMaxCounterBuffer
+from morango.models.fields.crypto import SharedKey
+from morango.sync.operations import _dequeue_into_store
+from morango.sync.operations import _queue_into_buffer
+from morango.sync.operations import _serialize_into_store
+from morango.sync.utils import validate_and_create_buffer_data
+from morango.utils import CAPABILITIES
 
 
 if GZIP_BUFFER_POST in CAPABILITIES:
-    from morango.parsers import GzipParser
+    from .parsers import GzipParser
 
     parsers = (GzipParser, JSONParser)
 else:
@@ -51,7 +50,7 @@ class CertificateChainViewSet(viewsets.ViewSet):
 
         # verify the rest of the cert chain
         try:
-            models.Certificate.save_certificate_chain(cert_chain)
+            core.Certificate.save_certificate_chain(cert_chain)
         except (AssertionError, errors.MorangoCertificateError) as e:
             return response.Response(
                 "Saving certificate chain has failed: {}".format(str(e)),
@@ -59,7 +58,7 @@ class CertificateChainViewSet(viewsets.ViewSet):
             )
 
         # create an in-memory instance of the cert from the serialized data and signature
-        certificate = models.Certificate.deserialize(
+        certificate = core.Certificate.deserialize(
             client_cert["serialized"], client_cert["signature"]
         )
 
@@ -117,7 +116,7 @@ class CertificateViewSet(viewsets.ModelViewSet):
         if serialized_cert.is_valid():
 
             # inflate the provided data into an actual in-memory certificate
-            certificate = models.Certificate(**serialized_cert.validated_data)
+            certificate = core.Certificate(**serialized_cert.validated_data)
 
             # add a salt, ID and signature to the certificate
             certificate.salt = uuid.uuid4().hex
@@ -162,7 +161,7 @@ class CertificateViewSet(viewsets.ModelViewSet):
 
         params = self.request.query_params
 
-        base_queryset = models.Certificate.objects
+        base_queryset = core.Certificate.objects
 
         # filter by profile, if requested
         if "profile" in params:
@@ -184,7 +183,7 @@ class CertificateViewSet(viewsets.ModelViewSet):
                 )
                 return target_cert.get_ancestors(include_self=True)
 
-        except models.Certificate.DoesNotExist:
+        except core.Certificate.DoesNotExist:
             # if the target_cert can't be found, just return an empty queryset
             return base_queryset.none()
 
@@ -210,11 +209,11 @@ class SyncSessionViewSet(viewsets.ModelViewSet):
 
     def create(self, request):
 
-        instance_id, _ = models.InstanceIDModel.get_or_create_current_instance()
+        instance_id, _ = core.InstanceIDModel.get_or_create_current_instance()
 
         # verify and save the certificate chain to our cert store
         try:
-            models.Certificate.save_certificate_chain(
+            core.Certificate.save_certificate_chain(
                 request.data.get("certificate_chain"),
                 expected_last_id=request.data.get("client_certificate_id"),
             )
@@ -225,13 +224,13 @@ class SyncSessionViewSet(viewsets.ModelViewSet):
 
         # attempt to load the requested certificates
         try:
-            server_cert = models.Certificate.objects.get(
+            server_cert = core.Certificate.objects.get(
                 id=request.data.get("server_certificate_id")
             )
-            client_cert = models.Certificate.objects.get(
+            client_cert = core.Certificate.objects.get(
                 id=request.data.get("client_certificate_id")
             )
-        except models.Certificate.DoesNotExist:
+        except core.Certificate.DoesNotExist:
             return response.Response(
                 "Requested certificate does not exist!",
                 status=status.HTTP_400_BAD_REQUEST,
@@ -281,7 +280,7 @@ class SyncSessionViewSet(viewsets.ModelViewSet):
             ),
         }
 
-        syncsession = models.SyncSession(**data)
+        syncsession = core.SyncSession(**data)
         syncsession.full_clean()
         syncsession.save()
 
@@ -297,7 +296,7 @@ class SyncSessionViewSet(viewsets.ModelViewSet):
         syncsession.save()
 
     def get_queryset(self):
-        return models.SyncSession.objects.filter(active=True)
+        return core.SyncSession.objects.filter(active=True)
 
 
 class TransferSessionViewSet(viewsets.ModelViewSet):
@@ -308,10 +307,10 @@ class TransferSessionViewSet(viewsets.ModelViewSet):
 
         # attempt to load the requested syncsession
         try:
-            syncsession = models.SyncSession.objects.filter(active=True).get(
+            syncsession = core.SyncSession.objects.filter(active=True).get(
                 id=request.data.get("sync_session_id")
             )
-        except models.SyncSession.DoesNotExist:
+        except core.SyncSession.DoesNotExist:
             return response.Response(
                 "Requested syncsession does not exist or is no longer active!",
                 status=status.HTTP_400_BAD_REQUEST,
@@ -352,7 +351,7 @@ class TransferSessionViewSet(viewsets.ModelViewSet):
             "server_fsic": "{}",
         }
 
-        transfersession = models.TransferSession(**data)
+        transfersession = core.TransferSession(**data)
         transfersession.full_clean()
         transfersession.save()
 
@@ -404,7 +403,7 @@ class TransferSessionViewSet(viewsets.ModelViewSet):
         transfersession.save()
 
     def get_queryset(self):
-        return models.TransferSession.objects.filter(active=True)
+        return core.TransferSession.objects.filter(active=True)
 
 
 class BufferViewSet(mixins.ListModelMixin, viewsets.GenericViewSet):
@@ -416,7 +415,7 @@ class BufferViewSet(mixins.ListModelMixin, viewsets.GenericViewSet):
     def create(self, request):
         data = request.data if isinstance(request.data, list) else [request.data]
         # ensure the transfer session allows pushes, and is same across records
-        transfer_session = TransferSession.objects.get(id=data[0]["transfer_session"])
+        transfer_session = core.TransferSession.objects.get(id=data[0]["transfer_session"])
         if not transfer_session.push:
             return response.Response(
                 "Specified TransferSession does not allow pushes.",
@@ -435,7 +434,7 @@ class BufferViewSet(mixins.ListModelMixin, viewsets.GenericViewSet):
 
         session_id = self.request.query_params["transfer_session_id"]
 
-        return models.Buffer.objects.filter(transfer_session_id=session_id)
+        return core.Buffer.objects.filter(transfer_session_id=session_id)
 
 
 class MorangoInfoViewSet(viewsets.ViewSet):

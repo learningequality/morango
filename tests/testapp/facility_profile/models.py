@@ -2,15 +2,16 @@ from __future__ import unicode_literals
 
 import uuid
 
-from django.contrib.auth.models import AbstractBaseUser, UserManager
+from django.contrib.auth.models import AbstractBaseUser
+from django.contrib.auth.models import UserManager
 from django.db import models
 from django.utils import timezone
-from morango.manager import SyncableModelManager
-from morango.models import SyncableModel
-from morango.query import SyncableModelQuerySet
-from morango.utils.morango_mptt import MorangoMPTTModel
-from morango.utils.uuids import UUIDField
 from mptt.models import TreeForeignKey
+
+from morango.models.core import SyncableModel
+from morango.models.fields.uuids import UUIDField
+from morango.models.manager import SyncableModelManager
+from morango.models.morango_mptt import MorangoMPTTModel
 
 
 class FacilityDataSyncableModel(SyncableModel):
@@ -108,6 +109,7 @@ class ProxyParent(MorangoMPTTModel):
 
     def calculate_partition(self, *args, **kwargs):
         return ''
+
 
 class ProxyManager(models.Manager):
     pass

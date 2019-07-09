@@ -11,18 +11,19 @@ from django.db.models import Q
 from django.db.models import signals
 from django.utils import six
 
-from morango.certificates import Filter
-from morango.models import Buffer
-from morango.models import DatabaseMaxCounter
-from morango.models import DeletedModels
-from morango.models import HardDeletedModels
-from morango.models import InstanceIDModel
-from morango.models import RecordMaxCounter
-from morango.models import RecordMaxCounterBuffer
-from morango.models import Store
-from morango.util import mute_signals
-from morango.utils.backends.utils import load_backend
-from morango.utils.register_models import _profile_models
+from .backends.utils import load_backend
+from .utils import mute_signals
+from morango.models.certificates import Filter
+from morango.models.core import Buffer
+from morango.models.core import DatabaseMaxCounter
+from morango.models.core import DeletedModels
+from morango.models.core import HardDeletedModels
+from morango.models.core import InstanceIDModel
+from morango.models.core import RecordMaxCounter
+from morango.models.core import RecordMaxCounterBuffer
+from morango.models.core import Store
+from morango.registry import syncable_models
+
 
 logger = logging.getLogger(__name__)
 
@@ -34,13 +35,13 @@ def _join_with_logical_operator(lst, operator):
     return "(({items}))".format(items=op.join(lst))
 
 
-def _self_referential_fk(klass_model):
+def _self_referential_fk(model):
     """
     Return whether this model has a self ref FK, and the name for the field
     """
-    for f in klass_model._meta.concrete_fields:
+    for f in model._meta.concrete_fields:
         if f.related_model:
-            if issubclass(klass_model, f.related_model):
+            if issubclass(model, f.related_model):
                 return f.attname
     return None
 
@@ -79,11 +80,10 @@ def _serialize_into_store(profile, filter=None):
             )
 
         # filter through all models with the dirty bit turned on
-        syncable_dict = _profile_models[profile]
-        for (_, klass_model) in six.iteritems(syncable_dict):
+        for model in syncable_models.get_models(profile):
             new_store_records = []
             new_rmc_records = []
-            klass_queryset = klass_model.objects.filter(_morango_dirty_bit=True)
+            klass_queryset = model.objects.filter(_morango_dirty_bit=True)
             if prefix_condition:
                 klass_queryset = klass_queryset.filter(prefix_condition)
             store_records_dict = Store.objects.in_bulk(
@@ -136,7 +136,7 @@ def _serialize_into_store(profile, filter=None):
                         "source_id": app_model._morango_source_id,
                     }
                     # check if model has FK pointing to it and add the value to a field on the store
-                    self_ref_fk = _self_referential_fk(klass_model)
+                    self_ref_fk = _self_referential_fk(model)
                     if self_ref_fk:
                         self_ref_fk_value = getattr(app_model, self_ref_fk)
                         kwargs.update({"_self_ref_fk": self_ref_fk_value or ""})
@@ -228,14 +228,13 @@ def _deserialize_from_store(profile):
     logger.info("Deserializing records")
     fk_cache = {}
     with transaction.atomic():
-        syncable_dict = _profile_models[profile]
         excluded_list = []
         # iterate through classes which are in foreign key dependency order
-        for model_name, klass_model in six.iteritems(syncable_dict):
+        for model in syncable_models.get_models(profile):
             # handle cases where a class has a single FK reference to itself
-            self_ref_fk = _self_referential_fk(klass_model)
-            query = Q(model_name=klass_model.morango_model_name)
-            for klass in klass_model.morango_model_dependencies:
+            self_ref_fk = _self_referential_fk(model)
+            query = Q(model_name=model.morango_model_name)
+            for klass in model.morango_model_dependencies:
                 query |= Q(model_name=klass.morango_model_name)
             if self_ref_fk:
                 clean_parents = (
@@ -276,9 +275,9 @@ def _deserialize_from_store(profile):
             else:
                 # array for holding db values from the fields of each model for this class
                 db_values = []
-                fields = klass_model._meta.fields
+                fields = model._meta.fields
                 for store_model in Store.objects.filter(
-                    model_name=model_name, profile=profile, dirty_bit=True
+                    model_name=model.morango_model_name, profile=profile, dirty_bit=True
                 ):
                     try:
                         app_model = store_model._deserialize_store_model(fk_cache)
@@ -304,7 +303,7 @@ def _deserialize_from_store(profile):
                     with connection.cursor() as cursor:
                         DBBackend._bulk_insert_into_app_models(
                             cursor,
-                            klass_model._meta.db_table,
+                            model._meta.db_table,
                             fields,
                             db_values,
                             placeholder_list,

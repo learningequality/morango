@@ -10,21 +10,21 @@ from requests.exceptions import HTTPError
 
 from morango.api.serializers import BufferSerializer
 from morango.api.serializers import CertificateSerializer
-from morango.certificates import Certificate
-from morango.certificates import Key
-from morango.certificates import ScopeDefinition
 from morango.constants.capabilities import ALLOW_CERTIFICATE_PUSHING
-from morango.controller import MorangoProfileController
-from morango.crypto import SharedKey
 from morango.errors import CertificateSignatureInvalid
 from morango.errors import MorangoServerDoesNotAllowNewCertPush
-from morango.models import Buffer
-from morango.models import InstanceIDModel
-from morango.models import SyncSession
-from morango.models import TransferSession
-from morango.session import SessionWrapper
-from morango.syncsession import NetworkSyncConnection
-from morango.syncsession import SyncClient
+from morango.models.certificates import Certificate
+from morango.models.certificates import Key
+from morango.models.certificates import ScopeDefinition
+from morango.models.core import Buffer
+from morango.models.core import InstanceIDModel
+from morango.models.core import SyncSession
+from morango.models.core import TransferSession
+from morango.models.fields.crypto import SharedKey
+from morango.sync.controller import MorangoProfileController
+from morango.sync.session import SessionWrapper
+from morango.sync.syncsession import NetworkSyncConnection
+from morango.sync.syncsession import SyncClient
 
 
 def mock_patch_decorator(func):

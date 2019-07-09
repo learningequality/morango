@@ -1,7 +1,7 @@
 # coding=utf-8
 import unittest
 
-from morango import crypto
+from morango.models.fields import crypto
 
 
 class CrossKeySigVerificationMixin(object):

@@ -1,33 +1,31 @@
 import base64
 import json
-import mock
 import sys
 import uuid
 
+import mock
 from django.core.urlresolvers import reverse
+from django.test.utils import override_settings
 from django.utils import timezone
-
+from facility_profile.models import MyUser
 from rest_framework.test import APITestCase as BaseTestCase
 
-from django.test.utils import override_settings
 from morango.api.serializers import BufferSerializer
 from morango.api.serializers import CertificateSerializer
 from morango.api.serializers import InstanceIDSerializer
-from morango.certificates import Certificate
-from morango.certificates import Key
-from morango.certificates import Nonce
-from morango.certificates import ScopeDefinition
-from morango.crypto import SharedKey
-from morango.models import Buffer
-from morango.models import InstanceIDModel
-from morango.models import RecordMaxCounterBuffer
-from morango.models import SyncSession
-from morango.models import TransferSession
-from morango.utils.register_models import _profile_models
-from morango.validation import validate_and_create_buffer_data
-
-from facility_profile.models import MyUser
-from morango.syncsession import compress_string
+from morango.models.certificates import Certificate
+from morango.models.certificates import Key
+from morango.models.certificates import Nonce
+from morango.models.certificates import ScopeDefinition
+from morango.models.core import Buffer
+from morango.models.core import InstanceIDModel
+from morango.models.core import RecordMaxCounterBuffer
+from morango.models.core import SyncSession
+from morango.models.core import TransferSession
+from morango.models.fields.crypto import SharedKey
+from morango.registry import syncable_models
+from morango.sync.syncsession import compress_string
+from morango.sync.utils import validate_and_create_buffer_data
 
 
 # A weird hack because of http://bugs.python.org/issue17866
@@ -565,7 +563,7 @@ class TransferSessionEndpointTestCase(CertificateTestCaseMixin, APITestCase):
 
     def test_transfersession_creation_fails_for_push_when_filter_not_in_client_write_scope(self):
 
-        response = self.make_transfersession_creation_request(
+        self.make_transfersession_creation_request(
             filter=str(self.root_cert1_with_key.get_scope().read_filter),
             push=True,
             expected_status=403,
@@ -579,7 +577,7 @@ class TransferSessionEndpointTestCase(CertificateTestCaseMixin, APITestCase):
             server_certificate=self.sub_subset_cert1_with_key,
         )
 
-        response = self.make_transfersession_creation_request(
+        self.make_transfersession_creation_request(
             filter=str(self.root_cert1_with_key.get_scope().write_filter),
             push=True,
             syncsession=syncsession,
@@ -589,7 +587,7 @@ class TransferSessionEndpointTestCase(CertificateTestCaseMixin, APITestCase):
 
     def test_transfersession_creation_fails_for_pull_when_filter_not_in_client_read_scope(self):
 
-        response = self.make_transfersession_creation_request(
+        self.make_transfersession_creation_request(
             filter=str(self.root_cert1_with_key.get_scope().read_filter),
             push=False,
             expected_status=403,
@@ -603,7 +601,7 @@ class TransferSessionEndpointTestCase(CertificateTestCaseMixin, APITestCase):
             server_certificate=self.sub_subset_cert1_with_key,
         )
 
-        response = self.make_transfersession_creation_request(
+        self.make_transfersession_creation_request(
             filter=str(self.root_cert1_with_key.get_scope().write_filter),
             push=False,
             syncsession=syncsession,
@@ -618,7 +616,7 @@ class TransferSessionEndpointTestCase(CertificateTestCaseMixin, APITestCase):
         syncsession.active = False
         syncsession.save()
 
-        response = self.make_transfersession_creation_request(
+        self.make_transfersession_creation_request(
             filter=str(self.sub_subset_cert1_with_key.get_scope().write_filter),
             push=True,
             expected_status=400,
@@ -632,7 +630,7 @@ class TransferSessionEndpointTestCase(CertificateTestCaseMixin, APITestCase):
 
         syncsession.delete()
 
-        response = self.make_transfersession_creation_request(
+        self.make_transfersession_creation_request(
             filter=str(self.sub_subset_cert1_with_key.get_scope().write_filter),
             push=True,
             expected_status=400,
@@ -680,7 +678,6 @@ class BufferEndpointTestCase(CertificateTestCaseMixin, APITestCase):
             t_sess_id = json.loads(t_sess_req.content.decode())["id"]
             kwargs["transfer_session"] = TransferSession.objects.get(id=t_sess_id)
 
-        client_cert = kwargs["transfer_session"].sync_session.server_certificate
         server_cert = kwargs["transfer_session"].sync_session.client_certificate
         push = kwargs["transfer_session"].push
 
@@ -702,7 +699,7 @@ class BufferEndpointTestCase(CertificateTestCaseMixin, APITestCase):
         }
 
         if not data["model_uuid"]:
-            Model = _profile_models[data["profile"]][data["model_name"]]
+            Model = syncable_models.get_model(data["profile"], data["model_name"])
             data["model_uuid"] = Model.compute_namespaced_id(data["partition"], data["source_id"], data["model_name"])
 
         buffermodel = Buffer.objects.create(**data)
@@ -855,7 +852,7 @@ class BufferEndpointTestCase(CertificateTestCaseMixin, APITestCase):
 
     def test_pull_fails_when_transfer_session_id_not_specified(self):
 
-        transfer_session_id = self.create_records_for_pulling()
+        self.create_records_for_pulling()
 
         self.make_buffer_get_request(
             expected_status=403,

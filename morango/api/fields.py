@@ -1,6 +1,6 @@
 from rest_framework import serializers
 
-from ..crypto import Key
+from morango.models.fields.crypto import Key
 
 
 class PublicKeyField(serializers.Field):

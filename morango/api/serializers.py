@@ -1,15 +1,15 @@
 from rest_framework import exceptions
 from rest_framework import serializers
 
-from ..crypto import SharedKey
-from ..models import Buffer
-from ..models import Certificate
-from ..models import InstanceIDModel
-from ..models import RecordMaxCounterBuffer
-from ..models import SyncSession
-from ..models import TransferSession
+from ..models.certificates import Nonce
+from ..models.core import Buffer
+from ..models.core import Certificate
+from ..models.core import InstanceIDModel
+from ..models.core import RecordMaxCounterBuffer
+from ..models.core import SyncSession
+from ..models.core import TransferSession
+from ..models.fields.crypto import SharedKey
 from .fields import PublicKeyField
-from morango.certificates import Nonce
 
 
 class CertificateSerializer(serializers.ModelSerializer):
