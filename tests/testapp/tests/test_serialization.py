@@ -1,7 +1,8 @@
 from django.db import models
 from django.test import TestCase
 from facility_profile.models import Facility
-from morango.utils.register_models import _profile_models
+
+from morango.registry import syncable_models
 
 
 class SerializationTestCase(TestCase):
@@ -17,7 +18,7 @@ class SerializationTestCase(TestCase):
         self.assertEqual(self.bob.morango_model_name, Facility.morango_model_name)
 
     def test_field_deserialization(self):
-        class_model = _profile_models['facilitydata'][self.bob.morango_model_name]
+        class_model = syncable_models.get_model('facilitydata', self.bob.morango_model_name)
         self.bob_copy = class_model.deserialize(self.bob_dict)
         for f in Facility._meta.concrete_fields:
             # we remove DateTimeField (for now) from this test because serializing and deserializing loses units of precision

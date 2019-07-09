@@ -2,27 +2,15 @@ class MorangoError(Exception):
     pass
 
 
+class ModelRegistryNotReady(MorangoError):
+    pass
+
+
 class InvalidMorangoModelConfiguration(MorangoError):
     pass
 
 
 class UnsupportedFieldType(MorangoError):
-    pass
-
-
-class InvalidSyncableManager(MorangoError):
-    pass
-
-
-class InvalidSyncableQueryset(MorangoError):
-    pass
-
-
-class InvalidMPTTManager(MorangoError):
-    pass
-
-
-class InvalidMPTTQuerySet(MorangoError):
     pass
 
 

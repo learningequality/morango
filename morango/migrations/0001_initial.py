@@ -7,8 +7,8 @@ import django.utils.timezone
 from django.db import migrations
 from django.db import models
 
-import morango.crypto
-import morango.utils.uuids
+import morango.models.fields.crypto
+import morango.models.fields.uuids
 
 
 class Migration(migrations.Migration):
@@ -37,7 +37,7 @@ class Migration(migrations.Migration):
                 ("model_name", models.CharField(max_length=40)),
                 ("profile", models.CharField(max_length=40)),
                 ("partition", models.TextField()),
-                ("model_uuid", morango.utils.uuids.UUIDField()),
+                ("model_uuid", morango.models.fields.uuids.UUIDField()),
             ],
             options={"abstract": False},
         ),
@@ -46,15 +46,15 @@ class Migration(migrations.Migration):
             fields=[
                 (
                     "id",
-                    morango.utils.uuids.UUIDField(primary_key=True, serialize=False),
+                    morango.models.fields.uuids.UUIDField(primary_key=True, serialize=False),
                 ),
                 ("profile", models.CharField(max_length=20)),
                 ("scope_version", models.IntegerField()),
                 ("scope_params", models.TextField()),
-                ("public_key", morango.crypto.PublicKeyField()),
+                ("public_key", morango.models.fields.crypto.PublicKeyField()),
                 ("serialized", models.TextField()),
                 ("signature", models.TextField()),
-                ("private_key", morango.crypto.PrivateKeyField(blank=True, null=True)),
+                ("private_key", morango.models.fields.crypto.PrivateKeyField(blank=True, null=True)),
                 ("lft", models.PositiveIntegerField(db_index=True, editable=False)),
                 ("rght", models.PositiveIntegerField(db_index=True, editable=False)),
                 ("tree_id", models.PositiveIntegerField(db_index=True, editable=False)),
@@ -93,7 +93,7 @@ class Migration(migrations.Migration):
             fields=[
                 (
                     "id",
-                    morango.utils.uuids.UUIDField(primary_key=True, serialize=False),
+                    morango.models.fields.uuids.UUIDField(primary_key=True, serialize=False),
                 ),
                 ("current", models.BooleanField(default=True)),
                 (
@@ -116,7 +116,7 @@ class Migration(migrations.Migration):
                         verbose_name="ID",
                     ),
                 ),
-                ("instance_id", morango.utils.uuids.UUIDField()),
+                ("instance_id", morango.models.fields.uuids.UUIDField()),
                 ("counter", models.IntegerField()),
                 ("filter", models.TextField()),
             ],
@@ -127,7 +127,7 @@ class Migration(migrations.Migration):
             fields=[
                 (
                     "id",
-                    morango.utils.uuids.UUIDField(primary_key=True, serialize=False),
+                    morango.models.fields.uuids.UUIDField(primary_key=True, serialize=False),
                 ),
                 ("profile", models.CharField(max_length=40)),
             ],
@@ -137,7 +137,7 @@ class Migration(migrations.Migration):
             fields=[
                 (
                     "id",
-                    morango.utils.uuids.UUIDField(primary_key=True, serialize=False),
+                    morango.models.fields.uuids.UUIDField(primary_key=True, serialize=False),
                 ),
                 ("platform", models.TextField()),
                 ("hostname", models.TextField()),
@@ -168,7 +168,7 @@ class Migration(migrations.Migration):
                         verbose_name="ID",
                     ),
                 ),
-                ("instance_id", morango.utils.uuids.UUIDField()),
+                ("instance_id", morango.models.fields.uuids.UUIDField()),
                 ("counter", models.IntegerField()),
             ],
         ),
@@ -184,9 +184,9 @@ class Migration(migrations.Migration):
                         verbose_name="ID",
                     ),
                 ),
-                ("instance_id", morango.utils.uuids.UUIDField()),
+                ("instance_id", morango.models.fields.uuids.UUIDField()),
                 ("counter", models.IntegerField()),
-                ("model_uuid", morango.utils.uuids.UUIDField()),
+                ("model_uuid", morango.models.fields.uuids.UUIDField()),
             ],
             options={"abstract": False},
         ),
@@ -219,7 +219,7 @@ class Migration(migrations.Migration):
                 ("partition", models.TextField()),
                 (
                     "id",
-                    morango.utils.uuids.UUIDField(primary_key=True, serialize=False),
+                    morango.models.fields.uuids.UUIDField(primary_key=True, serialize=False),
                 ),
             ],
             options={"abstract": False},
@@ -262,9 +262,9 @@ class Migration(migrations.Migration):
             fields=[
                 (
                     "id",
-                    morango.utils.uuids.UUIDField(primary_key=True, serialize=False),
+                    morango.models.fields.uuids.UUIDField(primary_key=True, serialize=False),
                 ),
-                ("public_key", morango.crypto.PublicKeyField()),
+                ("public_key", morango.models.fields.crypto.PublicKeyField()),
                 ("notes", models.TextField(blank=True)),
                 ("revoked", models.BooleanField(default=False)),
             ],

@@ -5,7 +5,7 @@ from __future__ import unicode_literals
 from django.db import migrations
 from django.db import models
 
-import morango.crypto
+import morango.models.fields.crypto
 
 
 class Migration(migrations.Migration):
@@ -25,8 +25,8 @@ class Migration(migrations.Migration):
                         verbose_name="ID",
                     ),
                 ),
-                ("public_key", morango.crypto.PublicKeyField()),
-                ("private_key", morango.crypto.PrivateKeyField()),
+                ("public_key", morango.models.fields.crypto.PublicKeyField()),
+                ("private_key", morango.models.fields.crypto.PrivateKeyField()),
                 ("current", models.BooleanField(default=True)),
             ],
         )

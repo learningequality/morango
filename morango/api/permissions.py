@@ -7,7 +7,7 @@ from rest_framework import authentication
 from rest_framework import exceptions
 from rest_framework import permissions
 
-from ..models import TransferSession
+from morango.models.core import TransferSession
 
 
 class BasicMultiArgumentAuthentication(authentication.BasicAuthentication):

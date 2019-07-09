@@ -5,7 +5,7 @@ from __future__ import unicode_literals
 from django.db import migrations
 from django.db import models
 
-import morango.utils.uuids
+import morango.models.fields.uuids
 
 
 class Migration(migrations.Migration):
@@ -18,7 +18,7 @@ class Migration(migrations.Migration):
             fields=[
                 (
                     "id",
-                    morango.utils.uuids.UUIDField(primary_key=True, serialize=False),
+                    morango.models.fields.uuids.UUIDField(primary_key=True, serialize=False),
                 ),
                 ("profile", models.CharField(max_length=40)),
             ],

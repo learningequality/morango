@@ -2,8 +2,8 @@ from mptt import managers
 from mptt import models
 from mptt import querysets
 
-from morango.manager import SyncableModelManager
-from morango.query import SyncableModelQuerySet
+from .manager import SyncableModelManager
+from .query import SyncableModelQuerySet
 
 
 class MorangoTreeQuerySet(querysets.TreeQuerySet, SyncableModelQuerySet):

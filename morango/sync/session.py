@@ -1,6 +1,6 @@
 import logging
 
-import requests
+from requests import exceptions
 from requests.sessions import Session
 
 
@@ -17,10 +17,10 @@ class SessionWrapper(Session):
             response = super(SessionWrapper, self).request(method, url, **kwargs)
             response.raise_for_status()
             return response
-        except requests.exceptions.HTTPError as httpErr:
+        except exceptions.HTTPError as httpErr:
             logger.error("{} Reason: {}".format(str(httpErr), httpErr.response.json()))
             raise httpErr
-        except requests.exceptions.RequestException as reqErr:
+        except exceptions.RequestException as reqErr:
             # we want to log all request errors for debugging purposes
             logger.error(str(reqErr))
             raise reqErr

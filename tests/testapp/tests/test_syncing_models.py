@@ -1,7 +1,8 @@
 from django.test import TestCase
 from facility_profile.models import MyUser
-from morango.manager import SyncableModelManager
-from morango.query import SyncableModelQuerySet
+
+from morango.models.manager import SyncableModelManager
+from morango.models.query import SyncableModelQuerySet
 
 
 class SyncingModelsTestCase(TestCase):

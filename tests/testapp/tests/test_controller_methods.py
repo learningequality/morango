@@ -1,16 +1,22 @@
-import factory
 import json
-import mock
 import uuid
 
+import factory
+import mock
 from django.test import TestCase
-from morango.controller import MorangoProfileController
-from morango.controller import _self_referential_fk
-from facility_profile.models import Facility, MyUser, SummaryLog
-from morango.certificates import Filter
-from morango.models import DeletedModels, InstanceIDModel, RecordMaxCounter, Store, HardDeletedModels
+from facility_profile.models import Facility
+from facility_profile.models import MyUser
+from facility_profile.models import SummaryLog
 
 from .helpers import serialized_facility_factory
+from morango.models.certificates import Filter
+from morango.models.core import DeletedModels
+from morango.models.core import HardDeletedModels
+from morango.models.core import InstanceIDModel
+from morango.models.core import RecordMaxCounter
+from morango.models.core import Store
+from morango.sync.controller import _self_referential_fk
+from morango.sync.controller import MorangoProfileController
 
 
 class FacilityModelFactory(factory.DjangoModelFactory):
@@ -390,7 +396,7 @@ class DeserializationFromStoreIntoAppTestCase(TestCase):
         self.assertTrue(st.dirty_bit)
 
     def test_invalid_model_leaves_store_dirty_bit(self):
-        user = MyUser(username='a'*21)
+        user = MyUser(username='a' * 21)
         st = StoreModelFacilityFactory(model_name="user", id=uuid.uuid4().hex, serialized=json.dumps(user.serialize()))
         self.mc.deserialize_from_store()
         st.refresh_from_db()

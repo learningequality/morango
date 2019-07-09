@@ -1,6 +1,9 @@
 from django.test import TestCase
-from facility_profile.models import Facility, MyUser
-from morango.utils.morango_mptt import MorangoMPTTTreeManager, MorangoTreeQuerySet
+from facility_profile.models import Facility
+from facility_profile.models import MyUser
+
+from morango.models.morango_mptt import MorangoMPTTTreeManager
+from morango.models.morango_mptt import MorangoTreeQuerySet
 
 
 class MorangoMPTTModelTestCase(TestCase):

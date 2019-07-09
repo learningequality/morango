@@ -1,6 +1,6 @@
-from morango.syncsession import NetworkSyncConnection
-from morango.utils.sync_utils import _deserialize_from_store
-from morango.utils.sync_utils import _serialize_into_store
+from .operations import _deserialize_from_store
+from .operations import _serialize_into_store
+from .syncsession import NetworkSyncConnection
 
 
 def _self_referential_fk(klass_model):
