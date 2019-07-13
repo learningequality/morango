@@ -45,6 +45,32 @@ def mock_session_request(func):
     return wrapper
 
 
+def build_buffer_items(transfer_session, **kwargs):
+
+    data = {
+        "profile": kwargs.get("profile", "facilitydata"),
+        "serialized": kwargs.get("serialized", '{"test": 99}'),
+        "deleted": kwargs.get("deleted", False),
+        "last_saved_instance": kwargs.get("last_saved_instance", uuid.uuid4().hex),
+        "last_saved_counter": kwargs.get("last_saved_counter", 179),
+        "partition": kwargs.get("partition", transfer_session.filter),
+        "source_id": kwargs.get("source_id", uuid.uuid4().hex),
+        "model_name": kwargs.get("model_name", "contentsummarylog"),
+        "conflicting_serialized_data": kwargs.get("conflicting_serialized_data", ""),
+        "model_uuid": kwargs.get("model_uuid", None),
+        "transfer_session": transfer_session,
+    }
+
+    for _ in range(kwargs.get("chunk_size", 3)):
+        data["source_id"] = uuid.uuid4().hex
+        data["model_uuid"] = SummaryLog.compute_namespaced_id(
+            data["partition"], data["source_id"], data["model_name"]
+        )
+        Buffer.objects.create(**data)
+
+    return Buffer.objects.filter(transfer_session=transfer_session)
+
+
 class NetworkSyncConnectionTestCase(LiveServerTestCase):
     def setUp(self):
         self.profile = "facilitydata"
@@ -104,35 +130,6 @@ class NetworkSyncConnectionTestCase(LiveServerTestCase):
         )
         self.key = SharedKey.get_or_create_shared_key()
 
-    def build_buffer_items(self, transfer_session, **kwargs):
-
-        data = {
-            "profile": kwargs.get("profile", "facilitydata"),
-            "serialized": kwargs.get("serialized", '{"test": 99}'),
-            "deleted": kwargs.get("deleted", False),
-            "last_saved_instance": kwargs.get("last_saved_instance", uuid.uuid4().hex),
-            "last_saved_counter": kwargs.get("last_saved_counter", 179),
-            "partition": kwargs.get("partition", "partition"),
-            "source_id": kwargs.get("source_id", uuid.uuid4().hex),
-            "model_name": kwargs.get("model_name", "contentsummarylog"),
-            "conflicting_serialized_data": kwargs.get(
-                "conflicting_serialized_data", ""
-            ),
-            "model_uuid": kwargs.get("model_uuid", None),
-            "transfer_session": transfer_session,
-        }
-
-        for i in range(3):
-            data["source_id"] = uuid.uuid4().hex
-            data["model_uuid"] = SummaryLog.compute_namespaced_id(
-                data["partition"], data["source_id"], data["model_name"]
-            )
-            Buffer.objects.create(**data)
-
-        buffered_items = Buffer.objects.filter(transfer_session=transfer_session)
-        serialized_records = BufferSerializer(buffered_items, many=True)
-        return serialized_records.data
-
     @mock.patch.object(Certificate.objects, "filter", return_value=mock.Mock())
     def test_retrieve_server_cert_if_needed(self, mock_filter):
         Certificate.objects.filter().exists.return_value = False
@@ -157,7 +154,7 @@ class NetworkSyncConnectionTestCase(LiveServerTestCase):
         ts = TransferSession.objects.create(
             id=uuid.uuid4().hex, push=True, sync_session=session, filter="partition"
         )
-        data = self.build_buffer_items(ts)
+        data = BufferSerializer(build_buffer_items(ts), many=True).data
         Buffer.objects.all().delete()
         self.network_connection._push_record_chunk(data)
         self.assertEqual(len(data), Buffer.objects.count())
@@ -574,37 +571,6 @@ class SyncClientPushTestCase(LiveServerTestCase):
         )
         self.syncclient.current_transfer_session = self.transfersession
 
-    def build_buffer_items(self, transfer_session, **kwargs):
-
-        data = {
-            "profile": kwargs.get("profile", "facilitydata"),
-            "serialized": kwargs.get("serialized", '{"test": 99}'),
-            "deleted": kwargs.get("deleted", False),
-            "last_saved_instance": kwargs.get("last_saved_instance", uuid.uuid4().hex),
-            "last_saved_counter": kwargs.get("last_saved_counter", 179),
-            "partition": kwargs.get("partition", self.filter),
-            "source_id": kwargs.get("source_id", uuid.uuid4().hex),
-            "model_name": kwargs.get("model_name", "contentsummarylog"),
-            "conflicting_serialized_data": kwargs.get(
-                "conflicting_serialized_data", ""
-            ),
-            "model_uuid": kwargs.get("model_uuid", None),
-            "transfer_session": transfer_session,
-        }
-
-        for i in range(self.syncclient.chunk_size):
-            data["source_id"] = uuid.uuid4().hex
-            data["model_uuid"] = SummaryLog.compute_namespaced_id(
-                data["partition"], data["source_id"], data["model_name"]
-            )
-            Buffer.objects.create(**data)
-
-        buffered_items = Buffer.objects.filter(
-            transfer_session=self.syncclient.current_transfer_session
-        )
-        serialized_records = BufferSerializer(buffered_items, many=True)
-        return json.dumps(serialized_records.data)
-
     @mock_session_request
     def test_starting_transfer_session(self):
         self.syncclient.current_transfer_session.delete(soft=False)
@@ -662,11 +628,8 @@ class SyncClientPushTestCase(LiveServerTestCase):
 
     def test_push_records(self):
         # build up records to be patched onto return value
-        self.build_buffer_items(self.syncclient.current_transfer_session)
         buffered_records = list(
-            Buffer.objects.filter(
-                transfer_session=self.syncclient.current_transfer_session
-            )
+            build_buffer_items(self.syncclient.current_transfer_session)
         )
         Buffer.objects.all().delete()
         self.syncclient.current_transfer_session.records_total = len(buffered_records)
@@ -680,11 +643,9 @@ class SyncClientPushTestCase(LiveServerTestCase):
         )
 
     def test_push_records_resume_records_transferred(self):
-        self.build_buffer_items(self.syncclient.current_transfer_session)
+        build_buffer_items(self.syncclient.current_transfer_session)
         buffered_records = list(
-            Buffer.objects.filter(
-                transfer_session=self.syncclient.current_transfer_session
-            )
+            build_buffer_items(self.syncclient.current_transfer_session)
         )
         Buffer.objects.last().delete()
         self.syncclient.current_transfer_session.records_transferred = (
@@ -705,7 +666,12 @@ class SyncClientPushTestCase(LiveServerTestCase):
             ):
                 self.syncclient._push_records()
         self.assertIsNone(self.syncclient.current_transfer_session)
-        self.assertEqual(TransferSession.objects.filter(active=False).count(), 1)
+        self.assertEqual(
+            TransferSession.objects.filter(
+                active=False, transfer_stage=transfer_status.ERROR
+            ).count(),
+            1,
+        )
 
     def test_pushing_update_records_total(self):
         self.syncclient.current_transfer_session.records_total = 100
@@ -724,11 +690,16 @@ class SyncClientPushTestCase(LiveServerTestCase):
             ):
                 self.syncclient._pushing()
         self.assertIsNone(self.syncclient.current_transfer_session)
-        self.assertEqual(TransferSession.objects.filter(active=False).count(), 1)
+        self.assertEqual(
+            TransferSession.objects.filter(
+                active=False, transfer_stage=transfer_status.ERROR
+            ).count(),
+            1,
+        )
 
     @mock_session_request
     def test_pushing(self):
-        self.build_buffer_items(self.syncclient.current_transfer_session)
+        build_buffer_items(self.syncclient.current_transfer_session)
         with mock.patch.object(SyncClient, "_push_records"):
             self.syncclient._pushing()
         self.assertFalse(Buffer.objects.exists())
@@ -827,37 +798,6 @@ class SyncClientPullTestCase(LiveServerTestCase):
         )
         self.syncclient.current_transfer_session = self.transfersession
 
-    def build_buffer_items(self, transfer_session, **kwargs):
-
-        data = {
-            "profile": kwargs.get("profile", "facilitydata"),
-            "serialized": kwargs.get("serialized", '{"test": 99}'),
-            "deleted": kwargs.get("deleted", False),
-            "last_saved_instance": kwargs.get("last_saved_instance", uuid.uuid4().hex),
-            "last_saved_counter": kwargs.get("last_saved_counter", 179),
-            "partition": kwargs.get("partition", self.filter),
-            "source_id": kwargs.get("source_id", uuid.uuid4().hex),
-            "model_name": kwargs.get("model_name", "contentsummarylog"),
-            "conflicting_serialized_data": kwargs.get(
-                "conflicting_serialized_data", ""
-            ),
-            "model_uuid": kwargs.get("model_uuid", None),
-            "transfer_session": transfer_session,
-        }
-
-        for i in range(self.syncclient.chunk_size):
-            data["source_id"] = uuid.uuid4().hex
-            data["model_uuid"] = SummaryLog.compute_namespaced_id(
-                data["partition"], data["source_id"], data["model_name"]
-            )
-            Buffer.objects.create(**data)
-
-        buffered_items = Buffer.objects.filter(
-            transfer_session=self.syncclient.current_transfer_session
-        )
-        serialized_records = BufferSerializer(buffered_items, many=True)
-        return json.dumps(serialized_records.data)
-
     @mock_session_request
     def test_resuming_start_transfer_session_pull(self):
         self.transfersession.push = False
@@ -888,7 +828,7 @@ class SyncClientPullTestCase(LiveServerTestCase):
 
     @mock_session_request
     def test_queuing(self):
-        self.build_buffer_items(self.syncclient.current_transfer_session)
+        build_buffer_items(self.syncclient.current_transfer_session)
         SessionWrapper.request.return_value.json.return_value = {
             "records_total": Buffer.objects.count()
         }
@@ -911,51 +851,64 @@ class SyncClientPullTestCase(LiveServerTestCase):
             ):
                 self.syncclient._queuing(None, push=False)
         self.assertEqual(TransferSession.objects.filter(active=True).count(), 0)
+        self.assertEqual(
+            TransferSession.objects.filter(
+                transfer_stage=transfer_status.ERROR
+            ).count(),
+            1,
+        )
 
-    @mock_session_request
+    def test_pull_record_chunk_resume_records_transferred(self):
+        build_buffer_items(self.syncclient.current_transfer_session)
+        self.syncclient.current_transfer_session.records_transferred = 1
+        response = self.syncclient.sync_connection._pull_record_chunk(
+            self.syncclient.chunk_size, self.syncclient.current_transfer_session
+        )
+        self.assertEqual(
+            len(response.json()["results"]),
+            Buffer.objects.count()
+            - self.syncclient.current_transfer_session.records_transferred,
+        )
+        self.syncclient.current_transfer_session.records_transferred = 2
+        response = self.syncclient.sync_connection._pull_record_chunk(
+            self.syncclient.chunk_size, self.syncclient.current_transfer_session
+        )
+        self.assertEqual(
+            len(response.json()["results"]),
+            Buffer.objects.count()
+            - self.syncclient.current_transfer_session.records_transferred,
+        )
+        self.syncclient.current_transfer_session.records_transferred = 3
+        response = self.syncclient.sync_connection._pull_record_chunk(
+            self.syncclient.chunk_size, self.syncclient.current_transfer_session
+        )
+        self.assertEqual(
+            len(response.json()["results"]),
+            Buffer.objects.count()
+            - self.syncclient.current_transfer_session.records_transferred,
+        )
+
     def test_pull_records(self):
-        resp = self.build_buffer_items(self.syncclient.current_transfer_session)
-        SessionWrapper.request.return_value.json.return_value = json.loads(resp)
+        buffered_records = list(
+            build_buffer_items(self.syncclient.current_transfer_session)
+        )
         Buffer.objects.filter(
             transfer_session=self.syncclient.current_transfer_session
         ).delete()
         self.assertEqual(
-            Buffer.objects.filter(
-                transfer_session=self.syncclient.current_transfer_session
-            ).count(),
-            0,
-        )
-        self.assertEqual(
             self.syncclient.current_transfer_session.records_transferred, 0
-        )
-        self.syncclient._pull_records()
-        self.assertEqual(
-            Buffer.objects.filter(
-                transfer_session=self.syncclient.current_transfer_session
-            ).count(),
-            self.syncclient.chunk_size,
-        )
-        self.assertEqual(
-            self.syncclient.current_transfer_session.records_transferred,
-            self.syncclient.chunk_size,
-        )
-
-    def test_pull_records_resume_records_transferred(self):
-        self.build_buffer_items(self.syncclient.current_transfer_session)
-        buffered_records = list(
-            Buffer.objects.filter(
-                transfer_session=self.syncclient.current_transfer_session
-            )
-        )
-        Buffer.objects.last().delete()
-        self.syncclient.current_transfer_session.records_transferred = (
-            len(buffered_records) - 1
         )
         with mock.patch.object(Buffer.objects, "filter", return_value=buffered_records):
             self.syncclient._pull_records()
         self.assertEqual(
+            Buffer.objects.filter(
+                transfer_session=self.syncclient.current_transfer_session
+            ).count(),
+            self.syncclient.chunk_size,
+        )
+        self.assertEqual(
             self.syncclient.current_transfer_session.records_transferred,
-            Buffer.objects.count(),
+            self.syncclient.chunk_size,
         )
 
     def test_pull_records_http_error(self):
@@ -965,6 +918,12 @@ class SyncClientPullTestCase(LiveServerTestCase):
             ):
                 self.syncclient._pull_records()
         self.assertEqual(TransferSession.objects.filter(active=True).count(), 0)
+        self.assertEqual(
+            TransferSession.objects.filter(
+                transfer_stage=transfer_status.ERROR
+            ).count(),
+            1,
+        )
 
     @mock_session_request
     def test_pull_records_integrity_checks(self):

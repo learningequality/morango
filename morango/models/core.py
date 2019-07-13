@@ -209,9 +209,8 @@ class SyncSession(models.Model):
 
 
 class TransferSessionSoftDeleteQueryset(models.QuerySet):
-
-    def delete(self, *args, **kwargs):
-        soft = kwargs.get('soft', True)
+    def delete(self, **kwargs):
+        soft = kwargs.get("soft", True)
         for obj in self:
             obj.delete(soft=soft)
 
@@ -247,14 +246,16 @@ class TransferSession(models.Model):
     server_fsic = models.TextField(blank=True, default="{}")
 
     # stages of transfer session
-    transfer_stage = models.CharField(max_length=20, choices=transfer_status.choices, blank=True)
+    transfer_stage = models.CharField(
+        max_length=20, choices=transfer_status.choices, blank=True
+    )
 
     def get_filter(self):
         return Filter(self.filter)
 
-    def save(self, *args, **kwargs):
+    def save(self, **kwargs):
         self.last_activity_timestamp = timezone.now()
-        super(TransferSession, self).save(*args, **kwargs)
+        super(TransferSession, self).save(**kwargs)
 
     def delete(self, soft=True):
         with transaction.atomic():
