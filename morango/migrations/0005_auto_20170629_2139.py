@@ -3,24 +3,23 @@
 from __future__ import unicode_literals
 
 from django.db import migrations
-import morango.crypto
+
+import morango.models.fields.crypto
 
 
 class Migration(migrations.Migration):
 
-    dependencies = [
-        ('morango', '0004_auto_20170520_2112'),
-    ]
+    dependencies = [("morango", "0004_auto_20170520_2112")]
 
     operations = [
         migrations.RenameField(
-            model_name='certificate',
-            old_name='private_key',
-            new_name='_private_key',
+            model_name="certificate", old_name="private_key", new_name="_private_key"
         ),
         migrations.AlterField(
-            model_name='certificate',
-            name='_private_key',
-            field=morango.crypto.PrivateKeyField(blank=True, db_column='private_key', null=True),
+            model_name="certificate",
+            name="_private_key",
+            field=morango.models.fields.crypto.PrivateKeyField(
+                blank=True, db_column="private_key", null=True
+            ),
         ),
     ]

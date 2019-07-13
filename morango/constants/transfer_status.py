@@ -7,6 +7,7 @@ DEQUEUING = "dequeuing"
 PUSHING = "pushing"
 PULLING = "pulling"
 COMPLETED = "completed"
+ERROR = "error"
 
 choices = (
     (STARTED, "Started"),
@@ -15,4 +16,5 @@ choices = (
     (PUSHING, "Pushing"),
     (PULLING, "Pulling"),
     (COMPLETED, "Completed"),
+    (ERROR, "Error"),
 )

@@ -1,8 +1,10 @@
 import factory
 from django.test import TestCase
 from facility_profile.models import Facility
-from morango.models import DeletedModels, InstanceIDModel
-from morango.controller import MorangoProfileController
+
+from morango.models.core import DeletedModels
+from morango.models.core import InstanceIDModel
+from morango.sync.controller import MorangoProfileController
 
 
 class FacilityModelFactory(factory.DjangoModelFactory):

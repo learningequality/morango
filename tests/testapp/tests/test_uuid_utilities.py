@@ -1,10 +1,15 @@
-import mock
 import uuid
 
+import mock
 from django.test import TestCase
-from facility_profile.models import Facility, MyUser, InteractionLog
-from morango.models import DatabaseIDModel, InstanceIDModel
-from morango.utils.uuids import sha2_uuid
+from facility_profile.models import Facility
+from facility_profile.models import InteractionLog
+from facility_profile.models import MyUser
+
+from morango.models.core import DatabaseIDModel
+from morango.models.core import InstanceIDModel
+from morango.models.fields.uuids import sha2_uuid
+
 
 class UUIDModelMixinTestCase(TestCase):
 

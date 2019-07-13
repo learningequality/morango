@@ -1,3 +1,9 @@
+include AUTHORS.md
+include CONTRIBUTING.md
+include CHANGELOG.md
+include LICENSE
+include README.md
+
 include requirements.txt
 
 recursive-include requirements *.txt

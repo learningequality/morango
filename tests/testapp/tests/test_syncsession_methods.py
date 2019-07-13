@@ -7,18 +7,25 @@ from django.db import connection
 from django.test import TestCase
 from django.utils import timezone
 from facility_profile.models import Facility
-from morango.controller import MorangoProfileController
-from morango.models import (Buffer, DatabaseIDModel, InstanceIDModel,
-                            RecordMaxCounter, RecordMaxCounterBuffer, Store,
-                            SyncSession, TransferSession)
-from morango.syncsession import SyncClient
-from morango.utils.sync_utils import _dequeue_into_store, _queue_into_buffer
-from morango.utils.backends.utils import load_backend
 
-from .helpers import (create_buffer_and_store_dummy_data,
-                      create_dummy_store_data)
+from .helpers import create_buffer_and_store_dummy_data
+from .helpers import create_dummy_store_data
+from morango.models.core import Buffer
+from morango.models.core import DatabaseIDModel
+from morango.models.core import InstanceIDModel
+from morango.models.core import RecordMaxCounter
+from morango.models.core import RecordMaxCounterBuffer
+from morango.models.core import Store
+from morango.models.core import SyncSession
+from morango.models.core import TransferSession
+from morango.sync.backends.utils import load_backend
+from morango.sync.controller import MorangoProfileController
+from morango.sync.operations import _dequeue_into_store
+from morango.sync.operations import _queue_into_buffer
+from morango.sync.syncsession import SyncClient
 
 DBBackend = load_backend(connection).SQLWrapper()
+
 
 class FacilityModelFactory(factory.DjangoModelFactory):
 
@@ -145,7 +152,10 @@ class BufferIntoStoreTestCase(TestCase):
         self.data['mc'] = MorangoProfileController('facilitydata')
         self.data['sc'] = SyncClient(None, 'host', 1)
         session = SyncSession.objects.create(id=uuid.uuid4().hex, profile="", last_activity_timestamp=timezone.now())
-        self.data['sc'].current_transfer_session = TransferSession.objects.create(id=uuid.uuid4().hex, sync_session=session, push=True, last_activity_timestamp=timezone.now())
+        self.data['sc'].current_transfer_session = TransferSession.objects.create(id=uuid.uuid4().hex,
+                                                                                  sync_session=session,
+                                                                                  push=True,
+                                                                                  last_activity_timestamp=timezone.now())
         self.data.update(create_buffer_and_store_dummy_data(self.data['sc'].current_transfer_session.id))
 
     def test_dequeuing_delete_rmcb_records(self):
@@ -215,6 +225,17 @@ class BufferIntoStoreTestCase(TestCase):
         self.assertEqual(store.last_saved_instance, current_id.id)
         self.assertEqual(store.last_saved_counter, current_id.counter)
         self.assertEqual(store.conflicting_serialized_data, "buffer\nstore")
+
+    def test_dequeuing_merge_conflict_hard_delete(self):
+        store = Store.objects.get(id=self.data['model7'])
+        self.assertEqual(store.serialized, "store")
+        self.assertEqual(store.conflicting_serialized_data, "store")
+        with connection.cursor() as cursor:
+            current_id = InstanceIDModel.get_current_instance_and_increment_counter()
+            DBBackend._dequeuing_merge_conflict_buffer(cursor, current_id, self.data['sc'].current_transfer_session.id)
+        store.refresh_from_db()
+        self.assertEqual(store.serialized, "")
+        self.assertEqual(store.conflicting_serialized_data, "")
 
     def test_dequeuing_update_rmcs_last_saved_by(self):
         self.assertFalse(RecordMaxCounter.objects.filter(instance_id=self.current_id.id).exists())
