@@ -67,8 +67,8 @@ class SQLWrapper(BaseSQLWrapper):
 
     def _dequeuing_merge_conflict_rmcb(self, cursor, transfersession_id):
         # transfer record max counters for records with merge conflicts + perform max
-        merge_conflict_rmc = """UPDATE {rmc} as rmc SET (counter)
-                                    = (rmcb.counter)
+        merge_conflict_rmc = """UPDATE {rmc} as rmc SET counter
+                                    = rmcb.counter
                                     FROM {rmcb} AS rmcb, {store} AS store, {buffer} AS buffer
                                     /*Scope to a single record.*/
                                     WHERE store.id = rmcb.model_uuid
