@@ -1,9 +1,11 @@
 import copy
 import functools
 import logging
+import os
 from io import BytesIO
 
 from django.db import transaction
+from django.utils import timezone
 from rest_framework.exceptions import ValidationError
 
 from morango.constants.capabilities import GZIP_BUFFER_POST
@@ -18,6 +20,25 @@ if GZIP_BUFFER_POST in CAPABILITIES:
     from gzip import GzipFile
 
 logger = logging.getLogger(__name__)
+
+
+def is_resumable(syncsession):
+    if syncsession.client_pid:
+        try:
+            os.kill(int(syncsession.client_pid), 0)
+        except OSError:
+            # process is dead, so we can resume sync session
+            return True
+        else:
+            # assume sync session process has died a long time ago so we can possibly reuse this one
+            diff = timezone.now() - syncsession.last_activity_timestamp
+            if (
+                diff.days >= 2
+            ):  # if last activity was more than 2 days ago, reuse session
+                return True
+    else:
+        # sync session has no pid so we can reuse this one
+        return True
 
 
 # borrowed from https://github.com/django/django/blob/1.11.20/django/utils/text.py#L295

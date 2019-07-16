@@ -1,4 +1,5 @@
 import json
+import os
 import uuid
 
 import mock
@@ -179,8 +180,7 @@ class NetworkSyncConnectionTestCase(LiveServerTestCase):
                 self.subset_cert, self.root_cert
             )
 
-    @mock_session_request
-    def test_resuming_sync_session(self):
+    def test_resuming_sync_session_no_pid(self):
         session = SyncSession.objects.create(
             id=uuid.uuid4().hex,
             profile="facilitydata",
@@ -193,10 +193,55 @@ class NetworkSyncConnectionTestCase(LiveServerTestCase):
                 ).data
             ),
         )
-        SessionWrapper.request.return_value.json.return_value = {"active": True}
         client = self.network_connection.create_sync_session(
             self.subset_cert, self.root_cert
         )
+        self.assertIsNotNone(client.sync_session.client_pid)
+        self.assertEqual(session.id, client.sync_session.id)
+        self.assertEqual(SyncSession.objects.count(), 1)
+
+    def test_resuming_sync_session_no_process(self):
+        session = SyncSession.objects.create(
+            id=uuid.uuid4().hex,
+            profile="facilitydata",
+            last_activity_timestamp=timezone.now(),
+            client_certificate=self.subset_cert,
+            server_certificate=self.root_cert,
+            server_instance=json.dumps(
+                InstanceIDSerializer(
+                    InstanceIDModel.get_or_create_current_instance()[0]
+                ).data
+            ),
+            client_pid="0",
+        )
+        with mock.patch.object(os, "kill", side_effect=OSError()):
+            client = self.network_connection.create_sync_session(
+                self.subset_cert, self.root_cert
+            )
+        self.assertIsNotNone(client.sync_session.client_pid)
+        self.assertEqual(session.id, client.sync_session.id)
+        self.assertEqual(SyncSession.objects.count(), 1)
+
+    def test_resuming_sync_session_expired_timestamp(self):
+        session = SyncSession.objects.create(
+            id=uuid.uuid4().hex,
+            profile="facilitydata",
+            last_activity_timestamp=timezone.datetime(
+                2000, 1, 1, tzinfo=timezone.get_current_timezone()
+            ),
+            client_certificate=self.subset_cert,
+            server_certificate=self.root_cert,
+            server_instance=json.dumps(
+                InstanceIDSerializer(
+                    InstanceIDModel.get_or_create_current_instance()[0]
+                ).data
+            ),
+            client_pid="0",
+        )
+        client = self.network_connection.create_sync_session(
+            self.subset_cert, self.root_cert
+        )
+        self.assertIsNotNone(client.sync_session.client_pid)
         self.assertEqual(session.id, client.sync_session.id)
         self.assertEqual(SyncSession.objects.count(), 1)
 
@@ -227,7 +272,7 @@ class NetworkSyncConnectionTestCase(LiveServerTestCase):
 
     @mock_session_request
     @mock.patch.object(Certificate, "verify", return_value=True)
-    def test_not_resuming_sync_session_404(self, mock_verify):
+    def test_not_resuming_sync_session_http_error(self, mock_verify):
         session = SyncSession.objects.create(
             id=uuid.uuid4().hex,
             profile="facilitydata",
@@ -251,31 +296,6 @@ class NetworkSyncConnectionTestCase(LiveServerTestCase):
             )
         self.assertNotEqual(session.id, client.sync_session.id)
         self.assertEqual(SyncSession.objects.count(), 2)
-
-    @mock_session_request
-    @mock.patch.object(Certificate, "verify", return_value=True)
-    def test_not_resuming_sync_session_http_error(self, mock_verify):
-        SyncSession.objects.create(
-            id=uuid.uuid4().hex,
-            profile="facilitydata",
-            last_activity_timestamp=timezone.now(),
-            client_certificate=self.subset_cert,
-            server_certificate=self.root_cert,
-            server_instance=json.dumps(
-                InstanceIDSerializer(
-                    InstanceIDModel.get_or_create_current_instance()[0]
-                ).data
-            ),
-        )
-        with self.assertRaises(HTTPError):
-            with mock.patch.object(
-                NetworkSyncConnection,
-                "_get_sync_session",
-                side_effect=HTTPError(response=mock.Mock(status_code=403)),
-            ):
-                self.network_connection.create_sync_session(
-                    self.subset_cert, self.root_cert
-                )
 
     @mock_session_request
     @mock.patch.object(Certificate, "verify", return_value=True)
@@ -482,7 +502,8 @@ class SyncClientTestCase(LiveServerTestCase):
             side_effect=HTTPError(response=mock.Mock(status_code=404)),
         ):
             self.syncclient._starting_transfer_session(self.filter, True)
-        self.assertEqual(TransferSession.objects.filter(active=True).count(), 2)
+        # should turn off other transfer session and create new one
+        self.assertEqual(TransferSession.objects.filter(active=True).count(), 1)
         self.assertNotEqual(
             self.syncclient.current_transfer_session, self.transfersession
         )
@@ -490,13 +511,12 @@ class SyncClientTestCase(LiveServerTestCase):
     @mock_session_request
     def test_not_resuming_start_transfer_session_403(self):
         self.assertEqual(TransferSession.objects.filter(active=True).count(), 1)
-        with self.assertRaises(HTTPError):
-            with mock.patch.object(
-                NetworkSyncConnection,
-                "_get_transfer_session",
-                side_effect=HTTPError(response=mock.Mock(status_code=403)),
-            ):
-                self.syncclient._starting_transfer_session(self.filter, True)
+        with mock.patch.object(
+            NetworkSyncConnection,
+            "_get_transfer_session",
+            side_effect=HTTPError(response=mock.Mock(status_code=403)),
+        ):
+            self.syncclient._starting_transfer_session(self.filter, True)
         self.assertEqual(TransferSession.objects.filter(active=True).count(), 1)
 
     @mock_session_request

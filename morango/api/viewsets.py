@@ -397,6 +397,7 @@ class TransferSessionViewSet(viewsets.ModelViewSet):
             RecordMaxCounterBuffer.objects.filter(
                 transfer_session=transfersession
             ).delete()
+            transfersession.records_transferred = transfersession.records_total
         transfersession.active = False
         transfersession.transfer_stage = transfer_status.COMPLETED
         transfersession.save()
@@ -414,7 +415,9 @@ class BufferViewSet(mixins.ListModelMixin, viewsets.GenericViewSet):
     def create(self, request):
         data = request.data if isinstance(request.data, list) else [request.data]
         # ensure the transfer session allows pushes, and is same across records
-        transfer_session = core.TransferSession.objects.get(id=data[0]["transfer_session"])
+        transfer_session = core.TransferSession.objects.get(
+            id=data[0]["transfer_session"]
+        )
         if not transfer_session.push:
             return response.Response(
                 "Specified TransferSession does not allow pushes.",
