@@ -2,8 +2,11 @@ import logging
 
 from requests import exceptions
 from requests.sessions import Session
-from simplejson.decoder import JSONDecodeError
 
+try:
+    from json.decoder import JSONDecodeError
+except ImportError:
+    JSONDecodeError = ValueError
 
 logger = logging.getLogger(__name__)
 
