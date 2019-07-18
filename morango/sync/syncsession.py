@@ -295,9 +295,9 @@ class NetworkSyncConnection(Connection):
         certificate.parent.sign_certificate(certificate)
 
         # serialize the chain for sending to server
-        certificate_chain = list(
-            local_parent_cert.get_descendants(include_self=True)
-        ) + [certificate]
+        certificate_chain = list(local_parent_cert.get_ancestors(include_self=True)) + [
+            certificate
+        ]
         data = json.dumps(CertificateSerializer(certificate_chain, many=True).data)
 
         # client sends signed certificate chain to server
