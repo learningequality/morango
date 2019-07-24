@@ -63,8 +63,7 @@ test-all:
 	tox
 
 coverage: ## check code coverage quickly with the default Python
-		coverage run --source morango setup.py test
-		coverage report -m
+		pytest --cov=morango tests/testapp/tests/
 		coverage html
 		$(BROWSER) htmlcov/index.html
 

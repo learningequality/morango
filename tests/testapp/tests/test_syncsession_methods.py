@@ -150,7 +150,7 @@ class BufferIntoStoreTestCase(TestCase):
 
         # create controllers for app/store/buffer operations
         self.data['mc'] = MorangoProfileController('facilitydata')
-        self.data['sc'] = SyncClient(None, 'host')
+        self.data['sc'] = SyncClient(None, 'host', 1)
         session = SyncSession.objects.create(id=uuid.uuid4().hex, profile="", last_activity_timestamp=timezone.now())
         self.data['sc'].current_transfer_session = TransferSession.objects.create(id=uuid.uuid4().hex,
                                                                                   sync_session=session,

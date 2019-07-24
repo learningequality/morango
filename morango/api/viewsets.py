@@ -19,6 +19,7 @@ from . import serializers
 from .. import errors
 from ..models import certificates
 from ..models import core
+from morango.constants import transfer_status
 from morango.constants.capabilities import GZIP_BUFFER_POST
 from morango.models.core import Buffer
 from morango.models.core import DatabaseMaxCounter
@@ -30,7 +31,6 @@ from morango.sync.operations import _queue_into_buffer
 from morango.sync.operations import _serialize_into_store
 from morango.sync.utils import validate_and_create_buffer_data
 from morango.utils import CAPABILITIES
-
 
 if GZIP_BUFFER_POST in CAPABILITIES:
     from .parsers import GzipParser
@@ -204,7 +204,6 @@ class NonceViewSet(viewsets.ModelViewSet):
 
 
 class SyncSessionViewSet(viewsets.ModelViewSet):
-    permission_classes = (permissions.SyncSessionPermissions,)
     serializer_class = serializers.SyncSessionSerializer
 
     def create(self, request):
@@ -300,7 +299,6 @@ class SyncSessionViewSet(viewsets.ModelViewSet):
 
 
 class TransferSessionViewSet(viewsets.ModelViewSet):
-    permission_classes = (permissions.TransferSessionPermissions,)
     serializer_class = serializers.TransferSessionSerializer
 
     def create(self, request):  # noqa: C901
@@ -399,7 +397,9 @@ class TransferSessionViewSet(viewsets.ModelViewSet):
             RecordMaxCounterBuffer.objects.filter(
                 transfer_session=transfersession
             ).delete()
+            transfersession.records_transferred = transfersession.records_total
         transfersession.active = False
+        transfersession.transfer_stage = transfer_status.COMPLETED
         transfersession.save()
 
     def get_queryset(self):
@@ -415,7 +415,9 @@ class BufferViewSet(mixins.ListModelMixin, viewsets.GenericViewSet):
     def create(self, request):
         data = request.data if isinstance(request.data, list) else [request.data]
         # ensure the transfer session allows pushes, and is same across records
-        transfer_session = core.TransferSession.objects.get(id=data[0]["transfer_session"])
+        transfer_session = core.TransferSession.objects.get(
+            id=data[0]["transfer_session"]
+        )
         if not transfer_session.push:
             return response.Response(
                 "Specified TransferSession does not allow pushes.",

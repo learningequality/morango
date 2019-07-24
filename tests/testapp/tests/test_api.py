@@ -24,7 +24,7 @@ from morango.models.core import SyncSession
 from morango.models.core import TransferSession
 from morango.models.fields.crypto import SharedKey
 from morango.registry import syncable_models
-from morango.sync.syncsession import compress_string
+from morango.sync.utils import compress_string
 from morango.sync.utils import validate_and_create_buffer_data
 
 
@@ -456,6 +456,16 @@ class SyncSessionEndpointTestCase(CertificateTestCaseMixin, APITestCase):
         # check that the syncsession was not created
         self.assertEqual(SyncSession.objects.count(), 0)
 
+    def test_syncsession_can_be_retrieved_with_id(self):
+        syncsession = self.create_syncsession()
+        response = self.client.get(reverse('syncsessions-detail', kwargs={"pk": syncsession.id}), format='json')
+        self.assertEqual(syncsession.id, response.data['id'])
+
+    def test_non_existent_syncsession_returns_404(self):
+        data = self.get_initial_syncsession_data_for_request()
+        response = self.client.get(reverse('syncsessions-detail', kwargs={"pk": data['id']}), format='json')
+        self.assertEqual(response.status_code, 404)
+
     def test_syncsession_can_be_created(self):
 
         data = self.get_initial_syncsession_data_for_request()
@@ -546,6 +556,18 @@ class SyncSessionEndpointTestCase(CertificateTestCaseMixin, APITestCase):
 
 
 class TransferSessionEndpointTestCase(CertificateTestCaseMixin, APITestCase):
+
+    def test_transfersession_can_be_retrieved_with_id(self):
+        transfersession = self.make_transfersession_creation_request(
+            filter=str(self.sub_subset_cert1_with_key.get_scope().write_filter),
+            push=True,
+        ).data
+        response = self.client.get(reverse('transfersessions-detail', kwargs={"pk": transfersession['id']}), format='json')
+        self.assertEqual(transfersession['id'], response.data['id'])
+
+    def test_non_existent_transfersession_returns_404(self):
+        response = self.client.get(reverse('transfersessions-detail', kwargs={"pk": uuid.uuid4().hex}), format='json')
+        self.assertEqual(response.status_code, 404)
 
     def test_transfersession_can_be_created(self):
 

@@ -15,8 +15,8 @@ from morango.models.core import HardDeletedModels
 from morango.models.core import InstanceIDModel
 from morango.models.core import RecordMaxCounter
 from morango.models.core import Store
-from morango.sync.controller import _self_referential_fk
 from morango.sync.controller import MorangoProfileController
+from morango.sync.operations import _self_referential_fk
 
 
 class FacilityModelFactory(factory.DjangoModelFactory):

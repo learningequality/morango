@@ -33,6 +33,7 @@ from .fields.uuids import UUIDField
 from .fields.uuids import UUIDModelMixin
 from .manager import SyncableModelManager
 from .morango_mptt import MorangoMPTTModel
+from morango.constants import transfer_status
 
 
 logger = logging.getLogger(__name__)
@@ -163,11 +164,22 @@ class InstanceIDModel(UUIDModelMixin):
         return proquint.from_int(int(self.id[:8], 16))
 
 
+class SyncSessionSoftDeleteQueryset(models.QuerySet):
+    def delete(self, soft=True):
+        if soft:
+            for obj in self:
+                obj.delete(soft=soft)
+        else:
+            super(SyncSessionSoftDeleteQueryset, self).delete()
+
+
 class SyncSession(models.Model):
     """
     ``SyncSession`` holds metadata for a sync session which keeps track of initial settings and
     the current transfer happening for this sync session.
     """
+
+    objects = SyncSessionSoftDeleteQueryset.as_manager()
 
     id = UUIDField(primary_key=True)
 
@@ -206,12 +218,40 @@ class SyncSession(models.Model):
     client_instance = models.TextField(default="{}")
     server_instance = models.TextField(default="{}")
 
+    # used for tracking currently running sync sessions
+    client_pid = models.CharField(blank=True, max_length=10)
+
+    def clear_pid(self):
+        self.client_pid = ""
+        self.save()
+
+    def delete(self, soft=True):
+        if soft:
+            self.active = False
+            self.client_pid = ""
+            self.transfersession_set.filter(active=True).delete(soft=True)
+            self.save()
+        # hard delete removes session from database
+        else:
+            super(SyncSession, self).delete()
+
+
+class TransferSessionSoftDeleteQueryset(models.QuerySet):
+    def delete(self, soft=True):
+        if soft:
+            for obj in self:
+                obj.delete(soft=soft)
+        else:
+            super(TransferSessionSoftDeleteQueryset, self).delete()
+
 
 class TransferSession(models.Model):
     """
     ``TransferSession`` holds metatada that is related to a specific transfer (push/pull) session
     between 2 morango instances.
     """
+
+    objects = TransferSessionSoftDeleteQueryset.as_manager()
 
     id = UUIDField(primary_key=True)
     filter = (
@@ -235,8 +275,33 @@ class TransferSession(models.Model):
     client_fsic = models.TextField(blank=True, default="{}")
     server_fsic = models.TextField(blank=True, default="{}")
 
+    # stages of transfer session
+    transfer_stage = models.CharField(
+        max_length=20, choices=transfer_status.choices, blank=True
+    )
+
     def get_filter(self):
         return Filter(self.filter)
+
+    def save(self, **kwargs):
+        time = timezone.now()
+        self.last_activity_timestamp = time
+        self.sync_session.last_activity_timestamp = time
+        self.sync_session.save()
+        super(TransferSession, self).save(**kwargs)
+
+    def delete(self, soft=True):
+        # soft delete only sets active to false
+        if soft:
+            with transaction.atomic():
+                # part of delete removes buffer and rmcbs associated with this ts
+                Buffer.objects.filter(transfer_session=self).delete()
+                RecordMaxCounterBuffer.objects.filter(transfer_session=self).delete()
+                self.active = False
+                self.save()
+        # hard delete removes ts from database
+        else:
+            super(TransferSession, self).delete()
 
 
 class DeletedModels(models.Model):
