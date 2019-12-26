@@ -24,25 +24,22 @@ def calculate_max_sqlite_variables():
     Source: https://stackoverflow.com/questions/17872665/determine-maximum-number-of-columns-from-sqlite3
     """
     conn = sqlite3.connect(":memory:")
-    low = 1
-    high = (
-        1000
-    )  # hard limit for SQLITE_MAX_VARIABLE_NUMBER <http://www.sqlite.org/limits.html>
-    conn.execute("CREATE TABLE T1 (id C1)")
-    while low < high - 1:
-        guess = (low + high) // 2
-        try:
-            statement = "select * from T1 where id in (%s)" % ",".join(
-                ["?" for _ in range(guess)]
-            )
-            values = [i for i in range(guess)]
-            conn.execute(statement, values)
-        except sqlite3.DatabaseError as ex:
-            if "too many SQL variables" in str(ex):
-                high = guess
-            else:
-                raise
-        else:
-            low = guess
-    conn.close()
-    return low
+    MAX_VARIABLE_NUMBER = 999
+    statement = """
+        WITH opts(n, opt) AS (
+        VALUES(0, NULL)
+        UNION ALL
+        SELECT n + 1,
+                sqlite_compileoption_get(n)
+        FROM opts
+        WHERE sqlite_compileoption_get(n) IS NOT NULL
+        )
+        SELECT CASE WHEN sqlite_compileoption_used('MAX_VARIABLE_NUMBER')
+            THEN (SELECT opt FROM opts WHERE opt LIKE 'MAX_VARIABLE_NUMBER%')
+            ELSE 'MAX_VARIABLE_NUMBER=999'
+        END;
+    """
+    cursor = conn.execute(statement)
+    output = cursor.fetchone()[0]
+    exec(output)
+    return MAX_VARIABLE_NUMBER
