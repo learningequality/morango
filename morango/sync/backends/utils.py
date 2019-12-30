@@ -21,7 +21,6 @@ def calculate_max_sqlite_variables():
     SQLite has a limit on the max number of variables allowed for parameter substitution. This limit is usually 999, but
     can be compiled to a different number. This function calculates what the max is for the sqlite version running on the device.
     We use the calculated value to chunk our SQL bulk insert statements when deserializing from the store to the app layer.
-    Source: https://stackoverflow.com/questions/17872665/determine-maximum-number-of-columns-from-sqlite3
     """
     conn = sqlite3.connect(":memory:")
     MAX_VARIABLE_NUMBER = 999

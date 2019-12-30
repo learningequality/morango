@@ -206,6 +206,9 @@ class SyncSession(models.Model):
     client_instance = models.TextField(default="{}")
     server_instance = models.TextField(default="{}")
 
+    # used to store other data we may need to know about this sync session
+    extra_fields = models.TextField(default="{}")
+
 
 class TransferSession(models.Model):
     """
