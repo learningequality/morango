@@ -209,6 +209,10 @@ class SyncSession(models.Model):
     # used to store other data we may need to know about this sync session
     extra_fields = models.TextField(default="{}")
 
+    # used to store data through a MORANGO_METADATA settings variable
+    client_metadata = models.TextField(default="{}")
+    server_metadata = models.TextField(default="{}")
+
 
 class TransferSession(models.Model):
     """

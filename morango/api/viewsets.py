@@ -278,6 +278,8 @@ class SyncSessionViewSet(viewsets.ModelViewSet):
             "server_instance": json.dumps(
                 serializers.InstanceIDSerializer(instance_id).data
             ),
+            "client_metadata": request.data.get("client_metadata", "{}"),
+            "server_metadata": getattr(settings, "MORANGO_METADATA", "{}"),
         }
 
         syncsession = core.SyncSession(**data)
@@ -287,6 +289,7 @@ class SyncSessionViewSet(viewsets.ModelViewSet):
         resp_data = {
             "signature": server_cert.sign(message),
             "server_instance": data["server_instance"],
+            "server_metadata": getattr(settings, "MORANGO_METADATA", "{}"),
         }
 
         return response.Response(resp_data, status=status.HTTP_201_CREATED)

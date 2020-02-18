@@ -159,6 +159,7 @@ class NetworkSyncConnection(Connection):
             "nonce": nonce,
             "client_ip": _get_client_ip_for_server(hostname, port),
             "server_ip": _get_server_ip(hostname),
+            "client_metadata": getattr(settings, "MORANGO_METADATA", "{}"),
         }
 
         # sign the nonce/ID combo to attach to the request
@@ -192,6 +193,8 @@ class NetworkSyncConnection(Connection):
                 ).data
             ),
             "server_instance": session_resp.json().get("server_instance") or "{}",
+            "client_metadata": getattr(settings, "MORANGO_METADATA", "{}"),
+            "server_metadata": session_resp.json().get("server_metadata", "{}"),
         }
         sync_session = SyncSession.objects.create(**data)
 
