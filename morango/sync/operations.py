@@ -6,6 +6,8 @@ from django.conf import settings
 from django.core import exceptions
 from django.core.serializers.json import DjangoJSONEncoder
 from django.db import connection
+from django.db import connections
+from django.db import router
 from django.db import transaction
 from django.db.models import Q
 from django.db.models import signals
@@ -29,6 +31,12 @@ logger = logging.getLogger(__name__)
 
 DBBackend = load_backend(connection).SQLWrapper()
 
+# if postgres, get serializable db connection
+db_name = router.db_for_write(Store)
+USING_DB = db_name
+if "postgresql" in transaction.get_connection(USING_DB).vendor:
+    USING_DB = db_name + '_serializable'
+    assert USING_DB in connections
 
 def _join_with_logical_operator(lst, operator):
     op = ") {operator} (".format(operator=operator)
@@ -70,7 +78,7 @@ def _serialize_into_store(profile, filter=None):
     # ensure that we write and retrieve the counter in one go for consistency
     current_id = InstanceIDModel.get_current_instance_and_increment_counter()
 
-    with transaction.atomic():
+    with transaction.atomic(using=USING_DB):
         # create Q objects for filtering by prefixes
         prefix_condition = None
         if filter:
@@ -227,7 +235,7 @@ def _deserialize_from_store(profile):
 
     logger.info("Deserializing records")
     fk_cache = {}
-    with transaction.atomic():
+    with transaction.atomic(using=USING_DB):
         excluded_list = []
         # iterate through classes which are in foreign key dependency order
         for model in syncable_models.get_models(profile):
@@ -316,7 +324,7 @@ def _deserialize_from_store(profile):
     logger.info("Deserialization complete")
 
 
-@transaction.atomic()
+@transaction.atomic(using=USING_DB)
 def _queue_into_buffer(transfersession):
     """
     Takes a chunk of data from the store to be put into the buffer to be sent to another morango instance.
@@ -399,7 +407,7 @@ def _queue_into_buffer(transfersession):
     logger.info("Queuing complete")
 
 
-@transaction.atomic()
+@transaction.atomic(using=USING_DB)
 def _dequeue_into_store(transfersession):
     """
     Takes data from the buffers and merges into the store and record max counters.
