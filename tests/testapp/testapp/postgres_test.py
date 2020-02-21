@@ -24,7 +24,7 @@ DATABASES = {
             'NAME': 'travis_ci_default'
         }
     },
-    'default_serializable': {
+    'default-serializable': {
         'ENGINE': 'django.db.backends.postgresql',
         'USER': 'postgres',
         'PASSWORD': '',

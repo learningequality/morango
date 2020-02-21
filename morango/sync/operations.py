@@ -35,8 +35,9 @@ DBBackend = load_backend(connection).SQLWrapper()
 db_name = router.db_for_write(Store)
 USING_DB = db_name
 if "postgresql" in transaction.get_connection(USING_DB).vendor:
-    USING_DB = db_name + '_serializable'
-    assert USING_DB in connections
+    USING_DB = db_name + '-serializable'
+    assert USING_DB in connections, "Please add a `default-serializable` database connection in your django settings file, \
+                                     which copies all the configuration settings of the `default` db connection"
 
 def _join_with_logical_operator(lst, operator):
     op = ") {operator} (".format(operator=operator)
