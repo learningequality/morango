@@ -5,7 +5,12 @@ from __future__ import absolute_import
 from __future__ import print_function
 from __future__ import unicode_literals
 
-import psycopg2
+try:
+    isolation_level = None
+    import psycopg2
+    isolation_level = psycopg2.extensions.ISOLATION_LEVEL_SERIALIZABLE
+except ImportError:
+    pass
 
 from .settings import *  # noqa
 
@@ -28,7 +33,7 @@ DATABASES = {
             'NAME': 'travis_ci_default'
         },
         'OPTIONS': {
-            'isolation_level': psycopg2.extensions.ISOLATION_LEVEL_SERIALIZABLE,
+            'isolation_level': isolation_level,
         }
     }
 }
