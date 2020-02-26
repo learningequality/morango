@@ -65,6 +65,11 @@ def _fsic_queuing_calc(fsic1, fsic2):
 def _serialize_into_store(profile, filter=None):
     """
     Takes data from app layer and serializes the models into the store.
+    ALGORITHM: On a per syncable model basis, we iterate through each class model and we go through 2 possible cases:
+    1. If there is a store record pertaining to that app model, we update the serialized store record with
+    the latest changes from the model's fields. We also update the counter's based on this device's current Instance ID.
+    2. If there is no store record for this app model, we proceed to create an in memory store model and append to a list to be
+    bulk created on a per class model basis.
     """
     logger.info("Serializing records")
     # ensure that we write and retrieve the counter in one go for consistency
@@ -221,6 +226,10 @@ def _serialize_into_store(profile, filter=None):
 def _deserialize_from_store(profile):
     """
     Takes data from the store and integrates into the application.
+    ALGORITHM: On a per syncable model basis, we iterate through each class model and we go through 2 possible cases:
+    1. For class models that have a self referential foreign key, we iterate down the dependency tree deserializing model by model.
+    2. On a per app model basis, we append the field values to a single list, and do a single bulk insert/replace query.
+    If a model fails to deserialize/validate, we exclude it from being marked as clean in the store.
     """
     # we first serialize to avoid deserialization merge conflicts
     _serialize_into_store(profile)
@@ -234,6 +243,7 @@ def _deserialize_from_store(profile):
             # handle cases where a class has a single FK reference to itself
             self_ref_fk = _self_referential_fk(model)
             query = Q(model_name=model.morango_model_name)
+            # this will handle the case of getting the clean parents, since they will be deserialized first
             for klass in model.morango_model_dependencies:
                 query |= Q(model_name=klass.morango_model_name)
             if self_ref_fk:
@@ -244,6 +254,7 @@ def _deserialize_from_store(profile):
                 )
                 dirty_children = (
                     Store.objects.filter(dirty_bit=True, profile=profile)
+                    # handle parents or if the model has no parent
                     .filter(Q(_self_ref_fk__in=clean_parents) | Q(_self_ref_fk=""))
                     .filter(query)
                 )
@@ -320,6 +331,9 @@ def _deserialize_from_store(profile):
 def _queue_into_buffer(transfersession):
     """
     Takes a chunk of data from the store to be put into the buffer to be sent to another morango instance.
+    ALGORITHM: We do Filter Specific Instance Counter arithmetic to get our newest data compared to the server's older data.
+    We use raw sql queries to place data in the buffer and the record max counter buffer, which matches the conditions of the FSIC,
+    as well as the partition for the data we are syncing.
     """
     logger.info("Queuing records for transfer")
     last_saved_by_conditions = []
@@ -403,6 +417,8 @@ def _queue_into_buffer(transfersession):
 def _dequeue_into_store(transfersession):
     """
     Takes data from the buffers and merges into the store and record max counters.
+    ALGORITHM: Incrementally insert and delete on a case by case basis to ensure subsequent cases
+    are not effected by previous cases.
     """
     logger.info("Dequeuing records into store")
     with connection.cursor() as cursor:
