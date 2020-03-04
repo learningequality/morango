@@ -41,6 +41,12 @@ os.environ.setdefault("DJANGO_SETTINGS_MODULE", "morango.settings")
 
 django.setup()
 
+# Monkey patch this so we don't have any complaints during Sphinx inspect
+from django.db.models.fields import files  # noqa
+
+files.FileDescriptor.__get__ = lambda *args: None
+
+
 # Auto list fields from django models - from https://djangosnippets.org/snippets/2533/#c5977
 def process_docstring(app, what, name, obj, options, lines):
     # This causes import errors if left outside the function
@@ -156,6 +162,24 @@ pygments_style = 'sphinx'
 # The theme to use for HTML and HTML Help pages.  See the documentation for
 # a list of builtin themes.
 html_theme = 'default'
+
+if not False:  # only import and set the theme if we're building docs locally
+    import sphinx_rtd_theme
+
+    html_theme = "sphinx_rtd_theme"
+    html_theme_path = [".", sphinx_rtd_theme.get_html_theme_path()]
+
+
+# Approach 2 for custom stylesheet:
+# adapted from: http://rackerlabs.github.io/docs-rackspace/tools/rtd-tables.html
+# and https://github.com/altair-viz/altair/pull/418/files
+# https://github.com/rtfd/sphinx_rtd_theme/issues/117
+def setup(app):
+    # Register the docstring processor with sphinx
+    app.connect("autodoc-process-docstring", process_docstring)
+    # Add our custom CSS overrides
+    app.add_stylesheet("theme_overrides.css")
+
 
 # Theme options are theme-specific and customize the look and feel of a
 # theme further.  For a list of options available for each theme, see the

@@ -1,3 +1,6 @@
+"""
+The main module to be used for initiating the synchronization of data between morango instances.
+"""
 import json
 import logging
 import socket
@@ -96,6 +99,11 @@ class Connection(object):
 
 class NetworkSyncConnection(Connection):
     def __init__(self, base_url="", compresslevel=9, retries=7, backoff_factor=0.3):
+        """
+        The underlying network connection with a syncing peer. Any network requests
+        (such as certificate querying or syncing related) will be done through this class.
+        """
+
         self.base_url = base_url
         self.compresslevel = compresslevel
         # set up requests session with retry logic

@@ -8,7 +8,11 @@ Table of contents
 .. toctree::
    :maxdepth: 2
 
-   dev/index
+   overview/index
+   architecture/index
+   api/index
+   integration/index
+   kolibri/index
    contributing
    authors
    changelog

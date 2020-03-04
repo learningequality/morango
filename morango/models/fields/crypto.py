@@ -1,3 +1,9 @@
+"""
+We have three types of cryptographic key algorithms to be used: ``rsa``, ``M2Crypto``, and ``Cryptography`` (Ordered for
+desirability/efficiency from left to right). We have a base ``Key`` class which uses one of the mentioned key algorithms under the hood.
+``Key`` has methods for signing messages using a private key and verifying signed messages using a public key.
+``Key`` classes are used for signing/verifying certificates that give various permissions.
+"""
 import hashlib
 import re
 import sys
@@ -379,6 +385,11 @@ class PrivateKeyField(RSAKeyBaseField):
 
 
 class SharedKey(models.Model):
+    """
+    The public key is publically available via the ``api/morango/v1/publickey`` endpoint. Applications
+    who would like to allow certificates to be pushed to the server must also enable ``ALLOW_CERTIFICATE_PUSHING``.
+    Clients generate a ``Certificate`` object and set the ``public_key`` field to the shared public key of the server.
+    """
     public_key = PublicKeyField()
     private_key = PrivateKeyField()
     current = models.BooleanField(default=True)
