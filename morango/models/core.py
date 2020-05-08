@@ -228,6 +228,9 @@ class TransferSession(models.Model):
     records_total = models.IntegerField(
         blank=True, null=True
     )  # total number of records to be synced across in this transfer
+    bytes_sent = models.BigIntegerField(default=0, null=True, blank=True)
+    bytes_received = models.BigIntegerField(default=0, null=True, blank=True)
+
     sync_session = models.ForeignKey(SyncSession)
 
     # track when the transfer session started and the last time there was activity on it
