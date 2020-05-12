@@ -38,6 +38,7 @@ from morango.models.core import RecordMaxCounterBuffer
 from morango.models.core import SyncSession
 from morango.models.core import TransferSession
 from morango.utils import CAPABILITIES
+from morango.sync.utils import bytes_for_humans
 
 if GZIP_BUFFER_POST in CAPABILITIES:
     from gzip import GzipFile
@@ -111,6 +112,14 @@ class NetworkSyncConnection(Connection):
             urljoin(self.base_url, api_urls.INFO)
         ).json()
         self.capabilities = self.server_info.get("capabilities", [])
+
+    @property
+    def bytes_sent(self):
+        return self.session.bytes_sent
+
+    @property
+    def bytes_received(self):
+        return self.session.bytes_received
 
     def urlresolve(self, endpoint, lookup=None):
         if lookup:
@@ -376,22 +385,62 @@ class NetworkSyncConnection(Connection):
         return self.session.get(self.urlresolve(api_urls.BUFFER), params=params)
 
 
+class SyncSignal(object):
+    """
+    Helper class for firing signals from the sync client
+    """
+
+    def __init__(self, **kwargs_defaults):
+        """
+        Default keys/values that the signal consumer can depend on being present
+        """
+        self._handlers = []
+        self._defaults = kwargs_defaults
+
+    def connect(self, handler):
+        """
+        :type handler: function
+        """
+        self._handlers.append(handler)
+
+    def fire(self, **kwargs):
+        """
+        Fires the handler functions connected via `connect`
+        """
+        fire_kwargs = self._defaults.copy()
+        fire_kwargs.update(kwargs)
+
+        for handler in self._handlers:
+            handler(**fire_kwargs)
+
+
 class SyncClient(object):
     """
     Controller to support client in initiating syncing and performing related operations.
     """
 
     def __init__(self, sync_connection, sync_session, chunk_size=500):
+        """
+        :type sync_connection: NetworkSyncConnection
+        :type sync_session: SessionWrapper
+        :type chunk_size: int
+        """
         self.sync_connection = sync_connection
         self.sync_session = sync_session
         self.chunk_size = chunk_size
         self.current_transfer_session = None
 
-    def initiate_push(self, sync_filter):
+        # setup signals, clearly defining the properties we're going to send
+        self.queueing = SyncSignal(local=True)
+        self.pushing = SyncSignal(transfer_session=None)
+        self.pulling = SyncSignal(transfer_session=None)
+        self.dequeueing = SyncSignal(local=True)
 
+    def initiate_push(self, sync_filter):
         logger.info("Initiating push sync")
         self._create_transfer_session(True, sync_filter)
 
+        self.queueing.fire(local=True)
         _queue_into_buffer(self.current_transfer_session)
 
         # update the records_total for client and server transfer session
@@ -410,6 +459,7 @@ class SyncClient(object):
         )
 
         logger.info("Beginning pushing of data...")
+        self.pushing.fire(transfer_session=self.current_transfer_session)
         self._push_records()
         logger.info("Completed push of data")
 
@@ -423,7 +473,6 @@ class SyncClient(object):
         self._close_transfer_session()
 
     def initiate_pull(self, sync_filter):
-
         logger.info("Initiating pull sync")
         self._create_transfer_session(False, sync_filter)
 
@@ -439,8 +488,11 @@ class SyncClient(object):
         )
         # pull records and close transfer session upon completion
         logger.info("Beginning pulling of data...")
+        self.pulling.fire(transfer_session=self.current_transfer_session)
         self._pull_records()
         logger.info("Completed pull of data")
+
+        self.dequeueing.fire(local=True)
         _dequeue_into_store(self.current_transfer_session)
 
         # update database max counters but use latest fsics on client
@@ -485,19 +537,23 @@ class SyncClient(object):
                     "Specified TransferSession does not match this SyncClient's current TransferSession."
                 )
 
-            validate_and_create_buffer_data(data, self.current_transfer_session)
+            validate_and_create_buffer_data(
+                data, self.current_transfer_session, self.sync_connection
+            )
             # update the records transferred so client and server are in agreement
             self.sync_connection._update_transfer_session(
                 {
-                    "records_transferred": self.current_transfer_session.records_transferred
+                    "records_transferred": self.current_transfer_session.records_transferred,
+                    # flip each of these since we're talking about the remote instance
+                    "bytes_received": self.current_transfer_session.bytes_sent,
+                    "bytes_sent": self.current_transfer_session.bytes_received,
                 },
                 self.current_transfer_session,
             )
-            logger.info(
-                "Received {}/{} records".format(
-                    self.current_transfer_session.records_transferred,
-                    self.current_transfer_session.records_total,
-                )
+
+            self.pulling.fire(transfer_session=self.current_transfer_session)
+            self._log_transfer(
+                "Received {records_transferred}/{records_total} records totaling {transfer_total}"
             )
 
     def _push_records(self, callback=None):
@@ -518,16 +574,31 @@ class SyncClient(object):
                 self.current_transfer_session.records_transferred + self.chunk_size,
                 self.current_transfer_session.records_total,
             )
+            self.current_transfer_session.bytes_sent = self.sync_connection.bytes_sent
+            self.current_transfer_session.bytes_received = (
+                self.sync_connection.bytes_received
+            )
             self.current_transfer_session.save()
-            logger.info(
-                "Sent {}/{} records".format(
-                    self.current_transfer_session.records_transferred,
-                    self.current_transfer_session.records_total,
-                )
+
+            self.pushing.fire(transfer_session=self.current_transfer_session)
+            self._log_transfer(
+                "Sent {records_transferred}/{records_total} records totaling {transfer_total}"
             )
 
-    def close_sync_session(self):
+    def _log_transfer(self, message):
+        transfer_total = (
+            self.current_transfer_session.bytes_sent
+            + self.current_transfer_session.bytes_received
+        )
+        logger.info(
+            message.format(
+                records_transferred=self.current_transfer_session.records_transferred,
+                records_total=self.current_transfer_session.records_total,
+                transfer_total=bytes_for_humans(transfer_total),
+            )
+        )
 
+    def close_sync_session(self):
         # "delete" sync session on server side
         self.sync_connection._close_sync_session(self.sync_session)
 
@@ -543,7 +614,6 @@ class SyncClient(object):
         self.sync_connection.session.close()
 
     def _create_transfer_session(self, push, filter):
-
         logger.info("Creating transfer session")
         # build data for creating transfer session on server side
         data = {
@@ -572,6 +642,11 @@ class SyncClient(object):
 
         # save transfersession locally before creating transfersession server side
         self.current_transfer_session.save()
+
+        # the next call to create the session starts queueing on server side
+        if not push:
+            self.queueing.fire(local=False)
+
         # create transfer session on server side
         transfer_resp = self.sync_connection._create_transfer_session(data)
 
@@ -585,8 +660,12 @@ class SyncClient(object):
         self.current_transfer_session.save()
 
     def _close_transfer_session(self):
-
         logger.info("Closing transfer session")
+
+        # deleting the server's transfer session also dequeues
+        if self.current_transfer_session.push:
+            self.dequeueing.fire(local=False)
+
         # "delete" transfer session on server side
         self.sync_connection._close_transfer_session(self.current_transfer_session)
 

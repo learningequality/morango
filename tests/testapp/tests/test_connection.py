@@ -2,6 +2,7 @@ import json
 import uuid
 
 import mock
+from django.test import TestCase
 from django.test.testcases import LiveServerTestCase
 from django.test.utils import override_settings
 from django.utils import timezone
@@ -228,6 +229,11 @@ class SyncClientTestCase(LiveServerTestCase):
         self.chunk_size = 3
         InstanceIDModel.get_or_create_current_instance()
 
+        self.pushing_mock = mock.Mock()
+        self.pulling_mock = mock.Mock()
+        self.syncclient.pushing.connect(self.pushing_mock)
+        self.syncclient.pulling.connect(self.pulling_mock)
+
     def build_buffer_items(self, transfer_session, **kwargs):
 
         data = {
@@ -270,6 +276,10 @@ class SyncClientTestCase(LiveServerTestCase):
             self.syncclient.current_transfer_session.records_transferred,
             self.chunk_size,
         )
+        self.assertEqual(self.syncclient.current_transfer_session.bytes_received, 154)
+        self.pushing_mock.assert_called_once_with(
+            transfer_session=self.syncclient.current_transfer_session
+        )
 
     @mock_patch_decorator
     def test_pull_records(self):
@@ -300,6 +310,10 @@ class SyncClientTestCase(LiveServerTestCase):
             self.syncclient.current_transfer_session.records_transferred,
             self.chunk_size,
         )
+        self.assertEqual(self.syncclient.current_transfer_session.bytes_received, 154)
+        self.pulling_mock.assert_called_once_with(
+            transfer_session=self.syncclient.current_transfer_session
+        )
 
     @mock_patch_decorator
     def test_create_transfer_session_push(self):
@@ -321,3 +335,32 @@ class SyncClientTestCase(LiveServerTestCase):
         self.syncclient._close_transfer_session()
         self.syncclient.close_sync_session()
         self.assertEqual(SyncSession.objects.filter(active=True).count(), 0)
+
+
+class SessionWrapperTestCase(TestCase):
+    @mock.patch("requests.sessions.Session.request")
+    def test_request(self, mocked_super_request):
+        expected = mocked_super_request.return_value = mock.Mock(
+            headers={"Content-Length": 1024}, raise_for_status=mock.Mock()
+        )
+
+        wrapper = SessionWrapper()
+        actual = wrapper.request("GET", "test_url", is_test=True)
+        mocked_super_request.assert_called_once_with("GET", "test_url", is_test=True)
+        self.assertEqual(expected, actual)
+
+        self.assertEqual(wrapper.bytes_received, 1024)
+
+    @mock.patch("requests.sessions.Session.prepare_request")
+    def test_request(self, mocked_super_prepare_request):
+        expected = mocked_super_prepare_request.return_value = mock.Mock(
+            headers={"Content-Length": 256},
+        )
+
+        request = mock.Mock()
+        wrapper = SessionWrapper()
+        actual = wrapper.prepare_request(request)
+        mocked_super_prepare_request.assert_called_once_with(request)
+
+        self.assertEqual(expected, actual)
+        self.assertEqual(wrapper.bytes_sent, 256)

@@ -13,11 +13,11 @@ from morango.registry import syncable_models
 
 logger = logging.getLogger(__name__)
 
-BYTES_PREFIXES = ('', 'Ki', 'Mi', 'Gi', 'Ti')
+BYTES_PREFIXES = ("", "Ki", "Mi", "Gi", "Ti")
 PREFIX_FACTOR_BYTES = 1024.0
 
 
-def bytes_for_humans(size, suffix='B'):
+def bytes_for_humans(size, suffix="B"):
     """
     Function to get bytes in more human readable format, untranslated, for logging purposes.
 
@@ -27,11 +27,11 @@ def bytes_for_humans(size, suffix='B'):
     """
     for prefix in BYTES_PREFIXES:
         if size < PREFIX_FACTOR_BYTES:
-            if prefix == '':
+            if prefix == "":
                 return "{}{}".format(size, suffix)
             return "{:.2f}{}{}".format(size, prefix, suffix)
         size /= PREFIX_FACTOR_BYTES
-    return "{:.2f}{}{}".format(size, 'Pi', suffix)
+    return "{:.2f}{}{}".format(size, "Pi", suffix)
 
 
 # taken from https://github.com/FactoryBoy/factory_boy/blob/master/factory/django.py#L256
@@ -90,7 +90,7 @@ class mute_signals(object):
         return wrapper
 
 
-def validate_and_create_buffer_data(data, transfer_session):
+def validate_and_create_buffer_data(data, transfer_session, connection=None):
     data = copy.deepcopy(data)
     rmcb_list = []
     buffer_list = []
@@ -155,6 +155,13 @@ def validate_and_create_buffer_data(data, transfer_session):
 
     with transaction.atomic():
         transfer_session.records_transferred += len(data)
+
+        if connection is not None:
+            transfer_session.bytes_sent = connection.bytes_sent
+        if connection is not None:
+            transfer_session.bytes_received = connection.bytes_received
+
         transfer_session.save()
+
         Buffer.objects.bulk_create(buffer_list)
         RecordMaxCounterBuffer.objects.bulk_create(rmcb_list)
