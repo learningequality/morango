@@ -414,6 +414,21 @@ class SyncSignal(object):
             handler(**fire_kwargs)
 
 
+class SyncSignalGroup(SyncSignal):
+    """
+    Breaks down a signal into started, in_progress, and completed stages
+    """
+    def __init__(self, **kwargs_defaults):
+        super(SyncSignalGroup, self).__init__(**kwargs_defaults)
+        self.started = SyncSignal(**kwargs_defaults)
+        self.in_progress = SyncSignal(**kwargs_defaults)
+        self.completed = SyncSignal(**kwargs_defaults)
+
+        self.started.connect(self.fire)
+        self.in_progress.connect(self.fire)
+        self.completed.connect(self.fire)
+
+
 class SyncClient(object):
     """
     Controller to support client in initiating syncing and performing related operations.
@@ -431,17 +446,19 @@ class SyncClient(object):
         self.current_transfer_session = None
 
         # setup signals, clearly defining the properties we're going to send
-        self.queueing = SyncSignal(local=True)
-        self.pushing = SyncSignal(transfer_session=None)
-        self.pulling = SyncSignal(transfer_session=None)
-        self.dequeueing = SyncSignal(local=True)
+        self.session_creation = SyncSignalGroup()
+        self.queueing = SyncSignalGroup(local=True)
+        self.pushing = SyncSignalGroup(transfer_session=None)
+        self.pulling = SyncSignalGroup(transfer_session=None)
+        self.dequeueing = SyncSignalGroup(local=True)
 
     def initiate_push(self, sync_filter):
         logger.info("Initiating push sync")
         self._create_transfer_session(True, sync_filter)
 
-        self.queueing.fire(local=True)
+        self.queueing.started.fire(local=True)
         _queue_into_buffer(self.current_transfer_session)
+        self.queueing.completed.fire(local=True)
 
         # update the records_total for client and server transfer session
         records_total = Buffer.objects.filter(
@@ -459,8 +476,9 @@ class SyncClient(object):
         )
 
         logger.info("Beginning pushing of data...")
-        self.pushing.fire(transfer_session=self.current_transfer_session)
+        self.pushing.started.fire(transfer_session=self.current_transfer_session)
         self._push_records()
+        self.pushing.completed.fire(transfer_session=self.current_transfer_session)
         logger.info("Completed push of data")
 
         # upon successful completion of pushing records, proceed to delete buffered records
@@ -488,12 +506,14 @@ class SyncClient(object):
         )
         # pull records and close transfer session upon completion
         logger.info("Beginning pulling of data...")
-        self.pulling.fire(transfer_session=self.current_transfer_session)
+        self.pulling.started.fire(transfer_session=self.current_transfer_session)
         self._pull_records()
+        self.pulling.completed.fire(transfer_session=self.current_transfer_session)
         logger.info("Completed pull of data")
 
-        self.dequeueing.fire(local=True)
+        self.dequeueing.started.fire(local=True)
         _dequeue_into_store(self.current_transfer_session)
+        self.dequeueing.completed.fire(local=True)
 
         # update database max counters but use latest fsics on client
         DatabaseMaxCounter.update_fsics(
@@ -551,7 +571,7 @@ class SyncClient(object):
                 self.current_transfer_session,
             )
 
-            self.pulling.fire(transfer_session=self.current_transfer_session)
+            self.pulling.in_progress.fire(transfer_session=self.current_transfer_session)
             self._log_transfer(
                 "Received {records_transferred}/{records_total} records totaling {transfer_total}"
             )
@@ -580,7 +600,7 @@ class SyncClient(object):
             )
             self.current_transfer_session.save()
 
-            self.pushing.fire(transfer_session=self.current_transfer_session)
+            self.pushing.in_progress.fire(transfer_session=self.current_transfer_session)
             self._log_transfer(
                 "Sent {records_transferred}/{records_total} records totaling {transfer_total}"
             )
@@ -615,6 +635,7 @@ class SyncClient(object):
 
     def _create_transfer_session(self, push, filter):
         logger.info("Creating transfer session")
+        self.session_creation.started.fire()
         # build data for creating transfer session on server side
         data = {
             "id": uuid.uuid4().hex,
@@ -642,13 +663,18 @@ class SyncClient(object):
 
         # save transfersession locally before creating transfersession server side
         self.current_transfer_session.save()
+        self.session_creation.completed.fire()
 
         # the next call to create the session starts queueing on server side
         if not push:
-            self.queueing.fire(local=False)
+            self.queueing.started.fire(local=False)
 
         # create transfer session on server side
         transfer_resp = self.sync_connection._create_transfer_session(data)
+
+        # the next call to create the session starts queueing on server side
+        if not push:
+            self.queueing.completed.fire(local=False)
 
         self.current_transfer_session.server_fsic = (
             transfer_resp.json().get("server_fsic") or "{}"
