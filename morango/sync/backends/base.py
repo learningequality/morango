@@ -45,7 +45,6 @@ class BaseSQLWrapper(object):
             buffer=Buffer._meta.db_table,
             store=Store._meta.db_table,
             rmc=RecordMaxCounter._meta.db_table,
-            rmcb=RecordMaxCounterBuffer._meta.db_table,
             transfer_session_id=transfersession_id,
         )
         cursor.execute(delete_buffered_records)
@@ -77,7 +76,6 @@ class BaseSQLWrapper(object):
                                """.format(
             buffer=Buffer._meta.db_table,
             store=Store._meta.db_table,
-            rmc=RecordMaxCounter._meta.db_table,
             rmcb=RecordMaxCounterBuffer._meta.db_table,
             transfer_session_id=transfersession_id,
         )
@@ -100,7 +98,6 @@ class BaseSQLWrapper(object):
                                                                                   AND store.last_saved_counter <= rmcb2.counter
                                                                                   AND rmcb2.transfer_session_id = '{transfer_session_id}'))
                                """.format(
-            buffer=Buffer._meta.db_table,
             store=Store._meta.db_table,
             rmc=RecordMaxCounter._meta.db_table,
             rmcb=RecordMaxCounterBuffer._meta.db_table,
