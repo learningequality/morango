@@ -15,4 +15,3 @@ Pure Python sqlite-based Django DB replication engine.
 * Free software: MIT license
 * Documentation: https://morango.readthedocs.io.
 
-textsss
