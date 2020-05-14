@@ -8,7 +8,7 @@ Morango
    :target: http://codecov.io/github/learningequality/morango?branch=master
 .. image:: https://readthedocs.org/projects/morango/badge/?version=latest
    :target: http://morango.readthedocs.org/en/latest/
-dsd
+dsdsad
 Pure Python sqlite-based Django DB replication engine.
 
 
