@@ -16,3 +16,4 @@ Pure Python sqlite-based Django DB replication engine.
 * Documentation: https://morango.readthedocs.io.
 
 more editing!
+!
