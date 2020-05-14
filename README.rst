@@ -8,10 +8,13 @@ Morango
    :target: http://codecov.io/github/learningequality/morango?branch=master
 .. image:: https://readthedocs.org/projects/morango/badge/?version=latest
    :target: http://morango.readthedocs.org/en/latest/
-
+dsdsad
 Pure Python sqlite-based Django DB replication engine.
 
 
 * Free software: MIT license
 * Documentation: https://morango.readthedocs.io.
-s
+
+more editing!
+!cdcz
+ksldjdk
