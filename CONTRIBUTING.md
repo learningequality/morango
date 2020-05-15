@@ -51,6 +51,10 @@ If you are proposing a feature:
 Ready to contribute? Here's how to set up
 <span class="title-ref">morango</span> for local development.
 
+1.  Install system dependencies for the project. On Ubuntu:
+
+        $ sudo apt install libssl1.0-dev
+
 1.  Fork the <span class="title-ref">morango</span> repo on GitHub.
 
 2.  Clone your fork locally:

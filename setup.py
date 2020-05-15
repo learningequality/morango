@@ -5,22 +5,11 @@ from __future__ import print_function
 from __future__ import unicode_literals
 
 import io
-import os
-
-try:  # for pip >= 10
-    from pip._internal.req import parse_requirements
-except ImportError:  # for pip <= 9.0.3
-    from pip.req import parse_requirements
-
 from setuptools import find_packages, setup
 
 import morango
 
 readme = io.open("README.md", mode="r", encoding="utf-8").read()
-
-req_file = os.path.join(os.path.dirname(os.path.realpath(__file__)), "requirements.txt")
-reqs = parse_requirements(req_file, session=False)
-install_requires = [str(ir.req) for ir in reqs]
 
 setup(
     name='morango',
@@ -35,7 +24,15 @@ setup(
     package_dir={'morango':
                  'morango'},
     include_package_data=True,
-    install_requires=install_requires,
+    install_requires=[
+        "django<1.12",
+        "django-mptt<0.10.0",
+        "rsa>=3.4.2,<3.5",
+        "djangorestframework==3.9.1",
+        "django-ipware>=1.1.6,<1.2",
+        "future==0.16.0",
+        "requests",
+    ],
     license="MIT",
     zip_safe=False,
     keywords=['database', 'syncing', 'morango'],
