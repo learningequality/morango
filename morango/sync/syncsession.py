@@ -469,7 +469,7 @@ class SyncClient(object):
         self.queueing = SyncSignalGroup(local=True)
         self.pushing = SyncSignalGroup(transfer_session=None)
         self.pulling = SyncSignalGroup(transfer_session=None)
-        self.dequeueing = SyncSignalGroup(local=True)
+        self.dequeuing = SyncSignalGroup(local=True)
 
     def initiate_push(self, sync_filter):
         self._create_transfer_session(True, sync_filter)
@@ -516,7 +516,7 @@ class SyncClient(object):
 
         # raise RuntimeError("oops")
 
-        with self.dequeueing.send(local=True):
+        with self.dequeuing.send(local=True):
             _dequeue_into_store(self.current_transfer_session)
 
         # update database max counters but use latest fsics on client
@@ -674,13 +674,13 @@ class SyncClient(object):
     def _close_transfer_session(self):
         # deleting the server's transfer session also dequeues
         if self.current_transfer_session.push:
-            self.dequeueing.started.fire(local=False)
+            self.dequeuing.started.fire(local=False)
 
         # "delete" transfer session on server side
         self.sync_connection._close_transfer_session(self.current_transfer_session)
 
         if self.current_transfer_session.push:
-            self.dequeueing.completed.fire(local=False)
+            self.dequeuing.completed.fire(local=False)
 
         # "delete" our own local transfer session
         self.current_transfer_session.active = False
