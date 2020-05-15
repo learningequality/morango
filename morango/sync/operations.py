@@ -276,8 +276,9 @@ def _deserialize_from_store(profile):
                 dirty_children = (
                     Store.objects.filter(dirty_bit=True, profile=profile)
                     # handle parents or if the model has no parent
-                    .filter(Q(_self_ref_fk__in=clean_parents) | Q(_self_ref_fk=""))
-                    .filter(query)
+                    .filter(
+                        Q(_self_ref_fk__in=clean_parents) | Q(_self_ref_fk="")
+                    ).filter(query)
                 )
 
                 # keep iterating until size of dirty_children is 0

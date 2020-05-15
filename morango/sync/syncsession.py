@@ -38,7 +38,6 @@ from morango.models.core import RecordMaxCounterBuffer
 from morango.models.core import SyncSession
 from morango.models.core import TransferSession
 from morango.utils import CAPABILITIES
-from morango.sync.utils import bytes_for_humans
 
 if GZIP_BUFFER_POST in CAPABILITIES:
     from gzip import GzipFile
@@ -418,6 +417,7 @@ class SyncSignalGroup(SyncSignal):
     """
     Breaks down a signal into started, in_progress, and completed stages
     """
+
     def __init__(self, **kwargs_defaults):
         super(SyncSignalGroup, self).__init__(**kwargs_defaults)
         self.started = SyncSignal(**kwargs_defaults)
@@ -490,7 +490,9 @@ class SyncClient(object):
             {"records_total": records_total}, self.current_transfer_session
         )
 
-        with self.pushing.send(transfer_session=self.current_transfer_session) as status:
+        with self.pushing.send(
+            transfer_session=self.current_transfer_session
+        ) as status:
             self._push_records(status.in_progress)
 
         # upon successful completion of pushing records, proceed to delete buffered records
@@ -573,7 +575,9 @@ class SyncClient(object):
                 self.current_transfer_session,
             )
 
-            self.pulling.in_progress.fire(transfer_session=self.current_transfer_session)
+            self.pulling.in_progress.fire(
+                transfer_session=self.current_transfer_session
+            )
 
     def _push_records(self, callback=None):
         # paginate buffered records so we do not load them all into memory

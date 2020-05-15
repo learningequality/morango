@@ -13,26 +13,6 @@ from morango.registry import syncable_models
 
 logger = logging.getLogger(__name__)
 
-BYTES_PREFIXES = ("", "Ki", "Mi", "Gi", "Ti")
-PREFIX_FACTOR_BYTES = 1024.0
-
-
-def bytes_for_humans(size, suffix="B"):
-    """
-    Function to get bytes in more human readable format, untranslated, for logging purposes.
-
-    :type size: int
-    :type suffix: str
-    :rtype: str
-    """
-    for prefix in BYTES_PREFIXES:
-        if size < PREFIX_FACTOR_BYTES:
-            if prefix == "":
-                return "{}{}".format(size, suffix)
-            return "{:.2f}{}{}".format(size, prefix, suffix)
-        size /= PREFIX_FACTOR_BYTES
-    return "{:.2f}{}{}".format(size, "Pi", suffix)
-
 
 # taken from https://github.com/FactoryBoy/factory_boy/blob/master/factory/django.py#L256
 class mute_signals(object):
