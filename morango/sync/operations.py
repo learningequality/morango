@@ -80,7 +80,6 @@ def _serialize_into_store(profile, filter=None):
     2. If there is no store record for this app model, we proceed to create an in memory store model and append to a list to be
     bulk created on a per class model basis.
     """
-    logger.info("Serializing records")
     # ensure that we write and retrieve the counter in one go for consistency
     current_id = InstanceIDModel.get_current_instance_and_increment_counter()
 
@@ -229,7 +228,6 @@ def _serialize_into_store(profile, filter=None):
                     partition=f,
                     defaults={"counter": current_id.counter},
                 )
-    logger.info("Serialization complete")
 
 
 def _deserialize_from_store(profile):
@@ -243,7 +241,6 @@ def _deserialize_from_store(profile):
     # we first serialize to avoid deserialization merge conflicts
     _serialize_into_store(profile)
 
-    logger.info("Deserializing records")
     fk_cache = {}
     with transaction.atomic(using=USING_DB):
         excluded_list = []
@@ -333,7 +330,6 @@ def _deserialize_from_store(profile):
         Store.objects.exclude(id__in=excluded_list).filter(
             profile=profile, dirty_bit=True
         ).update(dirty_bit=False)
-    logger.info("Deserialization complete")
 
 
 @transaction.atomic(using=USING_DB)
@@ -344,7 +340,6 @@ def _queue_into_buffer(transfersession):
     We use raw sql queries to place data in the buffer and the record max counter buffer, which matches the conditions of the FSIC,
     as well as the partition for the data we are syncing.
     """
-    logger.info("Queuing records for transfer")
     last_saved_by_conditions = []
     filter_prefixes = Filter(transfersession.filter)
     server_fsic = json.loads(transfersession.server_fsic)
@@ -419,7 +414,6 @@ def _queue_into_buffer(transfersession):
             outgoing_buffer=Buffer._meta.db_table,
         )
         cursor.execute(queue_rmc_buffer)
-    logger.info("Queuing complete")
 
 
 @transaction.atomic(using=USING_DB)
@@ -429,7 +423,6 @@ def _dequeue_into_store(transfersession):
     ALGORITHM: Incrementally insert and delete on a case by case basis to ensure subsequent cases
     are not effected by previous cases.
     """
-    logger.info("Dequeuing records into store")
     with connection.cursor() as cursor:
         DBBackend._dequeuing_delete_rmcb_records(cursor, transfersession.id)
         DBBackend._dequeuing_delete_buffered_records(cursor, transfersession.id)
@@ -447,6 +440,5 @@ def _dequeue_into_store(transfersession):
         DBBackend._dequeuing_insert_remaining_rmcb(cursor, transfersession.id)
         DBBackend._dequeuing_delete_remaining_rmcb(cursor, transfersession.id)
         DBBackend._dequeuing_delete_remaining_buffer(cursor, transfersession.id)
-    logger.info("Dequeuing complete")
     if getattr(settings, "MORANGO_DESERIALIZE_AFTER_DEQUEUING", True):
         _deserialize_from_store(transfersession.sync_session.profile)
