@@ -28,6 +28,7 @@ from morango.models.fields.crypto import SharedKey
 from morango.sync.operations import _dequeue_into_store
 from morango.sync.operations import _queue_into_buffer
 from morango.sync.operations import _serialize_into_store
+from morango.sync.operations import OperationLogger
 from morango.sync.utils import validate_and_create_buffer_data
 from morango.utils import CAPABILITIES
 
@@ -359,9 +360,10 @@ class TransferSessionViewSet(viewsets.ModelViewSet):
         if not is_a_push:
 
             if getattr(settings, "MORANGO_SERIALIZE_BEFORE_QUEUING", True):
-                _serialize_into_store(
-                    transfersession.sync_session.profile, filter=requested_filter
-                )
+                with OperationLogger("Serializing records", "Serialization complete"):
+                    _serialize_into_store(
+                        transfersession.sync_session.profile, filter=requested_filter
+                    )
 
         transfersession.server_fsic = json.dumps(
             DatabaseMaxCounter.calculate_filter_max_counters(requested_filter)
@@ -371,7 +373,8 @@ class TransferSessionViewSet(viewsets.ModelViewSet):
         if not is_a_push:
 
             # queue records to get ready for pulling
-            _queue_into_buffer(transfersession)
+            with OperationLogger("Queueing records into store", "Queueing complete"):
+                _queue_into_buffer(transfersession)
             # update records_total on transfer session object
             records_total = Buffer.objects.filter(
                 transfer_session=transfersession
@@ -387,7 +390,8 @@ class TransferSessionViewSet(viewsets.ModelViewSet):
     def perform_destroy(self, transfersession):
         if transfersession.push:
             # dequeue into store and then delete records
-            _dequeue_into_store(transfersession)
+            with OperationLogger("Dequeuing records into store", "Dequeuing complete"):
+                _dequeue_into_store(transfersession)
             # update database max counters but use latest fsics on server
             DatabaseMaxCounter.update_fsics(
                 json.loads(transfersession.client_fsic),

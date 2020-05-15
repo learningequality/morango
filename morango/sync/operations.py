@@ -39,6 +39,21 @@ if "postgresql" in transaction.get_connection(USING_DB).vendor:
     assert USING_DB in connections, "Please add a `default-serializable` database connection in your django settings file, \
                                      which copies all the configuration settings of the `default` db connection"
 
+class OperationLogger(object):
+    def __init__(self, start_msg, end_msg):
+        self.start_msg = start_msg
+        self.end_msg = end_msg
+
+    def __enter__(self):
+        logger.info(self.start_msg)
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        if exc_type is None:
+            logger.info(self.end_msg)
+        else:
+            logger.info("Error: {}".format(self.start_msg))
+
+
 def _join_with_logical_operator(lst, operator):
     op = ") {operator} (".format(operator=operator)
     return "(({items}))".format(items=op.join(lst))
