@@ -469,7 +469,7 @@ class SyncClient(object):
 
         # setup signals, clearly defining the properties we're going to send
         self.session = SyncSignalGroup()
-        self.queueing = SyncSignalGroup(local=True)
+        self.queuing = SyncSignalGroup(local=True)
         self.pushing = SyncSignalGroup(transfer_session=None)
         self.pulling = SyncSignalGroup(transfer_session=None)
         self.dequeuing = SyncSignalGroup(local=True)
@@ -477,7 +477,7 @@ class SyncClient(object):
     def initiate_push(self, sync_filter):
         self._create_transfer_session(True, sync_filter)
 
-        with self.queueing.send(local=True):
+        with self.queuing.send(local=True):
             _queue_into_buffer(self.current_transfer_session)
 
         # update the records_total for client and server transfer session
@@ -657,14 +657,14 @@ class SyncClient(object):
 
         # the next call to create the session starts queueing on server side
         if not push:
-            self.queueing.started.fire(local=False)
+            self.queuing.started.fire(local=False)
 
         # create transfer session on server side
         transfer_resp = self.sync_connection._create_transfer_session(data)
 
         # the next call to create the session starts queueing on server side
         if not push:
-            self.queueing.completed.fire(local=False)
+            self.queuing.completed.fire(local=False)
 
         self.current_transfer_session.server_fsic = (
             transfer_resp.json().get("server_fsic") or "{}"
