@@ -271,13 +271,16 @@ class SyncClientTestCase(LiveServerTestCase):
         self.assertEqual(
             self.syncclient.current_transfer_session.records_transferred, 0
         )
-        self.syncclient._push_records()
+        with self.syncclient.pushing.send(
+            transfer_session=self.syncclient.current_transfer_session
+        ) as in_progress:
+            self.syncclient._push_records(in_progress.fire)
         self.assertEqual(
             self.syncclient.current_transfer_session.records_transferred,
             self.chunk_size,
         )
         self.assertEqual(self.syncclient.current_transfer_session.bytes_received, 154)
-        self.pushing_mock.assert_called_once_with(
+        self.pushing_mock.assert_called_with(
             transfer_session=self.syncclient.current_transfer_session
         )
 

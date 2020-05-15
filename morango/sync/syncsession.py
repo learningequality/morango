@@ -435,7 +435,9 @@ class SyncSignalGroup(SyncSignal):
 
         :rtype: SyncSignalGroup
         """
-        context_group = SyncSignalGroup(**kwargs)
+        defaults = self._defaults.copy()
+        defaults.update(kwargs)
+        context_group = SyncSignalGroup(**defaults)
         context_group.started.connect(self.started.fire)
         context_group.in_progress.connect(self.in_progress.fire)
         context_group.completed.connect(self.completed.fire)
@@ -443,6 +445,7 @@ class SyncSignalGroup(SyncSignal):
 
     def __enter__(self):
         self.started.fire()
+        return self
 
     def __exit__(self, *args, **kwargs):
         self.completed.fire()
@@ -493,7 +496,7 @@ class SyncClient(object):
         with self.pushing.send(
             transfer_session=self.current_transfer_session
         ) as status:
-            self._push_records(status.in_progress)
+            self._push_records(status.in_progress.fire)
 
         # upon successful completion of pushing records, proceed to delete buffered records
         Buffer.objects.filter(transfer_session=self.current_transfer_session).delete()
@@ -511,8 +514,10 @@ class SyncClient(object):
             self._close_transfer_session()
             return
 
-        with self.pulling.send(transfer_session=self.current_transfer_session):
-            self._pull_records()
+        with self.pulling.send(
+            transfer_session=self.current_transfer_session
+        ) as status:
+            self._pull_records(status.in_progress.fire)
 
         # raise RuntimeError("oops")
 
@@ -575,9 +580,8 @@ class SyncClient(object):
                 self.current_transfer_session,
             )
 
-            self.pulling.in_progress.fire(
-                transfer_session=self.current_transfer_session
-            )
+            if callback is not None:
+                callback()
 
     def _push_records(self, callback=None):
         # paginate buffered records so we do not load them all into memory
