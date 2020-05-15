@@ -8,18 +8,18 @@ from django.db import migrations, models
 class Migration(migrations.Migration):
 
     dependencies = [
-        ('morango', '0014_syncsession_extra_fields'),
+        ("morango", "0014_syncsession_extra_fields"),
     ]
 
     operations = [
         migrations.AddField(
-            model_name='transfersession',
-            name='bytes_received',
+            model_name="transfersession",
+            name="bytes_received",
             field=models.BigIntegerField(blank=True, default=0, null=True),
         ),
         migrations.AddField(
-            model_name='transfersession',
-            name='bytes_sent',
+            model_name="transfersession",
+            name="bytes_sent",
             field=models.BigIntegerField(blank=True, default=0, null=True),
         ),
     ]
