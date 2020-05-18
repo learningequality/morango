@@ -9,8 +9,10 @@ Morango
 .. image:: https://readthedocs.org/projects/morango/badge/?version=latest
    :target: http://morango.readthedocs.org/en/latest/
 
-Pure Python Django DB replication engine.
+Pure Python sqlite-based Django DB replication engine.
 
 
 * Free software: MIT license
 * Documentation: https://morango.readthedocs.io.
+
+more edit
