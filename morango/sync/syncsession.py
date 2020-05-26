@@ -391,20 +391,22 @@ class SyncSignal(object):
 
     def __init__(self, **kwargs_defaults):
         """
-        Default keys/values that the signal consumer can depend on being present
+        Default keys/values that the signal consumer can depend on being present.
         """
         self._handlers = []
         self._defaults = kwargs_defaults
 
     def connect(self, handler):
         """
+        Adds a callable handler that will be called when the signal is fired.
+
         :type handler: function
         """
         self._handlers.append(handler)
 
     def fire(self, **kwargs):
         """
-        Fires the handler functions connected via `connect`
+        Fires the handler functions connected via `connect`.
         """
         fire_kwargs = self._defaults.copy()
         fire_kwargs.update(kwargs)
@@ -415,8 +417,16 @@ class SyncSignal(object):
 
 class SyncSignalGroup(SyncSignal):
     """
-    Breaks down a signal into started, in_progress, and completed stages
+    Breaks down a signal into `started`, `in_progress`, and `completed` stages. The
+    `kwargs_defaults` are passed through to each signal stage.
     """
+
+    started = SyncSignal()
+    """The started signal, which will be fired at the beginning of the procedure."""
+    in_progress = SyncSignal()
+    """The in progress signal, which should be fired at least once during the procedure."""
+    completed = SyncSignal()
+    """The completed signal, which should be fired at the end of the procedure"""
 
     def __init__(self, **kwargs_defaults):
         super(SyncSignalGroup, self).__init__(**kwargs_defaults)
@@ -431,7 +441,7 @@ class SyncSignalGroup(SyncSignal):
     def send(self, **kwargs):
         """
         Context manager helper that will signal started and fired when entered and exited,
-        and it'll send those with the `kwargs`
+        and it'll fire those with the `kwargs`.
 
         :rtype: SyncSignalGroup
         """
@@ -444,10 +454,16 @@ class SyncSignalGroup(SyncSignal):
         return context_group
 
     def __enter__(self):
+        """
+        Fires the `started` signal.
+        """
         self.started.fire()
         return self
 
     def __exit__(self, *args, **kwargs):
+        """
+        Fires the `completed` signal.
+        """
         self.completed.fire()
 
 
@@ -455,6 +471,17 @@ class SyncClient(object):
     """
     Controller to support client in initiating syncing and performing related operations.
     """
+
+    session = SyncSignalGroup()
+    """Signal group firing for each push and pull `TranferSession`."""
+    queuing = SyncSignalGroup(local=True)
+    """Queuing signal group for locally or remotely queuing data before transfer."""
+    pushing = SyncSignalGroup(transfer_session=None)
+    """Pushing signal group for tracking push progress of `TransferSession`. It is sent the `TransferSession` model."""
+    pulling = SyncSignalGroup(transfer_session=None)
+    """Pulling signal group for tracking pull progress of `TransferSession`. It is sent the `TransferSession` model."""
+    dequeuing = SyncSignalGroup(local=True)
+    """Dequeuing signal group for locally or remotely dequeuing data after transfer."""
 
     def __init__(self, sync_connection, sync_session, chunk_size=500):
         """
@@ -466,13 +493,6 @@ class SyncClient(object):
         self.sync_session = sync_session
         self.chunk_size = chunk_size
         self.current_transfer_session = None
-
-        # setup signals, clearly defining the properties we're going to send
-        self.session = SyncSignalGroup()
-        self.queuing = SyncSignalGroup(local=True)
-        self.pushing = SyncSignalGroup(transfer_session=None)
-        self.pulling = SyncSignalGroup(transfer_session=None)
-        self.dequeuing = SyncSignalGroup(local=True)
 
     def initiate_push(self, sync_filter):
         self._create_transfer_session(True, sync_filter)
