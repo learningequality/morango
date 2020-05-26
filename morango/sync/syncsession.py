@@ -519,8 +519,6 @@ class SyncClient(object):
         ) as status:
             self._pull_records(status.in_progress.fire)
 
-        # raise RuntimeError("oops")
-
         with self.dequeuing.send(local=True):
             _dequeue_into_store(self.current_transfer_session)
 
