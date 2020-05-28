@@ -105,32 +105,32 @@ def create_dummy_store_data():
     with mock.patch("platform.platform", return_value="plataforma"):
         data["group2_id"] = InstanceIDModel.get_or_create_current_instance()[0]  # new counter is at 0
 
-    data["mc"].serialize_into_store()  # new counter is at 1
-    data["group2_c1"] = [FacilityFactory() for _ in range(5)]
+        data["mc"].serialize_into_store()  # new counter is at 1
+        data["group2_c1"] = [FacilityFactory() for _ in range(5)]
 
-    # create users and logs associated with user
-    data["user2"] = MyUser.objects.create(username="rob")
-    data["user2_sumlogs"] = [
-        SummaryLog.objects.create(user=data["user2"]) for _ in range(5)
-    ]
-    data["user2_interlogs"] = [
-        InteractionLog.objects.create(user=data["user2"]) for _ in range(5)
-    ]
+        # create users and logs associated with user
+        data["user2"] = MyUser.objects.create(username="rob")
+        data["user2_sumlogs"] = [
+            SummaryLog.objects.create(user=data["user2"]) for _ in range(5)
+        ]
+        data["user2_interlogs"] = [
+            InteractionLog.objects.create(user=data["user2"]) for _ in range(5)
+        ]
 
-    data["user3"] = MyUser.objects.create(username="zob")
-    data["user3_sumlogs"] = [
-        SummaryLog.objects.create(user=data["user3"]) for _ in range(5)
-    ]
-    data["user3_interlogs"] = [
-        InteractionLog.objects.create(user=data["user3"]) for _ in range(5)
-    ]
+        data["user3"] = MyUser.objects.create(username="zob")
+        data["user3_sumlogs"] = [
+            SummaryLog.objects.create(user=data["user3"]) for _ in range(5)
+        ]
+        data["user3_interlogs"] = [
+            InteractionLog.objects.create(user=data["user3"]) for _ in range(5)
+        ]
 
-    data["mc"].serialize_into_store()  # new counter is at 2
+        data["mc"].serialize_into_store()  # new counter is at 2
 
-    data["user4"] = MyUser.objects.create(
-        username="invalid", _morango_partition="badpartition"
-    )
-    data["mc"].serialize_into_store()  # new counter is at 3
+        data["user4"] = MyUser.objects.create(
+            username="invalid", _morango_partition="badpartition"
+        )
+        data["mc"].serialize_into_store()  # new counter is at 3
 
     return data
 

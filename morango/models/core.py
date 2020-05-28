@@ -153,11 +153,13 @@ class InstanceIDModel(UUIDModelMixin):
 
         return obj, created
 
-    @staticmethod
+    @classmethod
     @transaction.atomic
-    def get_current_instance_and_increment_counter():
-        InstanceIDModel.objects.filter(current=True).update(counter=F("counter") + 1)
-        return InstanceIDModel.objects.get(current=True)
+    def get_current_instance_and_increment_counter(cls):
+        instance, _ = cls.get_or_create_current_instance()
+        cls.objects.filter(id=instance.id).update(counter=F("counter") + 1)
+        instance.refresh_from_db(fields=["counter"])
+        return instance
 
     def get_proquint(self):
         return proquint.from_int(int(self.id[:8], 16))
