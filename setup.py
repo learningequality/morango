@@ -32,7 +32,6 @@ setup(
         "django-ipware>=1.1.6,<1.2",
         "future==0.16.0",
         "requests",
-        "six",
     ],
     license="MIT",
     zip_safe=False,
