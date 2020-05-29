@@ -552,7 +552,7 @@ class SyncClient(object):
         ) as status:
             self._pull_records(callback=status.in_progress.fire)
 
-        with self.signals.dequeuing.send(local=True):
+        with self.signals.dequeuing.send(transfer_session=self.current_transfer_session):
             _dequeue_into_store(self.current_transfer_session)
 
         # update database max counters but use latest fsics on client
