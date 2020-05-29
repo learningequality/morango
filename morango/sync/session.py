@@ -24,8 +24,8 @@ class SessionWrapper(Session):
                 content_length = response.headers.get("Content-Length", 0)
                 if content_length:
                     self.bytes_received += int(content_length)
-            except TypeError as e:
-                raise e
+            except TypeError:
+                pass
 
             response.raise_for_status()
             return response
@@ -51,8 +51,8 @@ class SessionWrapper(Session):
             content_length = prepped.headers.get("Content-Length", 0)
             if content_length:
                 self.bytes_sent += int(content_length)
-        except TypeError as e:
-            raise e
+        except TypeError:
+            pass
 
         return prepped
 

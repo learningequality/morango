@@ -373,7 +373,7 @@ class TransferSessionViewSet(viewsets.ModelViewSet):
         if not is_a_push:
 
             # queue records to get ready for pulling
-            with OperationLogger("Queueing records into store", "Queueing complete"):
+            with OperationLogger("Queueing records into buffer", "Queueing complete"):
                 _queue_into_buffer(transfersession)
             # update records_total on transfer session object
             records_total = Buffer.objects.filter(

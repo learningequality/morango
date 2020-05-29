@@ -4,7 +4,7 @@ The simplest ways to use this module are the :func:`humanize` and :func:`uuid`
 functions. For tighter control over the output, see :class:`HumanHasher`.
 """
 import uuid
-import six
+from django.utils import six
 
 # Copyright (c) 2014 SUNET. All rights reserved.
 #
@@ -59,7 +59,7 @@ def from_int(data):
     :type data: int
     :rtype: string
     """
-    if not isinstance(data, int) and not isinstance(data, six.integer_types):
+    if not isinstance(data, six.integer_types):
         raise TypeError("Input must be integer")
 
     res = []

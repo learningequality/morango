@@ -1,3 +1,4 @@
+from collections import namedtuple
 import json
 import logging
 import socket
@@ -467,21 +468,31 @@ class SyncSignalGroup(SyncSignal):
         self.completed.fire()
 
 
+class SyncClientSignals(object):
+    """
+    Class for holding all signal types, attached to `SyncClient` as attribute. All groups
+    are sent the `TransferSession` object via the `transfer_session` keyword argument.
+    """
+
+    session = SyncSignalGroup(transfer_session=None)
+    """Signal group firing for each push and pull `TransferSession`."""
+    queuing = SyncSignalGroup(transfer_session=None)
+    """Queuing signal group for locally or remotely queuing data before transfer."""
+    pushing = SyncSignalGroup(transfer_session=None)
+    """Pushing signal group for tracking push progress of `TransferSession`."""
+    pulling = SyncSignalGroup(transfer_session=None)
+    """Pulling signal group for tracking pull progress of `TransferSession`."""
+    dequeuing = SyncSignalGroup(transfer_session=None)
+    """Dequeuing signal group for locally or remotely dequeuing data after transfer."""
+
+
 class SyncClient(object):
     """
     Controller to support client in initiating syncing and performing related operations.
     """
 
-    session = SyncSignalGroup()
-    """Signal group firing for each push and pull `TranferSession`."""
-    queuing = SyncSignalGroup(local=True)
-    """Queuing signal group for locally or remotely queuing data before transfer."""
-    pushing = SyncSignalGroup(transfer_session=None)
-    """Pushing signal group for tracking push progress of `TransferSession`. It is sent the `TransferSession` model."""
-    pulling = SyncSignalGroup(transfer_session=None)
-    """Pulling signal group for tracking pull progress of `TransferSession`. It is sent the `TransferSession` model."""
-    dequeuing = SyncSignalGroup(local=True)
-    """Dequeuing signal group for locally or remotely dequeuing data after transfer."""
+    signals = SyncClientSignals()
+    """A namespacing attribute clearly separating signal groups"""
 
     def __init__(self, sync_connection, sync_session, chunk_size=500):
         """
@@ -497,26 +508,29 @@ class SyncClient(object):
     def initiate_push(self, sync_filter):
         self._create_transfer_session(True, sync_filter)
 
-        with self.queuing.send(local=True):
+        with self.signals.queuing.send(transfer_session=self.current_transfer_session):
             _queue_into_buffer(self.current_transfer_session)
 
         # update the records_total for client and server transfer session
         records_total = Buffer.objects.filter(
             transfer_session=self.current_transfer_session
         ).count()
+
+        self.current_transfer_session.records_total = records_total
+        self.current_transfer_session.save()
+
         if records_total == 0:
             self._close_transfer_session()
             return
-        self.current_transfer_session.records_total = records_total
-        self.current_transfer_session.save()
+
         self.sync_connection._update_transfer_session(
             {"records_total": records_total}, self.current_transfer_session
         )
 
-        with self.pushing.send(
+        with self.signals.pushing.send(
             transfer_session=self.current_transfer_session
         ) as status:
-            self._push_records(status.in_progress.fire)
+            self._push_records(callback=status.in_progress.fire)
 
         # upon successful completion of pushing records, proceed to delete buffered records
         Buffer.objects.filter(transfer_session=self.current_transfer_session).delete()
@@ -534,12 +548,12 @@ class SyncClient(object):
             self._close_transfer_session()
             return
 
-        with self.pulling.send(
+        with self.signals.pulling.send(
             transfer_session=self.current_transfer_session
         ) as status:
-            self._pull_records(status.in_progress.fire)
+            self._pull_records(callback=status.in_progress.fire)
 
-        with self.dequeuing.send(local=True):
+        with self.signals.dequeuing.send(local=True):
             _dequeue_into_store(self.current_transfer_session)
 
         # update database max counters but use latest fsics on client
@@ -585,7 +599,7 @@ class SyncClient(object):
                 )
 
             validate_and_create_buffer_data(
-                data, self.current_transfer_session, self.sync_connection
+                data, self.current_transfer_session, connection=self.sync_connection
             )
             # update the records transferred so client and server are in agreement
             self.sync_connection._update_transfer_session(
@@ -644,7 +658,6 @@ class SyncClient(object):
         self.sync_connection.session.close()
 
     def _create_transfer_session(self, push, filter):
-        self.session.started.fire()
         # build data for creating transfer session on server side
         data = {
             "id": uuid.uuid4().hex,
@@ -655,6 +668,9 @@ class SyncClient(object):
 
         data["last_activity_timestamp"] = timezone.now()
         self.current_transfer_session = TransferSession.objects.create(**data)
+        self.signals.session.started.fire(
+            transfer_session=self.current_transfer_session
+        )
         data.pop("last_activity_timestamp")
 
         if push:
@@ -675,14 +691,18 @@ class SyncClient(object):
 
         # the next call to create the session starts queueing on server side
         if not push:
-            self.queuing.started.fire(local=False)
+            self.signals.queuing.started.fire(
+                transfer_session=self.current_transfer_session
+            )
 
         # create transfer session on server side
         transfer_resp = self.sync_connection._create_transfer_session(data)
 
-        # the next call to create the session starts queueing on server side
+        # the above call to create the session started queueing on server side, so it's done
         if not push:
-            self.queuing.completed.fire(local=False)
+            self.signals.queuing.completed.fire(
+                transfer_session=self.current_transfer_session
+            )
 
         self.current_transfer_session.server_fsic = (
             transfer_resp.json().get("server_fsic") or "{}"
@@ -696,16 +716,22 @@ class SyncClient(object):
     def _close_transfer_session(self):
         # deleting the server's transfer session also dequeues
         if self.current_transfer_session.push:
-            self.dequeuing.started.fire(local=False)
+            self.signals.dequeuing.started.fire(
+                transfer_session=self.current_transfer_session
+            )
 
         # "delete" transfer session on server side
         self.sync_connection._close_transfer_session(self.current_transfer_session)
 
         if self.current_transfer_session.push:
-            self.dequeuing.completed.fire(local=False)
+            self.signals.dequeuing.completed.fire(
+                transfer_session=self.current_transfer_session
+            )
 
         # "delete" our own local transfer session
         self.current_transfer_session.active = False
         self.current_transfer_session.save()
+        self.signals.session.completed.fire(
+            transfer_session=self.current_transfer_session
+        )
         self.current_transfer_session = None
-        self.session.completed.fire()
