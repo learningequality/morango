@@ -231,8 +231,8 @@ class SyncClientTestCase(LiveServerTestCase):
 
         self.pushing_mock = mock.Mock()
         self.pulling_mock = mock.Mock()
-        self.syncclient.pushing.connect(self.pushing_mock)
-        self.syncclient.pulling.connect(self.pulling_mock)
+        self.syncclient.signals.pushing.connect(self.pushing_mock)
+        self.syncclient.signals.pulling.connect(self.pulling_mock)
 
     def build_buffer_items(self, transfer_session, **kwargs):
 
@@ -271,7 +271,7 @@ class SyncClientTestCase(LiveServerTestCase):
         self.assertEqual(
             self.syncclient.current_transfer_session.records_transferred, 0
         )
-        with self.syncclient.pushing.send(
+        with self.syncclient.signals.pushing.send(
             transfer_session=self.syncclient.current_transfer_session
         ) as in_progress:
             self.syncclient._push_records(in_progress.fire)
@@ -279,7 +279,7 @@ class SyncClientTestCase(LiveServerTestCase):
             self.syncclient.current_transfer_session.records_transferred,
             self.chunk_size,
         )
-        self.assertEqual(self.syncclient.current_transfer_session.bytes_received, 154)
+        self.assertGreaterEqual(self.syncclient.current_transfer_session.bytes_received, 150)
         self.pushing_mock.assert_called_with(
             transfer_session=self.syncclient.current_transfer_session
         )
@@ -302,7 +302,7 @@ class SyncClientTestCase(LiveServerTestCase):
         self.assertEqual(
             self.syncclient.current_transfer_session.records_transferred, 0
         )
-        with self.syncclient.pulling.send(
+        with self.syncclient.signals.pulling.send(
             transfer_session=self.syncclient.current_transfer_session
         ) as status:
             self.syncclient._pull_records(status.in_progress.fire)
@@ -316,7 +316,7 @@ class SyncClientTestCase(LiveServerTestCase):
             self.syncclient.current_transfer_session.records_transferred,
             self.chunk_size,
         )
-        self.assertEqual(self.syncclient.current_transfer_session.bytes_received, 154)
+        self.assertGreaterEqual(self.syncclient.current_transfer_session.bytes_received, 150)
         self.pulling_mock.assert_called_with(
             transfer_session=self.syncclient.current_transfer_session
         )
