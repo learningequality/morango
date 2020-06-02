@@ -11,8 +11,8 @@ from django.utils.six import iteritems
 from requests.adapters import HTTPAdapter
 from requests.packages.urllib3.util.retry import Retry
 from rest_framework.exceptions import ValidationError
-from six.moves.urllib.parse import urljoin
-from six.moves.urllib.parse import urlparse
+from django.utils.six.moves.urllib.parse import urljoin
+from django.utils.six.moves.urllib.parse import urlparse
 
 from .operations import _dequeue_into_store
 from .operations import _queue_into_buffer
