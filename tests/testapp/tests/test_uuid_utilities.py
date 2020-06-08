@@ -100,9 +100,54 @@ class InstanceIDModelTestCase(TestCase):
         )
         self.assertTrue(InstanceIDModel.objects.get(id=ident).current)
 
+    @mock.patch("uuid.getnode", return_value=24359248572014)
+    @mock.patch("platform.platform", return_value="Windows 3.1")
+    @mock.patch("platform.node", return_value="myhost")
+    @mock.patch("morango.models.utils._get_database_path", return_value="<dummypath>")
+    def test_consistent_with_0_4_instance_id_calculation(self, *args):
+        """
+        This test ensures that we don't accidentally make changes that impact how we calculate
+        the instance ID, in a way that would cause instance IDs to change when they shouldn't.
+        """
+
+        from morango.models.utils import _get_database_path
+
+        sys.version = "2.7.333"
+
+        DatabaseIDModel.objects.all().update(current=False)
+        database_id = DatabaseIDModel.objects.create(id="6fe445b75cea11858c00fb97bdee8878", current=True).id
+
+        node_id = hashlib.sha1(
+            "{}:{}".format(database_id, 24359248572014).encode("utf-8")
+        ).hexdigest()[:20]
+
+        target = {
+            "platform": "Windows 3.1",
+            "hostname": "myhost",
+            "sysversion": "2.7.333",
+            "node_id": node_id,
+            "database_id": database_id,
+            "db_path": _get_database_path(),
+        }
+
+        result = get_0_4_system_parameters(database_id)
+
+        self.assertEqual(target, result)
+
+        calculated_id = _calculate_0_4_uuid(result)
+
+        self.assertEqual(calculated_id, "4480fda04236975d0895c0048b767647")
+
+        InstanceIDModel.objects.all().delete()
+
+        InstanceIDModel.objects.create(current=True, id=calculated_id, **result)
+
+        instance, _ = InstanceIDModel.get_or_create_current_instance()
+
+        self.assertEqual(calculated_id, instance.id)
+
 
 class DatabaseIDModelTestCase(TestCase):
-
     def setUp(self):
         self.ID = "40ce9a3fded95d7198f200c78e559353"
 

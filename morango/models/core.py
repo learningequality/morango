@@ -1,14 +1,10 @@
 from __future__ import unicode_literals
 
-import hashlib
 import json
 import logging
-import os
-import platform
 import sys
 import uuid
 
-from django.conf import settings
 from django.core import exceptions
 from django.db import connection
 from django.db import models
@@ -33,7 +29,7 @@ from .fields.uuids import UUIDField
 from .fields.uuids import UUIDModelMixin
 from .manager import SyncableModelManager
 from .morango_mptt import MorangoMPTTModel
-
+from .utils import get_0_4_system_parameters
 
 logger = logging.getLogger(__name__)
 
@@ -101,7 +97,6 @@ class InstanceIDModel(UUIDModelMixin):
         "node_id",
         "database_id",
         "db_path",
-        "system_id",
     )
 
     platform = models.TextField()
@@ -119,35 +114,20 @@ class InstanceIDModel(UUIDModelMixin):
         """Get the instance model corresponding to the current system, or create a new
         one if the system is new or its properties have changed (e.g. OS from upgrade)."""
 
-        # on Android, platform.platform() barfs, so we handle that safely here
+        # check if a matching legacy instance ID is already current, and don't mess with it
+        old_kwargs = get_0_4_system_parameters(
+            database_id=DatabaseIDModel.get_or_create_current_database_id().id
+        )
         try:
-            plat = platform.platform()
-        except:  # noqa: E722
-            plat = "Unknown (Android?)"
-
-        kwargs = {
-            "platform": plat,
-            "hostname": platform.node(),
-            "sysversion": sys.version,
-            "database": DatabaseIDModel.get_or_create_current_database_id(),
-            "db_path": os.path.abspath(settings.DATABASES["default"]["NAME"]),
-            "system_id": os.environ.get("MORANGO_SYSTEM_ID", ""),
-        }
-
-        # try to get the MAC address, but exclude it if it was a fake (random) address
-        mac = uuid.getnode()
-        if (mac >> 40) % 2 == 0:  # 8th bit (of 48 bits, from left) is 1 if MAC is fake
-            hashable_identifier = "{}:{}".format(kwargs["database"].id, mac)
-            kwargs["node_id"] = hashlib.sha1(
-                hashable_identifier.encode("utf-8")
-            ).hexdigest()[:20]
-        else:
-            kwargs["node_id"] = ""
+            obj = InstanceIDModel.objects.get(current=True, **old_kwargs)
+            return obj, False
+        except InstanceIDModel.DoesNotExist:
+            pass
 
         # do within transaction so we only ever have 1 current instance ID
         with transaction.atomic():
             InstanceIDModel.objects.filter(current=True).update(current=False)
-            obj, created = InstanceIDModel.objects.get_or_create(**kwargs)
+            obj, created = InstanceIDModel.objects.get_or_create(**old_kwargs)
             obj.current = True
             obj.save()
 
