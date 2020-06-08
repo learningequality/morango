@@ -1,6 +1,10 @@
+import hashlib
+import mock
+import os
+import sys
 import uuid
 
-import mock
+from django.conf import settings
 from django.test import TestCase
 from facility_profile.models import Facility
 from facility_profile.models import InteractionLog
@@ -9,21 +13,28 @@ from facility_profile.models import MyUser
 from morango.models.core import DatabaseIDModel
 from morango.models.core import InstanceIDModel
 from morango.models.fields.uuids import sha2_uuid
+from morango.models.utils import _calculate_0_4_uuid
+from morango.models.utils import get_0_4_system_parameters
 
 
 class UUIDModelMixinTestCase(TestCase):
-
     def setUp(self):
-        self.fac = Facility(name='bob')
+        self.fac = Facility(name="bob")
 
     def test_calculate_uuid(self):
         log_with_random_id = InteractionLog(user=MyUser.objects.create())
-        with mock.patch('uuid.uuid4', return_value=uuid.UUID('12345678123456781234567812345678')):
-            target_uuid = sha2_uuid(log_with_random_id.calculate_partition(), "12345678123456781234567812345678", log_with_random_id.morango_model_name)
+        with mock.patch(
+            "uuid.uuid4", return_value=uuid.UUID("12345678123456781234567812345678")
+        ):
+            target_uuid = sha2_uuid(
+                log_with_random_id.calculate_partition(),
+                "12345678123456781234567812345678",
+                log_with_random_id.morango_model_name,
+            )
             self.assertEqual(log_with_random_id.calculate_uuid(), target_uuid)
 
     def test_save_with_id(self):
-        ID = '11111111111111111111111111111111'
+        ID = "11111111111111111111111111111111"
         self.fac.id = ID
         self.fac.calculate_uuid = mock.Mock()
         self.fac.save()
@@ -32,7 +43,7 @@ class UUIDModelMixinTestCase(TestCase):
         self.assertEqual(ID, Facility.objects.first().id)
 
     def test_save_without_id(self):
-        ID = '40ce9a3fded95d7198f200c78e559353'
+        ID = "40ce9a3fded95d7198f200c78e559353"
         self.fac.calculate_uuid = mock.Mock(return_value=ID)
         self.fac.save()
 
@@ -41,7 +52,6 @@ class UUIDModelMixinTestCase(TestCase):
 
 
 class InstanceIDModelTestCase(TestCase):
-
     def setUp(self):
         InstanceIDModel.get_or_create_current_instance()
 
@@ -54,37 +64,47 @@ class InstanceIDModelTestCase(TestCase):
 
     def test_creating_different_instance_ID_model(self):
         # change system state
-        with mock.patch('platform.platform', return_value='platform'):
-            with mock.patch('uuid.getnode', return_value=9999999999999):  # fake (random) address
+        with mock.patch("platform.platform", return_value="platform"):
+            with mock.patch(
+                "uuid.getnode", return_value=9999999999999
+            ):  # fake (random) address
                 (IDModel, _) = InstanceIDModel.get_or_create_current_instance()
         self.assertEqual(InstanceIDModel.objects.count(), 2)
-        self.assertEqual(IDModel.node_id, '')  # assert that node id was not added
+        self.assertEqual(IDModel.node_id, "")  # assert that node id was not added
         self.assertEqual(IDModel.id, InstanceIDModel.objects.get(current=True).id)
 
     def test_only_one_current_instance_ID(self):
-        with mock.patch('platform.platform', return_value='platform'):
+        with mock.patch("platform.platform", return_value="platform"):
             InstanceIDModel.get_or_create_current_instance()
         self.assertEqual(len(InstanceIDModel.objects.filter(current=True)), 1)
 
     def test_same_node_id(self):
-        with mock.patch('uuid.getnode', return_value=67002173923623):  # fake (random) address
+        with mock.patch(
+            "uuid.getnode", return_value=67002173923623
+        ):  # fake (random) address
             (IDModel, _) = InstanceIDModel.get_or_create_current_instance()
             ident = IDModel.id
 
-        with mock.patch('uuid.getnode', return_value=69002173923623):  # fake (random) address
+        with mock.patch(
+            "uuid.getnode", return_value=69002173923623
+        ):  # fake (random) address
             (IDModel, _) = InstanceIDModel.get_or_create_current_instance()
 
-        with mock.patch('uuid.getnode', return_value=67002173923623):  # fake (random) address
+        with mock.patch(
+            "uuid.getnode", return_value=67002173923623
+        ):  # fake (random) address
             (IDModel, _) = InstanceIDModel.get_or_create_current_instance()
 
-        self.assertFalse(InstanceIDModel.objects.exclude(id=ident).filter(current=True).exists())
+        self.assertFalse(
+            InstanceIDModel.objects.exclude(id=ident).filter(current=True).exists()
+        )
         self.assertTrue(InstanceIDModel.objects.get(id=ident).current)
 
 
 class DatabaseIDModelTestCase(TestCase):
 
     def setUp(self):
-        self.ID = '40ce9a3fded95d7198f200c78e559353'
+        self.ID = "40ce9a3fded95d7198f200c78e559353"
 
     def test_save(self):
         [DatabaseIDModel().save() for _ in range(10)]
