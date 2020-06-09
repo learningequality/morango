@@ -115,7 +115,7 @@ def _do_salted_hash(value):
         pass
     value += "::b88281f3-302c-4def-bb87-043f681e4183".encode()
     value = value.lower()
-    return hashlib.sha1(value).hexdigest()
+    return hashlib.sha1(value).hexdigest()[:20]
 
 
 def get_0_5_system_id():

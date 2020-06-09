@@ -16,6 +16,8 @@ from morango.models.core import InstanceIDModel
 from morango.models.fields.uuids import sha2_uuid
 from morango.models.utils import _calculate_0_4_uuid
 from morango.models.utils import get_0_4_system_parameters
+from morango.models.utils import get_0_5_mac_address
+from morango.models.utils import get_0_5_system_id
 
 
 class UUIDModelMixinTestCase(TestCase):
@@ -105,7 +107,9 @@ class InstanceIDModelTestCase(TestCase):
         sys.version = "2.7.333"
 
         DatabaseIDModel.objects.all().update(current=False)
-        database_id = DatabaseIDModel.objects.create(id="6fe445b75cea11858c00fb97bdee8878", current=True).id
+        database_id = DatabaseIDModel.objects.create(
+            id="6fe445b75cea11858c00fb97bdee8878", current=True
+        ).id
 
         node_id = hashlib.sha1(
             "{}:{}".format(database_id, 24359248572014).encode("utf-8")
@@ -135,6 +139,30 @@ class InstanceIDModelTestCase(TestCase):
         instance, _ = InstanceIDModel.get_or_create_current_instance()
 
         self.assertEqual(calculated_id, instance.id)
+
+    @mock.patch(
+        "ifcfg.interfaces",
+        return_value={"eth0": {"device": "eth0", "ether": "aa:aa:aa:aa:aa"}},
+    )
+    def test_consistent_0_5_instance_id(self, *args):
+        """
+        If this test fails, it means we've changed the way Instance IDs are calculated in an undesirable way.
+        """
+
+        with EnvironmentVarGuard() as env:
+            env["MORANGO_SYSTEM_ID"] = "magicsysid"
+
+            DatabaseIDModel.objects.all().update(current=False)
+            database_id = DatabaseIDModel.objects.create(
+                id="7fe445b75cea11858c00fb97bdee8878", current=True
+            ).id
+
+            self.assertEqual(get_0_5_system_id(), "54940f560a55bbf7d86b")
+            self.assertEqual(get_0_5_mac_address(), "a56ba54c2a6ce0a6c64f")
+
+            instance, _ = InstanceIDModel.get_or_create_current_instance()
+
+            self.assertEqual(instance.id, "18cc7382324bbb51b6bfd2103a4c1201")
 
 
 class DatabaseIDModelTestCase(TestCase):
