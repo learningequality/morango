@@ -30,6 +30,9 @@ from .fields.uuids import UUIDModelMixin
 from .manager import SyncableModelManager
 from .morango_mptt import MorangoMPTTModel
 from .utils import get_0_4_system_parameters
+from .utils import calculate_0_4_uuid
+from .utils import get_0_5_system_id
+from .utils import get_0_5_mac_address
 
 logger = logging.getLogger(__name__)
 
@@ -83,7 +86,7 @@ class DatabaseIDModel(UUIDModelMixin):
                 return cls.objects.create()
 
 
-class InstanceIDModel(UUIDModelMixin):
+class InstanceIDModel(models.Model):
     """
     ``InstanceIDModel`` is used to track what the current ID of this Morango instance is based on system properties. If system properties
     change, the ID used to track the morango instance also changes. During serialization phase, we associate the current instance ID,
@@ -99,6 +102,8 @@ class InstanceIDModel(UUIDModelMixin):
         "db_path",
     )
 
+    id = UUIDField(max_length=32, primary_key=True, editable=False)
+
     platform = models.TextField()
     hostname = models.TextField()
     sysversion = models.TextField()
@@ -110,25 +115,44 @@ class InstanceIDModel(UUIDModelMixin):
     system_id = models.CharField(max_length=100, blank=True)
 
     @classmethod
+    @transaction.atomic
     def get_or_create_current_instance(cls):
         """Get the instance model corresponding to the current system, or create a new
         one if the system is new or its properties have changed (e.g. OS from upgrade)."""
 
         # check if a matching legacy instance ID is already current, and don't mess with it
-        old_kwargs = get_0_4_system_parameters(
+        kwargs = get_0_4_system_parameters(
             database_id=DatabaseIDModel.get_or_create_current_database_id().id
         )
         try:
-            obj = InstanceIDModel.objects.get(current=True, **old_kwargs)
+            obj = InstanceIDModel.objects.get(current=True, **kwargs)
             return obj, False
         except InstanceIDModel.DoesNotExist:
             pass
 
-        # do within transaction so we only ever have 1 current instance ID
-        with transaction.atomic():
-            InstanceIDModel.objects.filter(current=True).update(current=False)
-            obj, created = InstanceIDModel.objects.get_or_create(**old_kwargs)
-            obj.current = True
+        # calculate the new ID based on system ID and mac address
+        kwargs["system_id"] = get_0_5_system_id()
+        kwargs["node_id"] = get_0_5_mac_address()
+        kwargs["id"] = sha2_uuid(
+            kwargs["database_id"], kwargs["system_id"], kwargs["node_id"]
+        )
+        kwargs["current"] = True
+
+        # ensure we only ever have 1 current instance ID
+        InstanceIDModel.objects.exclude(id=kwargs["id"], current=False).update(
+            current=False
+        )
+        # create the model, or get existing if one already exists with this ID
+        obj, created = InstanceIDModel.objects.get_or_create(
+            id=kwargs["id"], defaults=kwargs
+        )
+        # update any of the attributes that have changed
+        changed = False
+        for key, val in kwargs.items():
+            if getattr(obj, key) != val:
+                setattr(obj, key, val)
+                changed = True
+        if changed:
             obj.save()
 
         return obj, created

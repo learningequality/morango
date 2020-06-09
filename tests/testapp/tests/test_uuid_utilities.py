@@ -9,11 +9,12 @@ from django.test import TestCase
 from facility_profile.models import Facility
 from facility_profile.models import InteractionLog
 from facility_profile.models import MyUser
+from test.support import EnvironmentVarGuard
 
 from morango.models.core import DatabaseIDModel
 from morango.models.core import InstanceIDModel
 from morango.models.fields.uuids import sha2_uuid
-from morango.models.utils import _calculate_0_4_uuid
+from morango.models.utils import calculate_0_4_uuid
 from morango.models.utils import get_0_4_system_parameters
 
 
@@ -61,17 +62,6 @@ class InstanceIDModelTestCase(TestCase):
 
         self.assertEqual(firstIDModel, secondIDModel)
         self.assertEqual(InstanceIDModel.objects.count(), 1)
-
-    def test_creating_different_instance_ID_model(self):
-        # change system state
-        with mock.patch("platform.platform", return_value="platform"):
-            with mock.patch(
-                "uuid.getnode", return_value=9999999999999
-            ):  # fake (random) address
-                (IDModel, _) = InstanceIDModel.get_or_create_current_instance()
-        self.assertEqual(InstanceIDModel.objects.count(), 2)
-        self.assertEqual(IDModel.node_id, "")  # assert that node id was not added
-        self.assertEqual(IDModel.id, InstanceIDModel.objects.get(current=True).id)
 
     def test_only_one_current_instance_ID(self):
         with mock.patch("platform.platform", return_value="platform"):
@@ -134,7 +124,7 @@ class InstanceIDModelTestCase(TestCase):
 
         self.assertEqual(target, result)
 
-        calculated_id = _calculate_0_4_uuid(result)
+        calculated_id = calculate_0_4_uuid(result)
 
         self.assertEqual(calculated_id, "4480fda04236975d0895c0048b767647")
 

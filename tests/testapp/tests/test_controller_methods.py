@@ -7,6 +7,7 @@ from django.test import TestCase
 from facility_profile.models import Facility
 from facility_profile.models import MyUser
 from facility_profile.models import SummaryLog
+from test.support import EnvironmentVarGuard
 
 from .helpers import serialized_facility_factory
 from morango.models.certificates import Filter
@@ -100,7 +101,8 @@ class SerializeIntoStoreTestCase(TestCase):
         self.mc.serialize_into_store()
         old_instance_id = Store.objects.first().last_saved_instance
 
-        with mock.patch("platform.platform", return_value="Windows 3.1"):
+        with EnvironmentVarGuard() as env:
+            env['MORANGO_SYSTEM_ID'] = 'new_sys_id'
             (new_id, _) = InstanceIDModel.get_or_create_current_instance()
 
             Facility.objects.all().update(name=self.new_name)
@@ -290,7 +292,8 @@ class RecordMaxCounterUpdatesDuringSerialization(TestCase):
         self.old_rmc = RecordMaxCounter.objects.first()
 
     def test_new_rmc_for_existing_model(self):
-        with mock.patch("platform.platform", return_value="Windows 3.1"):
+        with EnvironmentVarGuard() as env:
+            env['MORANGO_SYSTEM_ID'] = 'new_sys_id'
             (new_id, _) = InstanceIDModel.get_or_create_current_instance()
 
             Facility.objects.update(name="facility")
@@ -326,7 +329,8 @@ class RecordMaxCounterUpdatesDuringSerialization(TestCase):
         self.assertEqual(new_rmc.instance_id, new_store_record.last_saved_instance)
 
     def test_new_rmc_for_non_existent_model(self):
-        with mock.patch("platform.platform", return_value="Windows 3.1"):
+        with EnvironmentVarGuard() as env:
+            env['MORANGO_SYSTEM_ID'] = 'new_sys_id'
             (new_id, _) = InstanceIDModel.get_or_create_current_instance()
 
             new_fac = FacilityModelFactory(name="college")

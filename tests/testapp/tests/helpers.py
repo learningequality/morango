@@ -11,6 +11,7 @@ from facility_profile.models import Facility
 from facility_profile.models import InteractionLog
 from facility_profile.models import MyUser
 from facility_profile.models import SummaryLog
+from test.support import EnvironmentVarGuard
 
 from morango.models.core import AbstractStore
 from morango.models.core import Buffer
@@ -102,7 +103,9 @@ def create_dummy_store_data():
     data["mc"].serialize_into_store()  # counter is at 3
 
     # create new instance id and group of facilities
-    with mock.patch("platform.platform", return_value="plataforma"):
+    with EnvironmentVarGuard() as env:
+        env['MORANGO_SYSTEM_ID'] = 'new_sys_id'
+
         data["group2_id"] = InstanceIDModel.get_or_create_current_instance()[0]  # new counter is at 0
 
         data["mc"].serialize_into_store()  # new counter is at 1
