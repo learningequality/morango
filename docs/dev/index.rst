@@ -36,3 +36,38 @@ sync process by a Morango instance I.
 .. automodule:: morango.models
     :members:
     :noindex:
+
+Signaling
+---------
+Morango fires a few different signals from ``SyncClient.signals`` during the sync process which can be used
+to track the progress of the sync. These signal groups are ``session``, ``queuing``,
+``pushing``, ``pulling``, and ``dequeuing``. Each signal group has 3 stages that can be
+fired: ``started``, ``in_progress``, and ``completed``. For a push or pull sync, the order of
+the fired signals would be as follows:
+
+1) `TransferSession` started
+2) Queuing started
+3) Queueing completed
+4) Pushing/Pulling started
+5) Pushing/Pulling in progress
+6) Pushing/Pulling completed
+7) Dequeuing started
+8) Dequeuing completed
+9) `TransferSession` completed
+
+.. autoclass:: morango.sync.syncsession.SyncClient
+    :members: signals
+    :noindex:
+
+.. autoclass:: morango.sync.syncsession.SyncClientSignals
+    :members: session, queuing, pushing, pulling, dequeuing
+    :noindex:
+
+.. autoclass:: morango.sync.syncsession.SyncSignalGroup
+    :members:
+    :inherited-members:
+    :noindex:
+
+.. autoclass:: morango.sync.syncsession.SyncSignal
+    :members:
+    :noindex:

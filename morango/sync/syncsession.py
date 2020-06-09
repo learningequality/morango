@@ -11,8 +11,8 @@ from django.utils.six import iteritems
 from requests.adapters import HTTPAdapter
 from requests.packages.urllib3.util.retry import Retry
 from rest_framework.exceptions import ValidationError
-from six.moves.urllib.parse import urljoin
-from six.moves.urllib.parse import urlparse
+from django.utils.six.moves.urllib.parse import urljoin
+from django.utils.six.moves.urllib.parse import urlparse
 
 from .operations import _dequeue_into_store
 from .operations import _queue_into_buffer
@@ -111,6 +111,14 @@ class NetworkSyncConnection(Connection):
             urljoin(self.base_url, api_urls.INFO)
         ).json()
         self.capabilities = self.server_info.get("capabilities", [])
+
+    @property
+    def bytes_sent(self):
+        return self.session.bytes_sent
+
+    @property
+    def bytes_received(self):
+        return self.session.bytes_received
 
     def urlresolve(self, endpoint, lookup=None):
         if lookup:
@@ -376,42 +384,152 @@ class NetworkSyncConnection(Connection):
         return self.session.get(self.urlresolve(api_urls.BUFFER), params=params)
 
 
+class SyncSignal(object):
+    """
+    Helper class for firing signals from the sync client
+    """
+
+    def __init__(self, **kwargs_defaults):
+        """
+        Default keys/values that the signal consumer can depend on being present.
+        """
+        self._handlers = []
+        self._defaults = kwargs_defaults
+
+    def connect(self, handler):
+        """
+        Adds a callable handler that will be called when the signal is fired.
+
+        :type handler: function
+        """
+        self._handlers.append(handler)
+
+    def fire(self, **kwargs):
+        """
+        Fires the handler functions connected via `connect`.
+        """
+        fire_kwargs = self._defaults.copy()
+        fire_kwargs.update(kwargs)
+
+        for handler in self._handlers:
+            handler(**fire_kwargs)
+
+
+class SyncSignalGroup(SyncSignal):
+    """
+    Breaks down a signal into `started`, `in_progress`, and `completed` stages. The
+    `kwargs_defaults` are passed through to each signal stage.
+    """
+
+    started = SyncSignal()
+    """The started signal, which will be fired at the beginning of the procedure."""
+    in_progress = SyncSignal()
+    """The in progress signal, which should be fired at least once during the procedure."""
+    completed = SyncSignal()
+    """The completed signal, which should be fired at the end of the procedure"""
+
+    def __init__(self, **kwargs_defaults):
+        super(SyncSignalGroup, self).__init__(**kwargs_defaults)
+        self.started = SyncSignal(**kwargs_defaults)
+        self.in_progress = SyncSignal(**kwargs_defaults)
+        self.completed = SyncSignal(**kwargs_defaults)
+
+        self.started.connect(self.fire)
+        self.in_progress.connect(self.fire)
+        self.completed.connect(self.fire)
+
+    def send(self, **kwargs):
+        """
+        Context manager helper that will signal started and fired when entered and exited,
+        and it'll fire those with the `kwargs`.
+
+        :rtype: SyncSignalGroup
+        """
+        defaults = self._defaults.copy()
+        defaults.update(kwargs)
+        context_group = SyncSignalGroup(**defaults)
+        context_group.started.connect(self.started.fire)
+        context_group.in_progress.connect(self.in_progress.fire)
+        context_group.completed.connect(self.completed.fire)
+        return context_group
+
+    def __enter__(self):
+        """
+        Fires the `started` signal.
+        """
+        self.started.fire()
+        return self
+
+    def __exit__(self, *args, **kwargs):
+        """
+        Fires the `completed` signal.
+        """
+        self.completed.fire()
+
+
+class SyncClientSignals(object):
+    """
+    Class for holding all signal types, attached to `SyncClient` as attribute. All groups
+    are sent the `TransferSession` object via the `transfer_session` keyword argument.
+    """
+
+    session = SyncSignalGroup(transfer_session=None)
+    """Signal group firing for each push and pull `TransferSession`."""
+    queuing = SyncSignalGroup(transfer_session=None)
+    """Queuing signal group for locally or remotely queuing data before transfer."""
+    pushing = SyncSignalGroup(transfer_session=None)
+    """Pushing signal group for tracking push progress of `TransferSession`."""
+    pulling = SyncSignalGroup(transfer_session=None)
+    """Pulling signal group for tracking pull progress of `TransferSession`."""
+    dequeuing = SyncSignalGroup(transfer_session=None)
+    """Dequeuing signal group for locally or remotely dequeuing data after transfer."""
+
+
 class SyncClient(object):
     """
     Controller to support client in initiating syncing and performing related operations.
     """
 
+    signals = SyncClientSignals()
+    """A namespacing attribute clearly separating signal groups"""
+
     def __init__(self, sync_connection, sync_session, chunk_size=500):
+        """
+        :type sync_connection: NetworkSyncConnection
+        :type sync_session: SessionWrapper
+        :type chunk_size: int
+        """
         self.sync_connection = sync_connection
         self.sync_session = sync_session
         self.chunk_size = chunk_size
         self.current_transfer_session = None
 
     def initiate_push(self, sync_filter):
-
-        logger.info("Initiating push sync")
         self._create_transfer_session(True, sync_filter)
 
-        _queue_into_buffer(self.current_transfer_session)
+        with self.signals.queuing.send(transfer_session=self.current_transfer_session):
+            _queue_into_buffer(self.current_transfer_session)
 
         # update the records_total for client and server transfer session
         records_total = Buffer.objects.filter(
             transfer_session=self.current_transfer_session
         ).count()
-        if records_total == 0:
-            logger.info("There are no records to transfer")
-            self._close_transfer_session()
-            return
-        logger.info("{} records have been queued for transfer".format(records_total))
+
         self.current_transfer_session.records_total = records_total
         self.current_transfer_session.save()
+
+        if records_total == 0:
+            self._close_transfer_session()
+            return
+
         self.sync_connection._update_transfer_session(
             {"records_total": records_total}, self.current_transfer_session
         )
 
-        logger.info("Beginning pushing of data...")
-        self._push_records()
-        logger.info("Completed push of data")
+        with self.signals.pushing.send(
+            transfer_session=self.current_transfer_session
+        ) as status:
+            self._push_records(callback=status.in_progress.fire)
 
         # upon successful completion of pushing records, proceed to delete buffered records
         Buffer.objects.filter(transfer_session=self.current_transfer_session).delete()
@@ -423,25 +541,19 @@ class SyncClient(object):
         self._close_transfer_session()
 
     def initiate_pull(self, sync_filter):
-
-        logger.info("Initiating pull sync")
         self._create_transfer_session(False, sync_filter)
 
         if self.current_transfer_session.records_total == 0:
-            logger.info("There are no records to transfer")
             self._close_transfer_session()
             return
 
-        logger.info(
-            "{} records have been queued server side for transfer".format(
-                self.current_transfer_session.records_total
-            )
-        )
-        # pull records and close transfer session upon completion
-        logger.info("Beginning pulling of data...")
-        self._pull_records()
-        logger.info("Completed pull of data")
-        _dequeue_into_store(self.current_transfer_session)
+        with self.signals.pulling.send(
+            transfer_session=self.current_transfer_session
+        ) as status:
+            self._pull_records(callback=status.in_progress.fire)
+
+        with self.signals.dequeuing.send(transfer_session=self.current_transfer_session):
+            _dequeue_into_store(self.current_transfer_session)
 
         # update database max counters but use latest fsics on client
         DatabaseMaxCounter.update_fsics(
@@ -485,20 +597,22 @@ class SyncClient(object):
                     "Specified TransferSession does not match this SyncClient's current TransferSession."
                 )
 
-            validate_and_create_buffer_data(data, self.current_transfer_session)
+            validate_and_create_buffer_data(
+                data, self.current_transfer_session, connection=self.sync_connection
+            )
             # update the records transferred so client and server are in agreement
             self.sync_connection._update_transfer_session(
                 {
-                    "records_transferred": self.current_transfer_session.records_transferred
+                    "records_transferred": self.current_transfer_session.records_transferred,
+                    # flip each of these since we're talking about the remote instance
+                    "bytes_received": self.current_transfer_session.bytes_sent,
+                    "bytes_sent": self.current_transfer_session.bytes_received,
                 },
                 self.current_transfer_session,
             )
-            logger.info(
-                "Received {}/{} records".format(
-                    self.current_transfer_session.records_transferred,
-                    self.current_transfer_session.records_total,
-                )
-            )
+
+            if callback is not None:
+                callback()
 
     def _push_records(self, callback=None):
         # paginate buffered records so we do not load them all into memory
@@ -518,16 +632,16 @@ class SyncClient(object):
                 self.current_transfer_session.records_transferred + self.chunk_size,
                 self.current_transfer_session.records_total,
             )
-            self.current_transfer_session.save()
-            logger.info(
-                "Sent {}/{} records".format(
-                    self.current_transfer_session.records_transferred,
-                    self.current_transfer_session.records_total,
-                )
+            self.current_transfer_session.bytes_sent = self.sync_connection.bytes_sent
+            self.current_transfer_session.bytes_received = (
+                self.sync_connection.bytes_received
             )
+            self.current_transfer_session.save()
+
+            if callback is not None:
+                callback()
 
     def close_sync_session(self):
-
         # "delete" sync session on server side
         self.sync_connection._close_sync_session(self.sync_session)
 
@@ -543,8 +657,6 @@ class SyncClient(object):
         self.sync_connection.session.close()
 
     def _create_transfer_session(self, push, filter):
-
-        logger.info("Creating transfer session")
         # build data for creating transfer session on server side
         data = {
             "id": uuid.uuid4().hex,
@@ -555,6 +667,9 @@ class SyncClient(object):
 
         data["last_activity_timestamp"] = timezone.now()
         self.current_transfer_session = TransferSession.objects.create(**data)
+        self.signals.session.started.fire(
+            transfer_session=self.current_transfer_session
+        )
         data.pop("last_activity_timestamp")
 
         if push:
@@ -572,8 +687,21 @@ class SyncClient(object):
 
         # save transfersession locally before creating transfersession server side
         self.current_transfer_session.save()
+
+        # the next call to create the session starts queueing on server side
+        if not push:
+            self.signals.queuing.started.fire(
+                transfer_session=self.current_transfer_session
+            )
+
         # create transfer session on server side
         transfer_resp = self.sync_connection._create_transfer_session(data)
+
+        # the above call to create the session started queueing on server side, so it's done
+        if not push:
+            self.signals.queuing.completed.fire(
+                transfer_session=self.current_transfer_session
+            )
 
         self.current_transfer_session.server_fsic = (
             transfer_resp.json().get("server_fsic") or "{}"
@@ -585,12 +713,24 @@ class SyncClient(object):
         self.current_transfer_session.save()
 
     def _close_transfer_session(self):
+        # deleting the server's transfer session also dequeues
+        if self.current_transfer_session.push:
+            self.signals.dequeuing.started.fire(
+                transfer_session=self.current_transfer_session
+            )
 
-        logger.info("Closing transfer session")
         # "delete" transfer session on server side
         self.sync_connection._close_transfer_session(self.current_transfer_session)
+
+        if self.current_transfer_session.push:
+            self.signals.dequeuing.completed.fire(
+                transfer_session=self.current_transfer_session
+            )
 
         # "delete" our own local transfer session
         self.current_transfer_session.active = False
         self.current_transfer_session.save()
+        self.signals.session.completed.fire(
+            transfer_session=self.current_transfer_session
+        )
         self.current_transfer_session = None

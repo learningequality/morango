@@ -25,9 +25,7 @@ def calculate_max_sqlite_variables():
     """
     conn = sqlite3.connect(":memory:")
     low = 1
-    high = (
-        1000
-    )  # hard limit for SQLITE_MAX_VARIABLE_NUMBER <http://www.sqlite.org/limits.html>
+    high = 1000  # hard limit for SQLITE_MAX_VARIABLE_NUMBER <http://www.sqlite.org/limits.html>
     conn.execute("CREATE TABLE T1 (id C1)")
     while low < high - 1:
         guess = (low + high) // 2

@@ -2,6 +2,7 @@ import json
 import uuid
 
 import mock
+from django.test import TestCase
 from django.test.testcases import LiveServerTestCase
 from django.test.utils import override_settings
 from django.utils import timezone
@@ -228,6 +229,11 @@ class SyncClientTestCase(LiveServerTestCase):
         self.chunk_size = 3
         InstanceIDModel.get_or_create_current_instance()
 
+        self.pushing_mock = mock.Mock()
+        self.pulling_mock = mock.Mock()
+        self.syncclient.signals.pushing.connect(self.pushing_mock)
+        self.syncclient.signals.pulling.connect(self.pulling_mock)
+
     def build_buffer_items(self, transfer_session, **kwargs):
 
         data = {
@@ -265,10 +271,17 @@ class SyncClientTestCase(LiveServerTestCase):
         self.assertEqual(
             self.syncclient.current_transfer_session.records_transferred, 0
         )
-        self.syncclient._push_records()
+        with self.syncclient.signals.pushing.send(
+            transfer_session=self.syncclient.current_transfer_session
+        ) as in_progress:
+            self.syncclient._push_records(in_progress.fire)
         self.assertEqual(
             self.syncclient.current_transfer_session.records_transferred,
             self.chunk_size,
+        )
+        self.assertGreaterEqual(self.syncclient.current_transfer_session.bytes_received, 150)
+        self.pushing_mock.assert_called_with(
+            transfer_session=self.syncclient.current_transfer_session
         )
 
     @mock_patch_decorator
@@ -289,7 +302,10 @@ class SyncClientTestCase(LiveServerTestCase):
         self.assertEqual(
             self.syncclient.current_transfer_session.records_transferred, 0
         )
-        self.syncclient._pull_records()
+        with self.syncclient.signals.pulling.send(
+            transfer_session=self.syncclient.current_transfer_session
+        ) as status:
+            self.syncclient._pull_records(status.in_progress.fire)
         self.assertEqual(
             Buffer.objects.filter(
                 transfer_session=self.syncclient.current_transfer_session
@@ -299,6 +315,10 @@ class SyncClientTestCase(LiveServerTestCase):
         self.assertEqual(
             self.syncclient.current_transfer_session.records_transferred,
             self.chunk_size,
+        )
+        self.assertGreaterEqual(self.syncclient.current_transfer_session.bytes_received, 150)
+        self.pulling_mock.assert_called_with(
+            transfer_session=self.syncclient.current_transfer_session
         )
 
     @mock_patch_decorator
@@ -321,3 +341,32 @@ class SyncClientTestCase(LiveServerTestCase):
         self.syncclient._close_transfer_session()
         self.syncclient.close_sync_session()
         self.assertEqual(SyncSession.objects.filter(active=True).count(), 0)
+
+
+class SessionWrapperTestCase(TestCase):
+    @mock.patch("requests.sessions.Session.request")
+    def test_request(self, mocked_super_request):
+        expected = mocked_super_request.return_value = mock.Mock(
+            headers={"Content-Length": 1024}, raise_for_status=mock.Mock()
+        )
+
+        wrapper = SessionWrapper()
+        actual = wrapper.request("GET", "test_url", is_test=True)
+        mocked_super_request.assert_called_once_with("GET", "test_url", is_test=True)
+        self.assertEqual(expected, actual)
+
+        self.assertEqual(wrapper.bytes_received, 1024)
+
+    @mock.patch("requests.sessions.Session.prepare_request")
+    def test_request(self, mocked_super_prepare_request):
+        expected = mocked_super_prepare_request.return_value = mock.Mock(
+            headers={"Content-Length": 256},
+        )
+
+        request = mock.Mock()
+        wrapper = SessionWrapper()
+        actual = wrapper.prepare_request(request)
+        mocked_super_prepare_request.assert_called_once_with(request)
+
+        self.assertEqual(expected, actual)
+        self.assertEqual(wrapper.bytes_sent, 256)
