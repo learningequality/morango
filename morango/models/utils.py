@@ -48,7 +48,7 @@ def get_0_4_system_parameters(database_id):
     return params
 
 
-def calculate_0_4_uuid(parameters):
+def _calculate_0_4_uuid(parameters):
 
     uuid_input_fields = (
         "platform",
@@ -81,7 +81,7 @@ def _query_wmic(namespace, key):
 
         if "-" in result:
             return result
-    except:
+    except:  # noqa: E722
         pass
 
 
@@ -90,7 +90,7 @@ def _get_macos_uuid():
         command = "ioreg -rd1 -c IOPlatformExpertDevice | grep -E '(UUID)'"
         result = subprocess.check_output(command, shell=True)
         return result.decode().split('"')[-2]
-    except:
+    except:  # noqa: E722
         pass
 
 
@@ -100,7 +100,7 @@ def _get_android_uuid():
             output = subprocess.check_output(["getprop", propname]).decode().strip()
             if output:
                 return output
-    except:
+    except:  # noqa: E722
         pass
 
 
@@ -111,7 +111,7 @@ def _do_salted_hash(value):
         value = str(value)
     try:
         value = value.encode()
-    except:
+    except:  # noqa: E722
         pass
     value += "::b88281f3-302c-4def-bb87-043f681e4183".encode()
     value = value.lower()
@@ -181,7 +181,7 @@ def get_0_5_mac_address():
     interfaces = []
     try:
         interfaces = ifcfg.interfaces().values()
-    except:
+    except:  # noqa: E722
         pass
     for iface in sorted(interfaces, key=_device_sort_key):
         ether = iface.get("ether")

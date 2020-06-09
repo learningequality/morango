@@ -2,7 +2,6 @@ from __future__ import unicode_literals
 
 import json
 import logging
-import sys
 import uuid
 
 from django.core import exceptions
@@ -30,7 +29,6 @@ from .fields.uuids import UUIDModelMixin
 from .manager import SyncableModelManager
 from .morango_mptt import MorangoMPTTModel
 from .utils import get_0_4_system_parameters
-from .utils import calculate_0_4_uuid
 from .utils import get_0_5_system_id
 from .utils import get_0_5_mac_address
 
