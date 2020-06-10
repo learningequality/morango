@@ -355,9 +355,9 @@ class Store(AbstractStore):
                 # validate and return the model
                 app_model.cached_clean_fields(fk_cache)
                 return app_model
-            except exceptions.ValidationError as e:
+            except (exceptions.ValidationError, exceptions.ObjectDoesNotExist) as e:
                 logger.warn(
-                    "Validation error for {model} with id {id}: {error}".format(
+                    "Error deserializing instance of {model} with id {id}: {error}".format(
                         model=klass_model.__name__, id=app_model.id, error=e
                     )
                 )

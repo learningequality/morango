@@ -40,6 +40,11 @@ class Facility(MorangoMPTTModel, FacilityDataSyncableModel):
     def calculate_partition(self, *args, **kwargs):
         return ''
 
+    def clean_fields(self, *args, **kwargs):
+        # reference parent here just to trigger a non-validation error to make sure we handle it
+        parent = self.parent
+        super(Facility, self).clean_fields(*args, **kwargs)
+
 
 class MyUser(AbstractBaseUser, FacilityDataSyncableModel):
     # Morango syncing settings

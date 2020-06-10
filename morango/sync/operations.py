@@ -292,7 +292,7 @@ def _deserialize_from_store(profile):
                             # we update a store model after we have deserialized it to be able to mark it as a clean parent
                             store_model.dirty_bit = False
                             store_model.save(update_fields=["dirty_bit"])
-                        except exceptions.ValidationError:
+                        except (exceptions.ValidationError, exceptions.ObjectDoesNotExist):
                             # if the app model did not validate, we leave the store dirty bit set
                             excluded_list.append(store_model.id)
 
@@ -304,7 +304,7 @@ def _deserialize_from_store(profile):
                     )
                     dirty_children = Store.objects.filter(
                         dirty_bit=True, profile=profile, _self_ref_fk__in=clean_parents
-                    ).filter(query)
+                    ).filter(query).exclude(id__in=excluded_list)
             else:
                 # array for holding db values from the fields of each model for this class
                 db_values = []
@@ -320,7 +320,7 @@ def _deserialize_from_store(profile):
                                 value = getattr(app_model, f.attname)
                                 db_value = f.get_db_prep_value(value, connection)
                                 db_values.append(db_value)
-                    except exceptions.ValidationError:
+                    except (exceptions.ValidationError, exceptions.ObjectDoesNotExist):
                         # if the app model did not validate, we leave the store dirty bit set
                         excluded_list.append(store_model.id)
 

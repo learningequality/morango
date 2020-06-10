@@ -570,3 +570,26 @@ class SelfReferentialFKDeserializationTestCase(TestCase):
         child2 = Facility.objects.filter(id=child2.id)
         self.assertTrue(child2.exists())
         self.assertEqual(child2[0].parent_id, root.id)
+
+    def test_deserialization_of_model_with_missing_parent(self):
+        self._test_deserialization_of_model_with_missing_parent(correct_self_ref_fk=True)
+
+    def test_deserialization_of_model_with_mismatched_self_ref_fk(self):
+        self._test_deserialization_of_model_with_missing_parent(correct_self_ref_fk=False)
+
+    def _test_deserialization_of_model_with_missing_parent(self, correct_self_ref_fk):
+        root = FacilityModelFactory()
+        child1 = FacilityModelFactory(parent=root)
+        self.mc.serialize_into_store()
+
+        new_child = Store.objects.get(id=child1.id)
+        data = json.loads(new_child.serialized)
+        new_child.id = data["id"] = "a" * 32
+        data["parent_id"] = "b" * 32
+        if correct_self_ref_fk:
+            new_child._self_ref_fk = data["parent_id"]
+        new_child.serialized = json.dumps(data)
+        new_child.dirty_bit = True
+        new_child.save()
+
+        self.mc.deserialize_from_store()
