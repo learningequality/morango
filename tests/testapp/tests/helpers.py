@@ -11,6 +11,7 @@ from facility_profile.models import Facility
 from facility_profile.models import InteractionLog
 from facility_profile.models import MyUser
 from facility_profile.models import SummaryLog
+from test.support import EnvironmentVarGuard
 
 from morango.models.core import AbstractStore
 from morango.models.core import Buffer
@@ -102,35 +103,37 @@ def create_dummy_store_data():
     data["mc"].serialize_into_store()  # counter is at 3
 
     # create new instance id and group of facilities
-    with mock.patch("platform.platform", return_value="plataforma"):
+    with EnvironmentVarGuard() as env:
+        env['MORANGO_SYSTEM_ID'] = 'new_sys_id'
+
         data["group2_id"] = InstanceIDModel.get_or_create_current_instance()[0]  # new counter is at 0
 
-    data["mc"].serialize_into_store()  # new counter is at 1
-    data["group2_c1"] = [FacilityFactory() for _ in range(5)]
+        data["mc"].serialize_into_store()  # new counter is at 1
+        data["group2_c1"] = [FacilityFactory() for _ in range(5)]
 
-    # create users and logs associated with user
-    data["user2"] = MyUser.objects.create(username="rob")
-    data["user2_sumlogs"] = [
-        SummaryLog.objects.create(user=data["user2"]) for _ in range(5)
-    ]
-    data["user2_interlogs"] = [
-        InteractionLog.objects.create(user=data["user2"]) for _ in range(5)
-    ]
+        # create users and logs associated with user
+        data["user2"] = MyUser.objects.create(username="rob")
+        data["user2_sumlogs"] = [
+            SummaryLog.objects.create(user=data["user2"]) for _ in range(5)
+        ]
+        data["user2_interlogs"] = [
+            InteractionLog.objects.create(user=data["user2"]) for _ in range(5)
+        ]
 
-    data["user3"] = MyUser.objects.create(username="zob")
-    data["user3_sumlogs"] = [
-        SummaryLog.objects.create(user=data["user3"]) for _ in range(5)
-    ]
-    data["user3_interlogs"] = [
-        InteractionLog.objects.create(user=data["user3"]) for _ in range(5)
-    ]
+        data["user3"] = MyUser.objects.create(username="zob")
+        data["user3_sumlogs"] = [
+            SummaryLog.objects.create(user=data["user3"]) for _ in range(5)
+        ]
+        data["user3_interlogs"] = [
+            InteractionLog.objects.create(user=data["user3"]) for _ in range(5)
+        ]
 
-    data["mc"].serialize_into_store()  # new counter is at 2
+        data["mc"].serialize_into_store()  # new counter is at 2
 
-    data["user4"] = MyUser.objects.create(
-        username="invalid", _morango_partition="badpartition"
-    )
-    data["mc"].serialize_into_store()  # new counter is at 3
+        data["user4"] = MyUser.objects.create(
+            username="invalid", _morango_partition="badpartition"
+        )
+        data["mc"].serialize_into_store()  # new counter is at 3
 
     return data
 

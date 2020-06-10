@@ -9,6 +9,7 @@ from django.test.utils import override_settings
 from django.utils import timezone
 from facility_profile.models import MyUser
 from rest_framework.test import APITestCase as BaseTestCase
+from test.support import EnvironmentVarGuard
 
 from morango.api.serializers import BufferSerializer
 from morango.api.serializers import CertificateSerializer
@@ -922,7 +923,8 @@ class MorangoInfoTestCase(APITestCase):
 
     def test_id_changes_id_hash_changes(self):
         old_id_hash = self.m_info.data['instance_hash']
-        with mock.patch('platform.platform', return_value='platform'):
+        with EnvironmentVarGuard() as env:
+            env['MORANGO_SYSTEM_ID'] = 'new_sys_id'
             InstanceIDModel.get_or_create_current_instance()
             m_info = self.client.get(reverse('morangoinfo-detail', kwargs={"pk": 1}), format='json')
         self.assertNotEqual(m_info.data['instance_hash'], old_id_hash)
