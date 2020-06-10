@@ -59,7 +59,7 @@ def from_int(data):
     :type data: int
     :rtype: string
     """
-    if not isinstance(data, int):
+    if not isinstance(data, six.integer_types):
         raise TypeError("Input must be integer")
 
     res = []

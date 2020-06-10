@@ -142,7 +142,7 @@ class InstanceIDModelTestCase(TestCase):
 
     @mock.patch(
         "ifcfg.interfaces",
-        return_value={"eth0": {"device": "eth0", "ether": "aa:aa:aa:aa:aa"}},
+        return_value={"eth0": {"device": "eth0", "ether": "a0:aa:aa:aa:aa"}},
     )
     def test_consistent_0_5_instance_id(self, *args):
         """
@@ -158,11 +158,11 @@ class InstanceIDModelTestCase(TestCase):
             ).id
 
             self.assertEqual(get_0_5_system_id(), "54940f560a55bbf7d86b")
-            self.assertEqual(get_0_5_mac_address(), "a56ba54c2a6ce0a6c64f")
+            self.assertEqual(get_0_5_mac_address(), "804f4c20d3b2b5a29b95")
 
             instance, _ = InstanceIDModel.get_or_create_current_instance()
 
-            self.assertEqual(instance.id, "18cc7382324bbb51b6bfd2103a4c1201")
+            self.assertEqual(instance.id, "e45c06595d820f4581e0c82930359592")
 
 
 class DatabaseIDModelTestCase(TestCase):

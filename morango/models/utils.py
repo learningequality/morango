@@ -9,6 +9,7 @@ import uuid
 from .fields.uuids import sha2_uuid
 
 from django.conf import settings
+from django.utils import six
 
 
 def _get_database_path():
@@ -107,7 +108,7 @@ def _get_android_uuid():
 def _do_salted_hash(value):
     if not value:
         return ""
-    if isinstance(value, int):
+    if not isinstance(value, six.string_types):
         value = str(value)
     try:
         value = value.encode()
@@ -175,6 +176,33 @@ def _device_sort_key(iface):
         return dev
 
 
+def _mac_int_to_ether(mac):
+    return ":".join(("%012x" % mac)[i : i + 2] for i in range(0, 12, 2))
+
+
+def _get_mac_address_flags(mac):
+    """
+    See: https://en.wikipedia.org/wiki/MAC_address#Universal_vs._local
+    """
+    if isinstance(mac, six.integer_types):
+        mac = _mac_int_to_ether(mac)
+
+    first_octet = int(mac[:2], base=16)
+
+    multicast = first_octet % 2 == 1
+    local = (first_octet >> 1) % 2 == 1
+
+    return multicast, local
+
+
+def _mac_is_multicast(mac):
+    return _get_mac_address_flags(mac)[0]
+
+
+def _mac_is_local(mac):
+    return _get_mac_address_flags(mac)[1]
+
+
 def get_0_5_mac_address():
 
     # first, try using ifcfg
@@ -185,13 +213,14 @@ def get_0_5_mac_address():
         pass
     for iface in sorted(interfaces, key=_device_sort_key):
         ether = iface.get("ether")
-        if ether:
+        if ether and not _mac_is_local(ether):
             return _do_salted_hash(ether)
 
     # fall back to trying uuid.getnode
     mac = uuid.getnode()
-    if (mac >> 40) % 2 == 0:  # 8th bit (of 48 bits, from left) is 1 if MAC is fake
-        ether = ":".join(("%012x" % mac)[i : i + 2] for i in range(0, 12, 2))
-        return _do_salted_hash(ether)
+    if not _mac_is_multicast(
+        mac
+    ):  # when uuid.getnode returns a fake MAC, it marks as multicast
+        return _do_salted_hash(_mac_int_to_ether(mac))
 
     return ""

@@ -141,18 +141,9 @@ class InstanceIDModel(models.Model):
             current=False
         )
         # create the model, or get existing if one already exists with this ID
-        obj, created = InstanceIDModel.objects.get_or_create(
+        obj, created = InstanceIDModel.objects.update_or_create(
             id=kwargs["id"], defaults=kwargs
         )
-        # update any of the attributes that have changed
-        changed = False
-        for key, val in kwargs.items():
-            if getattr(obj, key) != val:
-                setattr(obj, key, val)
-                changed = True
-        if changed:
-            obj.save()
-
         return obj, created
 
     @classmethod
