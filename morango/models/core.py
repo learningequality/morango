@@ -320,6 +320,7 @@ class Store(AbstractStore):
     id = UUIDField(primary_key=True)
     # used to know which store records need to be deserialized into the app layer models
     dirty_bit = models.BooleanField(default=False)
+    deserialization_error = models.TextField(blank=True)
 
     objects = StoreManager()
 

@@ -35,9 +35,12 @@ DBBackend = load_backend(connection).SQLWrapper()
 db_name = router.db_for_write(Store)
 USING_DB = db_name
 if "postgresql" in transaction.get_connection(USING_DB).vendor:
-    USING_DB = db_name + '-serializable'
-    assert USING_DB in connections, "Please add a `default-serializable` database connection in your django settings file, \
+    USING_DB = db_name + "-serializable"
+    assert (
+        USING_DB in connections
+    ), "Please add a `default-serializable` database connection in your django settings file, \
                                      which copies all the configuration settings of the `default` db connection"
+
 
 class OperationLogger(object):
     def __init__(self, start_msg, end_msg):
@@ -262,23 +265,15 @@ def _deserialize_from_store(profile):
         # iterate through classes which are in foreign key dependency order
         for model in syncable_models.get_models(profile):
             # handle cases where a class has a single FK reference to itself
-            self_ref_fk = _self_referential_fk(model)
-            query = Q(model_name=model.morango_model_name)
-            # this will handle the case of getting the clean parents, since they will be deserialized first
-            for klass in model.morango_model_dependencies:
-                query |= Q(model_name=klass.morango_model_name)
-            if self_ref_fk:
-                clean_parents = (
-                    Store.objects.filter(dirty_bit=False, profile=profile)
-                    .filter(query)
-                    .char_ids_list()
+            if _self_referential_fk(model):
+                store_models = Store.objects.filter(
+                    profile=profile, model_name=model.morango_model_name
                 )
+                clean_parents = store_models.filter(dirty_bit=False).char_ids_list()
                 dirty_children = (
-                    Store.objects.filter(dirty_bit=True, profile=profile)
+                    store_models.filter(dirty_bit=True)
                     # handle parents or if the model has no parent
-                    .filter(
-                        Q(_self_ref_fk__in=clean_parents) | Q(_self_ref_fk="")
-                    ).filter(query)
+                    .filter(Q(_self_ref_fk__in=clean_parents) | Q(_self_ref_fk=""))
                 )
 
                 # keep iterating until size of dirty_children is 0
@@ -291,20 +286,41 @@ def _deserialize_from_store(profile):
                                     app_model.save(update_dirty_bit_to=False)
                             # we update a store model after we have deserialized it to be able to mark it as a clean parent
                             store_model.dirty_bit = False
-                            store_model.save(update_fields=["dirty_bit"])
-                        except (exceptions.ValidationError, exceptions.ObjectDoesNotExist):
-                            # if the app model did not validate, we leave the store dirty bit set
+                            store_model.deserialization_error = ""
+                            store_model.save(
+                                update_fields=["dirty_bit", "deserialization_error"]
+                            )
+                        except (
+                            exceptions.ValidationError,
+                            exceptions.ObjectDoesNotExist,
+                        ) as e:
                             excluded_list.append(store_model.id)
+                            # if the app model did not validate, we leave the store dirty bit set, but mark the error
+                            store_model.deserialization_error = str(e)
+                            store_model.save(update_fields=["deserialization_error"])
 
                     # update lists with new clean parents and dirty children
-                    clean_parents = (
-                        Store.objects.filter(dirty_bit=False, profile=profile)
-                        .filter(query)
-                        .char_ids_list()
-                    )
-                    dirty_children = Store.objects.filter(
-                        dirty_bit=True, profile=profile, _self_ref_fk__in=clean_parents
-                    ).filter(query).exclude(id__in=excluded_list)
+                    clean_parents = store_models.filter(dirty_bit=False).char_ids_list()
+                    dirty_children = store_models.filter(
+                        dirty_bit=True, _self_ref_fk__in=clean_parents
+                    ).exclude(id__in=excluded_list)
+
+                # A. Mark records that were skipped due to missing parents with error info
+                # A(i). The ones that have a parent Store entry but it's dirty
+                dirty_parents = store_models.filter(dirty_bit=True).char_ids_list()
+                store_models.filter(
+                    dirty_bit=True, _self_ref_fk__in=dirty_parents
+                ).exclude(id__in=excluded_list).update(
+                    deserialization_error="Parent is dirty; could not deserialize."
+                )
+                # A(ii). The ones that don't even have Store entries for parent at all
+                all_parents = store_models.char_ids_list()
+                store_models.filter(dirty_bit=True).exclude(
+                    _self_ref_fk__in=all_parents
+                ).exclude(id__in=excluded_list).update(
+                    deserialization_error="Parent does not exist in Store; could not deserialize."
+                )
+
             else:
                 # array for holding db values from the fields of each model for this class
                 db_values = []
@@ -320,9 +336,14 @@ def _deserialize_from_store(profile):
                                 value = getattr(app_model, f.attname)
                                 db_value = f.get_db_prep_value(value, connection)
                                 db_values.append(db_value)
-                    except (exceptions.ValidationError, exceptions.ObjectDoesNotExist):
+                    except (
+                        exceptions.ValidationError,
+                        exceptions.ObjectDoesNotExist,
+                    ) as e:
                         # if the app model did not validate, we leave the store dirty bit set
                         excluded_list.append(store_model.id)
+                        store_model.deserialization_error = str(e)
+                        store_model.save(update_fields=["deserialization_error"])
 
                 if db_values:
                     # number of rows to update
@@ -342,10 +363,10 @@ def _deserialize_from_store(profile):
                             placeholder_list,
                         )
 
-        # clear dirty bit for all store models for this profile except for models that did not validate
-        Store.objects.exclude(id__in=excluded_list).filter(
-            profile=profile, dirty_bit=True
-        ).update(dirty_bit=False)
+                # clear dirty bit for all store records for this model/profile except for rows that did not validate
+                Store.objects.exclude(id__in=excluded_list).filter(
+                    model_name=model.morango_model_name, profile=profile, dirty_bit=True
+                ).update(dirty_bit=False)
 
 
 @transaction.atomic(using=USING_DB)

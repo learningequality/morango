@@ -593,3 +593,27 @@ class SelfReferentialFKDeserializationTestCase(TestCase):
         new_child.save()
 
         self.mc.deserialize_from_store()
+
+        new_child.refresh_from_db()
+        self.assertTrue(new_child.dirty_bit)
+        self.assertIn("exist", new_child.deserialization_error)
+
+    def test_deserialization_of_model_with_missing_foreignkey_referent(self):
+
+        user = MyUser.objects.create(username="penguin")
+        log = SummaryLog.objects.create(user=user)
+        self.mc.serialize_into_store()
+
+        new_log = Store.objects.get(id=log.id)
+        data = json.loads(new_log.serialized)
+        new_log.id = data["id"] = "f" * 32
+        data["user_id"] = "e" * 32
+        new_log.serialized = json.dumps(data)
+        new_log.dirty_bit = True
+        new_log.save()
+
+        self.mc.deserialize_from_store()
+
+        new_log.refresh_from_db()
+        self.assertTrue(new_log.dirty_bit)
+        self.assertIn("exist", new_log.deserialization_error)
