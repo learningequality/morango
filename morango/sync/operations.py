@@ -248,7 +248,7 @@ def _serialize_into_store(profile, filter=None):
                 )
 
 
-def _deserialize_from_store(profile):
+def _deserialize_from_store(profile, skip_erroring=False):
     """
     Takes data from the store and integrates into the application.
     ALGORITHM: On a per syncable model basis, we iterate through each class model and we go through 2 possible cases:
@@ -264,11 +264,17 @@ def _deserialize_from_store(profile):
         excluded_list = []
         # iterate through classes which are in foreign key dependency order
         for model in syncable_models.get_models(profile):
+
+            store_models = Store.objects.filter(
+                profile=profile, model_name=model.morango_model_name
+            )
+
+            # if requested, skip any records that previously errored, to be faster
+            if skip_erroring:
+                store_models = store_models.filter(deserialization_error="")
+
             # handle cases where a class has a single FK reference to itself
             if _self_referential_fk(model):
-                store_models = Store.objects.filter(
-                    profile=profile, model_name=model.morango_model_name
-                )
                 clean_parents = store_models.filter(dirty_bit=False).char_ids_list()
                 dirty_children = (
                     store_models.filter(dirty_bit=True)
@@ -325,9 +331,7 @@ def _deserialize_from_store(profile):
                 # array for holding db values from the fields of each model for this class
                 db_values = []
                 fields = model._meta.fields
-                for store_model in Store.objects.filter(
-                    model_name=model.morango_model_name, profile=profile, dirty_bit=True
-                ):
+                for store_model in store_models.filter(dirty_bit=True):
                     try:
                         app_model = store_model._deserialize_store_model(fk_cache)
                         # if the model was not deleted add its field values to the list
@@ -364,8 +368,8 @@ def _deserialize_from_store(profile):
                         )
 
                 # clear dirty bit for all store records for this model/profile except for rows that did not validate
-                Store.objects.exclude(id__in=excluded_list).filter(
-                    model_name=model.morango_model_name, profile=profile, dirty_bit=True
+                store_models.exclude(id__in=excluded_list).filter(
+                    dirty_bit=True
                 ).update(dirty_bit=False)
 
 
