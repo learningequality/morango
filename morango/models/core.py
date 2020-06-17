@@ -353,15 +353,19 @@ class Store(AbstractStore):
             app_model._morango_dirty_bit = False
 
             try:
+
                 # validate and return the model
                 app_model.cached_clean_fields(fk_cache)
                 return app_model
+
             except (exceptions.ValidationError, exceptions.ObjectDoesNotExist) as e:
+
                 logger.warn(
                     "Error deserializing instance of {model} with id {id}: {error}".format(
                         model=klass_model.__name__, id=app_model.id, error=e
                     )
                 )
+
                 # check FKs in store to see if any of those models were deleted or hard_deleted to propagate to this model
                 fk_ids = [
                     getattr(app_model, field.attname)
@@ -379,6 +383,8 @@ class Store(AbstractStore):
                             return None
                     except Store.DoesNotExist:
                         pass
+
+                # if we got here, it means the validation error wasn't handled by propagating deletion, so re-raise it
                 raise e
 
 
