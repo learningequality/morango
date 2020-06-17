@@ -502,25 +502,35 @@ class DeserializationFromStoreIntoAppTestCase(TestCase):
         self.assertFalse(SummaryLog.objects.filter(id=log.id).exists())
         self.assertTrue(Store.objects.get(id=log.id).hard_deleted)
 
-    def test_regular_model_deserialization(self):
-        # deserialization should be able to handle multiple records
+    def _create_two_users_to_deserialize(self):
         user = MyUser(username="test", password="password")
         user2 = MyUser(username="test2", password="password")
-        user.save(update_dirty_bit_to=False)
-        user2.save(update_dirty_bit_to=False)
+        user.save()
+        user2.save()
+        self.mc.serialize_into_store()
         user.username = "changed"
         user2.username = "changed2"
-        StoreModelFacilityFactory(
-            id=user.id, serialized=json.dumps(user.serialize()), model_name="user"
-        )
-        StoreModelFacilityFactory(
-            id=user2.id, serialized=json.dumps(user2.serialize()), model_name="user"
-        )
+        Store.objects.filter(id=user.id).update(serialized=json.dumps(user.serialize()), dirty_bit=True)
+        Store.objects.filter(id=user2.id).update(serialized=json.dumps(user2.serialize()), dirty_bit=True)
+        return user, user2
+
+    def test_regular_model_deserialization(self):
+        # deserialization should be able to handle multiple records
+        user, user2 = self._create_two_users_to_deserialize()
         self.mc.deserialize_from_store()
         self.assertFalse(MyUser.objects.filter(username="test").exists())
         self.assertFalse(MyUser.objects.filter(username="test2").exists())
         self.assertTrue(MyUser.objects.filter(username="changed").exists())
         self.assertTrue(MyUser.objects.filter(username="changed2").exists())
+
+    def test_filtered_deserialization(self):
+        # filtered deserialization only impacts specific records
+        user, user2 = self._create_two_users_to_deserialize()
+        self.mc.deserialize_from_store(filter=Filter(user._morango_partition))
+        self.assertFalse(MyUser.objects.filter(username="test").exists())
+        self.assertTrue(MyUser.objects.filter(username="test2").exists())
+        self.assertTrue(MyUser.objects.filter(username="changed").exists())
+        self.assertFalse(MyUser.objects.filter(username="changed2").exists())
 
 
 class SelfReferentialFKDeserializationTestCase(TestCase):

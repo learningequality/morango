@@ -248,7 +248,7 @@ def _serialize_into_store(profile, filter=None):
                 )
 
 
-def _deserialize_from_store(profile, skip_erroring=False):
+def _deserialize_from_store(profile, skip_erroring=False, filter=None):
     """
     Takes data from the store and integrates into the application.
     ALGORITHM: On a per syncable model basis, we iterate through each class model and we go through 2 possible cases:
@@ -256,8 +256,6 @@ def _deserialize_from_store(profile, skip_erroring=False):
     2. On a per app model basis, we append the field values to a single list, and do a single bulk insert/replace query.
     If a model fails to deserialize/validate, we exclude it from being marked as clean in the store.
     """
-    # we first serialize to avoid deserialization merge conflicts
-    _serialize_into_store(profile)
 
     fk_cache = {}
     with transaction.atomic(using=USING_DB):
@@ -268,6 +266,14 @@ def _deserialize_from_store(profile, skip_erroring=False):
             store_models = Store.objects.filter(
                 profile=profile, model_name=model.morango_model_name
             )
+
+            if filter:
+                # create Q objects for filtering by prefixes
+                prefix_condition = functools.reduce(
+                    lambda x, y: x | y,
+                    [Q(partition__startswith=prefix) for prefix in filter],
+                )
+                store_models = store_models.filter(prefix_condition)
 
             # if requested, skip any records that previously errored, to be faster
             if skip_erroring:
@@ -482,4 +488,6 @@ def _dequeue_into_store(transfersession):
         DBBackend._dequeuing_delete_remaining_rmcb(cursor, transfersession.id)
         DBBackend._dequeuing_delete_remaining_buffer(cursor, transfersession.id)
     if getattr(settings, "MORANGO_DESERIALIZE_AFTER_DEQUEUING", True):
+        # we first serialize to avoid deserialization merge conflicts
+        _serialize_into_store(transfersession.sync_session.profile, filter=transfersession.get_filter())
         _deserialize_from_store(transfersession.sync_session.profile)

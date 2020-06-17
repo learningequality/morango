@@ -19,6 +19,7 @@ from morango.models.certificates import Key
 from morango.models.certificates import Nonce
 from morango.models.certificates import ScopeDefinition
 from morango.models.core import Buffer
+from morango.models.core import DatabaseMaxCounter
 from morango.models.core import InstanceIDModel
 from morango.models.core import RecordMaxCounterBuffer
 from morango.models.core import SyncSession
@@ -651,6 +652,9 @@ class TransferSessionEndpointTestCase(CertificateTestCaseMixin, APITestCase):
 
         # check that the transfersession was "deleted"
         self.assertEqual(TransferSession.objects.get().active, False)
+
+        # check that we didn't create a DatabaseMaxCounter with empty partition in the process
+        self.assertEqual(DatabaseMaxCounter.objects.filter(partition="").count(), 0)
 
     def test_inactive_transfersession_cannot_be_deleted(self):
 
