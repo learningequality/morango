@@ -264,8 +264,14 @@ def _deserialize_from_store(profile, skip_erroring=False, filter=None):
         for model in syncable_models.get_models(profile):
 
             store_models = Store.objects.filter(
-                profile=profile, model_name=model.morango_model_name
+                profile=profile,
             )
+
+            model_condition = Q(model_name=model.morango_model_name)
+            for klass in model.morango_model_dependencies:
+                model_condition |= Q(model_name=klass.morango_model_name)
+
+            store_models = store_models.filter(model_condition)
 
             if filter:
                 # create Q objects for filtering by prefixes
