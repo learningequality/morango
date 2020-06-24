@@ -27,12 +27,14 @@ class MorangoProfileController(object):
         with OperationLogger("Serializing records", "Serialization complete"):
             _serialize_into_store(self.profile, filter=filter)
 
-    def deserialize_from_store(self):
+    def deserialize_from_store(self, skip_erroring=False, filter=None):
         """
         Takes data from the store and integrates into the application.
         """
         with OperationLogger("Deserializing records", "Deserialization complete"):
-            _deserialize_from_store(self.profile)
+            # we first serialize to avoid deserialization merge conflicts
+            _serialize_into_store(self.profile, filter=filter)
+            _deserialize_from_store(self.profile, filter=filter, skip_erroring=skip_erroring)
 
     def create_network_connection(self, base_url):
         return NetworkSyncConnection(base_url=base_url)

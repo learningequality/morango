@@ -79,7 +79,7 @@ servedocs: browserdocs ## compile the docs watching for changes
 
 release:
 	ls -l dist/
-	read "\nDo you want to upload everything in dist/*?\n\n CTRL+C to exit."
+	echo "\nPress enter to upload everything in dist (CTRL+C to exit).\n" && read yes
 	twine upload -s dist/*
 
 dist: clean

@@ -502,25 +502,35 @@ class DeserializationFromStoreIntoAppTestCase(TestCase):
         self.assertFalse(SummaryLog.objects.filter(id=log.id).exists())
         self.assertTrue(Store.objects.get(id=log.id).hard_deleted)
 
-    def test_regular_model_deserialization(self):
-        # deserialization should be able to handle multiple records
+    def _create_two_users_to_deserialize(self):
         user = MyUser(username="test", password="password")
         user2 = MyUser(username="test2", password="password")
-        user.save(update_dirty_bit_to=False)
-        user2.save(update_dirty_bit_to=False)
+        user.save()
+        user2.save()
+        self.mc.serialize_into_store()
         user.username = "changed"
         user2.username = "changed2"
-        StoreModelFacilityFactory(
-            id=user.id, serialized=json.dumps(user.serialize()), model_name="user"
-        )
-        StoreModelFacilityFactory(
-            id=user2.id, serialized=json.dumps(user2.serialize()), model_name="user"
-        )
+        Store.objects.filter(id=user.id).update(serialized=json.dumps(user.serialize()), dirty_bit=True)
+        Store.objects.filter(id=user2.id).update(serialized=json.dumps(user2.serialize()), dirty_bit=True)
+        return user, user2
+
+    def test_regular_model_deserialization(self):
+        # deserialization should be able to handle multiple records
+        user, user2 = self._create_two_users_to_deserialize()
         self.mc.deserialize_from_store()
         self.assertFalse(MyUser.objects.filter(username="test").exists())
         self.assertFalse(MyUser.objects.filter(username="test2").exists())
         self.assertTrue(MyUser.objects.filter(username="changed").exists())
         self.assertTrue(MyUser.objects.filter(username="changed2").exists())
+
+    def test_filtered_deserialization(self):
+        # filtered deserialization only impacts specific records
+        user, user2 = self._create_two_users_to_deserialize()
+        self.mc.deserialize_from_store(filter=Filter(user._morango_partition))
+        self.assertFalse(MyUser.objects.filter(username="test").exists())
+        self.assertTrue(MyUser.objects.filter(username="test2").exists())
+        self.assertTrue(MyUser.objects.filter(username="changed").exists())
+        self.assertFalse(MyUser.objects.filter(username="changed2").exists())
 
 
 class SelfReferentialFKDeserializationTestCase(TestCase):
@@ -570,3 +580,50 @@ class SelfReferentialFKDeserializationTestCase(TestCase):
         child2 = Facility.objects.filter(id=child2.id)
         self.assertTrue(child2.exists())
         self.assertEqual(child2[0].parent_id, root.id)
+
+    def test_deserialization_of_model_with_missing_parent(self):
+        self._test_deserialization_of_model_with_missing_parent(correct_self_ref_fk=True)
+
+    def test_deserialization_of_model_with_mismatched_self_ref_fk(self):
+        self._test_deserialization_of_model_with_missing_parent(correct_self_ref_fk=False)
+
+    def _test_deserialization_of_model_with_missing_parent(self, correct_self_ref_fk):
+        root = FacilityModelFactory()
+        child1 = FacilityModelFactory(parent=root)
+        self.mc.serialize_into_store()
+
+        new_child = Store.objects.get(id=child1.id)
+        data = json.loads(new_child.serialized)
+        new_child.id = data["id"] = "a" * 32
+        data["parent_id"] = "b" * 32
+        if correct_self_ref_fk:
+            new_child._self_ref_fk = data["parent_id"]
+        new_child.serialized = json.dumps(data)
+        new_child.dirty_bit = True
+        new_child.save()
+
+        self.mc.deserialize_from_store()
+
+        new_child.refresh_from_db()
+        self.assertTrue(new_child.dirty_bit)
+        self.assertIn("exist", new_child.deserialization_error)
+
+    def test_deserialization_of_model_with_missing_foreignkey_referent(self):
+
+        user = MyUser.objects.create(username="penguin")
+        log = SummaryLog.objects.create(user=user)
+        self.mc.serialize_into_store()
+
+        new_log = Store.objects.get(id=log.id)
+        data = json.loads(new_log.serialized)
+        new_log.id = data["id"] = "f" * 32
+        data["user_id"] = "e" * 32
+        new_log.serialized = json.dumps(data)
+        new_log.dirty_bit = True
+        new_log.save()
+
+        self.mc.deserialize_from_store()
+
+        new_log.refresh_from_db()
+        self.assertTrue(new_log.dirty_bit)
+        self.assertIn("exist", new_log.deserialization_error)
