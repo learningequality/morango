@@ -23,7 +23,7 @@ from morango.models.core import Store
 from morango.models.core import SyncSession
 from morango.models.core import TransferSession
 from morango.sync.controller import MorangoProfileController
-from morango.sync.syncsession import SyncClient
+from morango.sync.syncsession import BaseSyncClient
 
 
 class FacilityFactory(factory.DjangoModelFactory):
@@ -69,11 +69,13 @@ def serialized_facility_factory(identifier):
 def create_dummy_store_data():
     data = {}
     DatabaseIDModel.objects.create()
-    data["group1_id"] = InstanceIDModel.get_or_create_current_instance()[0]  # counter is at 0
+    data["group1_id"] = InstanceIDModel.get_or_create_current_instance()[
+        0
+    ]  # counter is at 0
 
     # create controllers for app/store/buffer operations
     data["mc"] = MorangoProfileController("facilitydata")
-    data["sc"] = SyncClient(None, "host")
+    data["sc"] = BaseSyncClient(None, "host")
     session = SyncSession.objects.create(
         id=uuid.uuid4().hex,
         profile="facilitydata",
@@ -104,9 +106,11 @@ def create_dummy_store_data():
 
     # create new instance id and group of facilities
     with EnvironmentVarGuard() as env:
-        env['MORANGO_SYSTEM_ID'] = 'new_sys_id'
+        env["MORANGO_SYSTEM_ID"] = "new_sys_id"
 
-        data["group2_id"] = InstanceIDModel.get_or_create_current_instance()[0]  # new counter is at 0
+        data["group2_id"] = InstanceIDModel.get_or_create_current_instance()[
+            0
+        ]  # new counter is at 0
 
         data["mc"].serialize_into_store()  # new counter is at 1
         data["group2_c1"] = [FacilityFactory() for _ in range(5)]
