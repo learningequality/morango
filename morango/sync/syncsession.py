@@ -3,7 +3,6 @@ import logging
 import socket
 import uuid
 from io import BytesIO
-from contextlib import contextmanager
 
 from django.conf import settings
 from django.core.paginator import Paginator
@@ -112,6 +111,8 @@ class NetworkSyncConnection(Connection):
             urljoin(self.base_url, api_urls.INFO)
         ).json()
         self.capabilities = self.server_info.get("capabilities", [])
+        self.sync_sessions = {}
+        self.transfer_session_count = 0
 
     @property
     def bytes_sent(self):
@@ -127,7 +128,15 @@ class NetworkSyncConnection(Connection):
         url = urljoin(urljoin(self.base_url, endpoint), lookup)
         return url
 
-    def create_sync_session(self, client_cert, server_cert):
+    def create_sync_session(self, client_cert, server_cert, chunk_size=500):
+        # since a sync session can be used for pulling and pushing, we'll cache session objects
+        # we create so a push and pull to the same server get the same session
+        cache_key = "session_{}_{}".format(client_cert.id, server_cert.id)
+        existing_session = self.sync_sessions.get(cache_key, None)
+        if existing_session is not None:
+            # TODO: this should return a `SyncSession` when deprecated code is cleaned up
+            return self._get_client(SyncClient, existing_session, chunk_size=chunk_size)
+
         # if server cert does not exist locally, retrieve it from server
         if not Certificate.objects.filter(id=server_cert.id).exists():
             cert_chain_response = self._get_certificate_chain(
@@ -202,21 +211,52 @@ class NetworkSyncConnection(Connection):
             ),
             "server_instance": session_resp.json().get("server_instance") or "{}",
         }
-        return SyncSession.objects.create(**data)
+        sync_session = SyncSession.objects.create(**data)
+        self.sync_sessions.update({cache_key: sync_session})
+
+        # TODO: this should return a `SyncSession` when deprecated code is cleaned up
+        return self._get_client(SyncClient, sync_session, chunk_size=chunk_size)
+
+    def close(self):
+        if self.transfer_session_count > 0:
+            raise MorangoError(
+                "Transfer Session must be closed before closing sync session."
+            )
+
+        for sync_session in self.sync_sessions.values():
+            # "delete" sync session on server side
+            self._close_sync_session(sync_session)
+            sync_session.active = False
+            sync_session.save()
+
+        # close adapters on requests session object
+        self.session.close()
+
+    def _increase_transfer_session_count(self, *args, **kwargs):
+        self.transfer_session_count += 1
+
+    def _decrease_transfer_session_count(self, *args, **kwargs):
+        self.transfer_session_count -= 1
+
+    def _get_client(self, client_class, sync_session, chunk_size=500):
+        client = client_class(self, sync_session, chunk_size=chunk_size)
+        client.signals.session.started.connect(self._increase_transfer_session_count)
+        client.signals.session.completed.connect(self._decrease_transfer_session_count)
+        return client
 
     def get_pull_client(self, client_cert, server_cert, chunk_size=500):
         """
         Creates the sync client needed to pull data from a server
         """
-        sync_session = self.create_sync_session(client_cert, server_cert)
-        return PullClient(self, sync_session, chunk_size=chunk_size)
+        sync_session = self.create_sync_session(client_cert, server_cert).sync_session
+        return self._get_client(PullClient, sync_session, chunk_size=chunk_size)
 
     def get_push_client(self, client_cert, server_cert, chunk_size=500):
         """
         Creates the sync client needed to push data to a server
         """
-        sync_session = self.create_sync_session(client_cert, server_cert)
-        return PushClient(self, sync_session, chunk_size=chunk_size)
+        sync_session = self.create_sync_session(client_cert, server_cert).sync_session
+        return self._get_client(PushClient, sync_session, chunk_size=chunk_size)
 
     def get_remote_certificates(self, primary_partition, scope_def_id=None):
         remote_certs = []
@@ -379,7 +419,6 @@ class NetworkSyncConnection(Connection):
             gzipped_data = compress_string(
                 bytes(json_data.encode("utf-8")), compresslevel=self.compresslevel
             )
-            print("Sending GZIP")
             return self.session.post(
                 self.urlresolve(api_urls.BUFFER),
                 data=gzipped_data,
@@ -497,6 +536,54 @@ class SyncClientSignals(object):
     """Dequeuing signal group for locally or remotely dequeuing data after transfer."""
 
 
+class SyncClient(object):
+    """
+    :deprecated This class is deprecated in favor of using individual sync classes `PullClient` and `PushClient`
+    """
+
+    signals = SyncClientSignals()
+
+    def __init__(self, sync_connection, sync_session, chunk_size=500):
+        """
+        :type sync_connection: NetworkSyncConnection
+        :type sync_session: SessionWrapper
+        :type chunk_size: int
+        """
+        self.sync_connection = sync_connection
+        self.sync_session = sync_session
+        self.chunk_size = chunk_size
+
+    def initiate_pull(self, sync_filter):
+        """
+        :deprecated Please use `NetworkSyncConnection.get_pull_client`
+        """
+        client = PullClient(
+            self.sync_connection, self.sync_session, chunk_size=self.chunk_size
+        )
+        client.signals = self.signals
+        client.initialize(sync_filter)
+        client.run()
+        client.finalize()
+
+    def initiate_push(self, sync_filter):
+        """
+        :deprecated Please use `NetworkSyncConnection.get_push_client`
+        """
+        client = PushClient(
+            self.sync_connection, self.sync_session, chunk_size=self.chunk_size
+        )
+        client.signals = self.signals
+        client.initialize(sync_filter)
+        client.run()
+        client.finalize()
+
+    def close_sync_session(self):
+        """
+        :deprecated Please use `NetworkSyncConnection.close`
+        """
+        self.sync_connection.close()
+
+
 class BaseSyncClient(object):
     """
     Base class for handling common operations for initiating syncing and other related operations.
@@ -527,21 +614,6 @@ class BaseSyncClient(object):
 
     def finalize(self):
         raise NotImplementedError("Abstract method")
-
-    def close_sync_session(self):
-        # "delete" sync session on server side
-        self.sync_connection._close_sync_session(self.sync_session)
-
-        # "delete" our own local sync session
-        if self.current_transfer_session is not None:
-            raise MorangoError(
-                "Transfer Session must be closed before closing sync session."
-            )
-        self.sync_session.active = False
-        self.sync_session.save()
-        self.sync_session = None
-        # close adapters on requests session object
-        self.sync_connection.session.close()
 
     def _initialize_server_transfer_session(self):
         return self.sync_connection._create_transfer_session(
