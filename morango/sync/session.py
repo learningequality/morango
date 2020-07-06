@@ -2,9 +2,24 @@ import logging
 
 from requests import exceptions
 from requests.sessions import Session
+from requests.utils import super_len
 
 
 logger = logging.getLogger(__name__)
+
+
+def _headers_content_length(headers):
+    try:
+        content_length = int(headers.get("Content-Length", 0))
+        if content_length > 0:
+            return content_length
+    except TypeError:
+        pass
+    return 0
+
+
+def _length_of_headers(headers):
+    return super_len("\n".join(["{}: {}".format(key, value) for key, value in headers.items()]))
 
 
 class SessionWrapper(Session):
@@ -20,12 +35,12 @@ class SessionWrapper(Session):
             response = super(SessionWrapper, self).request(method, url, **kwargs)
 
             # capture bytes received from the response
-            try:
-                content_length = response.headers.get("Content-Length", 0)
-                if content_length:
-                    self.bytes_received += int(content_length)
-            except TypeError:
-                pass
+            content_length = _headers_content_length(response.headers)
+            if not content_length:
+                content_length = super_len(response.content)
+
+            self.bytes_received += _length_of_headers(response.headers)
+            self.bytes_received += content_length
 
             response.raise_for_status()
             return response
@@ -47,12 +62,8 @@ class SessionWrapper(Session):
         """
         prepped = super(SessionWrapper, self).prepare_request(request)
 
-        try:
-            content_length = prepped.headers.get("Content-Length", 0)
-            if content_length:
-                self.bytes_sent += int(content_length)
-        except TypeError:
-            pass
+        self.bytes_sent += _length_of_headers(prepped.headers)
+        self.bytes_sent += _headers_content_length(prepped.headers)
 
         return prepped
 
