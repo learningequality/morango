@@ -118,9 +118,13 @@ class NetworkSyncConnectionTestCase(LiveServerTestCase):
         mock_create.return_value = mock_session
 
         self.assertEqual(SyncSession.objects.filter(active=True).count(), 0)
-        first_client = self.network_connection.create_sync_session(self.subset_cert, self.root_cert)
+        first_client = self.network_connection.create_sync_session(
+            self.subset_cert, self.root_cert
+        )
         self.assertEqual(SyncSession.objects.filter(active=True).count(), 1)
-        second_client = self.network_connection.create_sync_session(self.subset_cert, self.root_cert)
+        second_client = self.network_connection.create_sync_session(
+            self.subset_cert, self.root_cert
+        )
         self.assertEqual(SyncSession.objects.filter(active=True).count(), 1)
 
         self.assertEqual(mock_session, first_client.sync_session)
@@ -391,7 +395,9 @@ class SyncClientTestCase(LiveServerTestCase):
 
         filter = ["abc123"]
         client.initiate_pull(filter)
-        MockPullClient.assert_called_with(self.conn, self.session, chunk_size=self.chunk_size)
+        MockPullClient.assert_called_with(
+            self.conn, self.session, chunk_size=self.chunk_size
+        )
 
         mock_pull_client.initialize.assert_called_once_with(filter)
         mock_pull_client.run.assert_called_once()
@@ -410,7 +416,9 @@ class SyncClientTestCase(LiveServerTestCase):
 
         filter = ["abc123"]
         client.initiate_push(filter)
-        MockPushClient.assert_called_with(self.conn, self.session, chunk_size=self.chunk_size)
+        MockPushClient.assert_called_with(
+            self.conn, self.session, chunk_size=self.chunk_size
+        )
 
         mock_pull_client.initialize.assert_called_once_with(filter)
         mock_pull_client.run.assert_called_once()
@@ -427,12 +435,21 @@ class SyncClientTestCase(LiveServerTestCase):
         client.close_sync_session()
         conn.close.assert_called_once()
 
-    @mock.patch("morango.sync.syncsession.NetworkSyncConnection._update_transfer_session")
+    @mock.patch(
+        "morango.sync.syncsession.NetworkSyncConnection._update_transfer_session"
+    )
     @mock.patch("morango.sync.syncsession._queue_into_buffer")
     @mock.patch("morango.sync.syncsession.BaseSyncClient._create_transfer_session")
     @mock.patch("morango.sync.syncsession._serialize_into_store")
     @mock.patch("morango.sync.syncsession.settings")
-    def test_push_client__initialize(self, mock_settings, mock_serialize, mock_parent_create, mock_queue, mock_transfer_update):
+    def test_push_client__initialize(
+        self,
+        mock_settings,
+        mock_serialize,
+        mock_parent_create,
+        mock_queue,
+        mock_transfer_update,
+    ):
         mock_handler = mock.Mock()
         client = self.build_client(PushClient)
         client.signals.queuing.connect(mock_handler)
@@ -440,11 +457,15 @@ class SyncClientTestCase(LiveServerTestCase):
         setattr(mock_settings, "MORANGO_SERIALIZE_BEFORE_QUEUING", True)
 
         client.initialize(sync_filter)
-        mock_serialize.assert_called_with(self.session.profile, filter=Filter(sync_filter))
+        mock_serialize.assert_called_with(
+            self.session.profile, filter=Filter(sync_filter)
+        )
         mock_parent_create.assert_called_with(sync_filter, push=True)
         mock_queue.assert_called_with(client.current_transfer_session)
         mock_transfer_update.assert_called_once_with(
-            {"records_total": client.current_transfer_session.records_total}, client.current_transfer_session)
+            {"records_total": client.current_transfer_session.records_total},
+            client.current_transfer_session,
+        )
 
         mock_handler.assert_any_call(transfer_session=client.current_transfer_session)
 
@@ -455,7 +476,9 @@ class SyncClientTestCase(LiveServerTestCase):
         client.run()
 
         mock_push.assert_called_once()
-        self.transferring_mock.assert_called_with(transfer_session=client.current_transfer_session)
+        self.transferring_mock.assert_called_with(
+            transfer_session=client.current_transfer_session
+        )
 
     @mock.patch("morango.sync.syncsession.PushClient._push_records")
     def test_push_client__run__no_records(self, mock_push):
@@ -490,7 +513,9 @@ class SyncClientTestCase(LiveServerTestCase):
         client.run()
 
         mock_pull.assert_called_once()
-        self.transferring_mock.assert_called_with(transfer_session=client.current_transfer_session)
+        self.transferring_mock.assert_called_with(
+            transfer_session=client.current_transfer_session
+        )
 
     @mock.patch("morango.sync.syncsession.PullClient._pull_records")
     def test_pull_client__run__no_records(self, mock_pull):
@@ -513,8 +538,12 @@ class SyncClientTestCase(LiveServerTestCase):
         mock_handler.assert_any_call(transfer_session=client.current_transfer_session)
         mock_close.assert_called_once()
 
-    @mock.patch("morango.sync.syncsession.BaseSyncClient._initialize_server_transfer_session")
-    def test_pull_client__initialize_server_transfer_session(self, mock_parent_initialize):
+    @mock.patch(
+        "morango.sync.syncsession.BaseSyncClient._initialize_server_transfer_session"
+    )
+    def test_pull_client__initialize_server_transfer_session(
+        self, mock_parent_initialize
+    ):
         mock_handler = mock.Mock()
         mock_response = mock.Mock()
 

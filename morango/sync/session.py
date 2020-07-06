@@ -19,7 +19,9 @@ def _headers_content_length(headers):
 
 
 def _length_of_headers(headers):
-    return super_len("\n".join(["{}: {}".format(key, value) for key, value in headers.items()]))
+    return super_len(
+        "\n".join(["{}: {}".format(key, value) for key, value in headers.items()])
+    )
 
 
 class SessionWrapper(Session):
