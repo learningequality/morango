@@ -28,6 +28,7 @@ from morango.sync.syncsession import NetworkSyncConnection
 from morango.sync.syncsession import BaseSyncClient
 from morango.sync.syncsession import PullClient
 from morango.sync.syncsession import PushClient
+from morango.sync.syncsession import SyncClient
 
 
 def mock_patch_decorator(func):
@@ -223,6 +224,22 @@ class NetworkSyncConnectionTestCase(LiveServerTestCase):
         self.assertEqual(data[0]["id"], self.root_cert.id)
         self.assertEqual(data[1]["id"], self.subset_cert.id)
 
+    @mock.patch.object(SyncSession.objects, "create")
+    def test_close_sync_session(self, mock_create):
+        mock_session = mock.Mock(spec=SyncSession)
+
+        def create(**data):
+            mock_session.id = data.get("id")
+            return mock_session
+
+        mock_create.side_effect = create
+        self.assertEqual(SyncSession.objects.filter(active=True).count(), 0)
+        self.network_connection.create_sync_session(self.subset_cert, self.root_cert)
+        self.assertEqual(SyncSession.objects.filter(active=True).count(), 1)
+
+        self.network_connection.close()
+        self.assertEqual(SyncSession.objects.filter(active=True).count(), 0)
+
 
 class SyncClientTestCase(LiveServerTestCase):
     def setUp(self):
@@ -347,12 +364,52 @@ class SyncClientTestCase(LiveServerTestCase):
         self.syncclient._close_transfer_session()
         self.assertEqual(TransferSession.objects.filter(active=True).count(), 0)
 
-    @mock_patch_decorator
+    @mock.patch("morango.sync.syncsession.PullClient")
+    def test_initiate_pull(self, MockPullClient):
+        """
+        TODO: should eventually be removed as this method is deprecated
+        """
+        mock_pull_client = mock.Mock(spec=PullClient)
+        MockPullClient.return_value = mock_pull_client
+        client = self.build_client(SyncClient)
+
+        filter = ["abc123"]
+        client.initiate_pull(filter)
+        MockPullClient.assert_called_with(self.conn, self.session, chunk_size=self.chunk_size)
+
+        mock_pull_client.initialize.assert_called_once_with(filter)
+        mock_pull_client.run.assert_called_once()
+        mock_pull_client.finalize.assert_called_once()
+
+        self.assertEqual(client.signals, mock_pull_client.signals)
+
+    @mock.patch("morango.sync.syncsession.PushClient")
+    def test_initiate_push(self, MockPushClient):
+        """
+        TODO: should eventually be removed as this method is deprecated
+        """
+        mock_pull_client = mock.Mock(spec=PushClient)
+        MockPushClient.return_value = mock_pull_client
+        client = self.build_client(SyncClient)
+
+        filter = ["abc123"]
+        client.initiate_push(filter)
+        MockPushClient.assert_called_with(self.conn, self.session, chunk_size=self.chunk_size)
+
+        mock_pull_client.initialize.assert_called_once_with(filter)
+        mock_pull_client.run.assert_called_once()
+        mock_pull_client.finalize.assert_called_once()
+
+        self.assertEqual(client.signals, mock_pull_client.signals)
+
     def test_close_sync_session(self):
-        self.assertEqual(SyncSession.objects.filter(active=True).count(), 1)
-        self.syncclient._close_transfer_session()
-        self.syncclient.close_sync_session()
-        self.assertEqual(SyncSession.objects.filter(active=True).count(), 0)
+        """
+        TODO: should eventually be removed as this method is deprecated
+        """
+        conn = mock.Mock(spec=NetworkSyncConnection)
+        client = SyncClient(conn, self.session)
+        client.close_sync_session()
+        conn.close.assert_called_once()
 
 
 class SessionWrapperTestCase(TestCase):
