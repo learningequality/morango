@@ -9,6 +9,7 @@ from django.core.paginator import Paginator
 from django.utils import timezone
 from django.utils.six import iteritems
 from requests.adapters import HTTPAdapter
+from requests.exceptions import Timeout
 from requests.packages.urllib3.util.retry import Retry
 from rest_framework.exceptions import ValidationError
 from django.utils.six.moves.urllib.parse import urljoin
@@ -612,7 +613,7 @@ class BaseSyncClient(object):
     def run(self):
         raise NotImplementedError("Abstract method")
 
-    def finalize(self):
+    def finalize(self, allow_server_timeout=False):
         raise NotImplementedError("Abstract method")
 
     def _initialize_server_transfer_session(self):
@@ -656,9 +657,21 @@ class BaseSyncClient(object):
         )
         self.current_transfer_session.save()
 
-    def _close_transfer_session(self):
-        # "delete" transfer session on server side
-        self._close_server_transfer_session()
+    def _close_transfer_session(self, allow_server_timeout=False):
+        """
+        :param allow_server_timeout: Ignores timeout errors during remote close of transfer session
+        """
+        try:
+            # "delete" transfer session on server side
+            self._close_server_transfer_session()
+        except Timeout as e:
+            # re-raise error if we weren't told to ignore it
+            if not allow_server_timeout:
+                raise e
+            else:
+                logger.warning(
+                    "Request to close server's transfer session has timed out"
+                )
 
         # "delete" our own local transfer session
         self.current_transfer_session.active = False
@@ -709,7 +722,7 @@ class PushClient(BaseSyncClient):
         ) as status:
             self._push_records(callback=status.in_progress.fire)
 
-    def finalize(self):
+    def finalize(self, allow_server_timeout=False):
         # upon successful completion of pushing records, proceed to delete buffered records
         Buffer.objects.filter(transfer_session=self.current_transfer_session).delete()
         RecordMaxCounterBuffer.objects.filter(
@@ -721,7 +734,7 @@ class PushClient(BaseSyncClient):
         with self.signals.dequeuing.send(
             transfer_session=self.current_transfer_session
         ):
-            self._close_transfer_session()
+            self._close_transfer_session(allow_server_timeout=allow_server_timeout)
 
     def _push_records(self, callback=None):
         # paginate buffered records so we do not load them all into memory
@@ -772,7 +785,7 @@ class PullClient(BaseSyncClient):
         ) as status:
             self._pull_records(callback=status.in_progress.fire)
 
-    def finalize(self):
+    def finalize(self, allow_server_timeout=False):
         with self.signals.dequeuing.send(
             transfer_session=self.current_transfer_session
         ):
@@ -782,7 +795,7 @@ class PullClient(BaseSyncClient):
         DatabaseMaxCounter.update_fsics(
             json.loads(self.current_transfer_session.server_fsic), self.sync_filter
         )
-        self._close_transfer_session()
+        self._close_transfer_session(allow_server_timeout=allow_server_timeout)
 
     def _initialize_server_transfer_session(self):
         # this makes a remote call to the server, which triggers queuing for our pull session

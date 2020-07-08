@@ -9,6 +9,7 @@ from django.utils import timezone
 from facility_profile.models import SummaryLog
 from requests.exceptions import HTTPError
 from requests.exceptions import RequestException
+from requests.exceptions import Timeout
 
 from morango.api.serializers import BufferSerializer
 from morango.api.serializers import CertificateSerializer
@@ -383,6 +384,30 @@ class SyncClientTestCase(LiveServerTestCase):
     def test_close_transfer_session_push(self):
         self.assertEqual(TransferSession.objects.filter(active=True).count(), 1)
         self.syncclient._close_transfer_session()
+        self.assertEqual(TransferSession.objects.filter(active=True).count(), 0)
+
+    @mock.patch(
+        "morango.sync.syncsession.BaseSyncClient._close_server_transfer_session"
+    )
+    @mock_patch_decorator
+    def test_close_transfer_session_disallow_timeout(self, mocked_close):
+        mocked_close.side_effect = Timeout()
+
+        self.assertEqual(TransferSession.objects.filter(active=True).count(), 1)
+        with self.assertRaises(Timeout):
+            self.syncclient._close_transfer_session()
+
+        self.assertEqual(TransferSession.objects.filter(active=True).count(), 1)
+
+    @mock.patch(
+        "morango.sync.syncsession.BaseSyncClient._close_server_transfer_session"
+    )
+    @mock_patch_decorator
+    def test_close_transfer_session_allow_timeout(self, mocked_close):
+        mocked_close.side_effect = Timeout()
+
+        self.assertEqual(TransferSession.objects.filter(active=True).count(), 1)
+        self.syncclient._close_transfer_session(allow_server_timeout=True)
         self.assertEqual(TransferSession.objects.filter(active=True).count(), 0)
 
     @mock.patch("morango.sync.syncsession.PullClient")
