@@ -46,13 +46,15 @@ class SessionWrapper(Session):
 
             response.raise_for_status()
             return response
-        except exceptions.HTTPError as httpErr:
-            logger.error("{} Reason: {}".format(str(httpErr), httpErr.response.json()))
-            raise httpErr
-        except exceptions.RequestException as reqErr:
+        except exceptions.RequestException as req_err:
             # we want to log all request errors for debugging purposes
-            logger.error(str(reqErr))
-            raise reqErr
+            response_content = (
+                req_err.response.content if req_err.response else "(no response)"
+            )
+            logger.error(
+                "{} Reason: {}".format(req_err.__class__.__name__, response_content)
+            )
+            raise req_err
 
     def prepare_request(self, request):
         """

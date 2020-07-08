@@ -8,6 +8,7 @@ from django.test.utils import override_settings
 from django.utils import timezone
 from facility_profile.models import SummaryLog
 from requests.exceptions import HTTPError
+from requests.exceptions import RequestException
 
 from morango.api.serializers import BufferSerializer
 from morango.api.serializers import CertificateSerializer
@@ -559,7 +560,7 @@ class SyncClientTestCase(LiveServerTestCase):
 
 
 class SessionWrapperTestCase(TestCase):
-    @mock.patch("requests.sessions.Session.request")
+    @mock.patch("morango.sync.session.Session.request")
     def test_request(self, mocked_super_request):
         headers = {"Content-Length": 1024}
         expected = mocked_super_request.return_value = mock.Mock(
@@ -573,7 +574,49 @@ class SessionWrapperTestCase(TestCase):
 
         self.assertEqual(wrapper.bytes_received, 1024 + _length_of_headers(headers))
 
-    @mock.patch("requests.sessions.Session.prepare_request")
+    @mock.patch("morango.sync.session.logger")
+    @mock.patch("morango.sync.session.Session.request")
+    def test_request__not_ok(self, mocked_super_request, mocked_logger):
+        raise_for_status = mock.Mock()
+        expected = mocked_super_request.return_value = mock.Mock(
+            headers={"Content-Length": 1024},
+            raise_for_status=raise_for_status,
+            content="Connection timeout",
+        )
+
+        raise_for_status.side_effect = HTTPError(response=expected)
+
+        wrapper = SessionWrapper()
+
+        with self.assertRaises(HTTPError):
+            wrapper.request("GET", "test_url", is_test=True)
+
+        mocked_super_request.assert_called_once_with("GET", "test_url", is_test=True)
+        mocked_logger.error.assert_called_once_with(
+            "HTTPError Reason: Connection timeout"
+        )
+
+    @mock.patch("morango.sync.session.logger")
+    @mock.patch("morango.sync.session.Session.request")
+    def test_request__really_not_ok(self, mocked_super_request, mocked_logger):
+        raise_for_status = mock.Mock()
+        mocked_super_request.return_value = mock.Mock(
+            headers={"Content-Length": 1024}, raise_for_status=raise_for_status,
+        )
+
+        raise_for_status.side_effect = RequestException()
+
+        wrapper = SessionWrapper()
+
+        with self.assertRaises(RequestException):
+            wrapper.request("GET", "test_url", is_test=True)
+
+        mocked_super_request.assert_called_once_with("GET", "test_url", is_test=True)
+        mocked_logger.error.assert_called_once_with(
+            "RequestException Reason: (no response)"
+        )
+
+    @mock.patch("morango.sync.session.Session.prepare_request")
     def test_prepare_request(self, mocked_super_prepare_request):
         headers = {"Content-Length": 256}
         expected = mocked_super_prepare_request.return_value = mock.Mock(
