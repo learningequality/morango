@@ -419,7 +419,7 @@ class SyncClientTestCase(LiveServerTestCase):
         MockPullClient.return_value = mock_pull_client
         client = self.build_client(SyncClient)
 
-        filter = ["abc123"]
+        filter = Filter("abc123")
         client.initiate_pull(filter)
         MockPullClient.assert_called_with(
             self.conn, self.session, chunk_size=self.chunk_size
@@ -440,13 +440,13 @@ class SyncClientTestCase(LiveServerTestCase):
         MockPushClient.return_value = mock_pull_client
         client = self.build_client(SyncClient)
 
-        filter = ["abc123"]
-        client.initiate_push(filter)
+        sync_filter = Filter("abc123")
+        client.initiate_push(sync_filter)
         MockPushClient.assert_called_with(
             self.conn, self.session, chunk_size=self.chunk_size
         )
 
-        mock_pull_client.initialize.assert_called_once_with(filter)
+        mock_pull_client.initialize.assert_called_once_with(sync_filter)
         mock_pull_client.run.assert_called_once()
         mock_pull_client.finalize.assert_called_once()
 
@@ -479,13 +479,11 @@ class SyncClientTestCase(LiveServerTestCase):
         mock_handler = mock.Mock()
         client = self.build_client(PushClient)
         client.signals.queuing.connect(mock_handler)
-        sync_filter = "abc123"
+        sync_filter = Filter("abc123")
         setattr(mock_settings, "MORANGO_SERIALIZE_BEFORE_QUEUING", True)
 
         client.initialize(sync_filter)
-        mock_serialize.assert_called_with(
-            self.session.profile, filter=Filter(sync_filter)
-        )
+        mock_serialize.assert_called_with(self.session.profile, filter=sync_filter)
         mock_parent_create.assert_called_with(sync_filter, push=True)
         mock_queue.assert_called_with(client.current_transfer_session)
         mock_transfer_update.assert_called_once_with(
@@ -526,7 +524,7 @@ class SyncClientTestCase(LiveServerTestCase):
     @mock.patch("morango.sync.syncsession.BaseSyncClient._create_transfer_session")
     def test_pull_client__initialize(self, mock_parent_create):
         client = self.build_client(PullClient)
-        sync_filter = "abc123"
+        sync_filter = Filter("abc123")
 
         client.initialize(sync_filter)
         self.assertEqual(sync_filter, client.sync_filter)
@@ -556,7 +554,7 @@ class SyncClientTestCase(LiveServerTestCase):
         mock_handler = mock.Mock()
         client = self.build_client(PullClient)
         client.signals.dequeuing.connect(mock_handler)
-        client.sync_filter = "abc123"
+        client.sync_filter = Filter("abc123")
         client.current_transfer_session.server_fsic = "{}"
         client.finalize()
 

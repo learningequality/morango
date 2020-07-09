@@ -556,6 +556,7 @@ class SyncClient(object):
 
     def initiate_pull(self, sync_filter):
         """
+        :type sync_filter: Filter
         :deprecated Please use `NetworkSyncConnection.get_pull_client`
         """
         client = PullClient(
@@ -606,7 +607,7 @@ class BaseSyncClient(object):
 
     def initialize(self, sync_filter):
         """
-        :type sync_filter: list
+        :type sync_filter: Filter
         """
         raise NotImplementedError("Abstract method")
 
@@ -639,7 +640,9 @@ class BaseSyncClient(object):
             filter=str(sync_filter),
             sync_session_id=self.sync_session.id,
             last_activity_timestamp=timezone.now(),
-            client_fsic=DatabaseMaxCounter.calculate_filter_max_counters(sync_filter),
+            client_fsic=json.dumps(
+                DatabaseMaxCounter.calculate_filter_max_counters(sync_filter)
+            ),
         )
 
         self.current_transfer_session = TransferSession.objects.create(**data)
@@ -688,11 +691,14 @@ class PushClient(BaseSyncClient):
     """
 
     def initialize(self, sync_filter):
+        """
+        :type sync_filter: Filter
+        """
         # before pushing or creating the transfer session, we want to serialize the most recent
         # data and update database max counters
         if getattr(settings, "MORANGO_SERIALIZE_BEFORE_QUEUING", True):
             _serialize_into_store(
-                self.sync_session.profile, filter=Filter(sync_filter),
+                self.sync_session.profile, filter=sync_filter,
             )
 
         self._create_transfer_session(sync_filter, push=True)
@@ -772,6 +778,9 @@ class PullClient(BaseSyncClient):
     sync_filter = None
 
     def initialize(self, sync_filter):
+        """
+        :type sync_filter: Filter
+        """
         self.sync_filter = sync_filter
         self._create_transfer_session(sync_filter, push=False)
 
