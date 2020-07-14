@@ -1,5 +1,4 @@
 import logging
-from urllib.parse import urlparse
 
 from requests import exceptions
 from requests.sessions import Session
