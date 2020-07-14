@@ -30,7 +30,6 @@ from morango.errors import CertificateSignatureInvalid
 from morango.errors import MorangoError
 from morango.errors import MorangoServerDoesNotAllowNewCertPush
 from morango.models.certificates import Certificate
-from morango.models.certificates import Filter
 from morango.models.certificates import Key
 from morango.models.core import Buffer
 from morango.models.core import DatabaseMaxCounter
