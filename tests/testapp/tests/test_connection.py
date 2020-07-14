@@ -32,7 +32,7 @@ from morango.sync.syncsession import NetworkSyncConnection
 from morango.sync.syncsession import BaseSyncClient
 from morango.sync.syncsession import PullClient
 from morango.sync.syncsession import PushClient
-from morango.sync.syncsession import SyncClient
+from morango.sync.syncsession import SyncSessionClient
 
 
 def mock_patch_decorator(func):
@@ -113,38 +113,6 @@ class NetworkSyncConnectionTestCase(LiveServerTestCase):
         self.assertEqual(SyncSession.objects.filter(active=True).count(), 0)
         self.network_connection.create_sync_session(self.subset_cert, self.root_cert)
         self.assertEqual(SyncSession.objects.filter(active=True).count(), 1)
-
-    @mock.patch.object(SyncSession.objects, "create")
-    def test_creating_sync_session_successful(self, mock_create):
-        mock_session = mock.Mock(spec=SyncSession)
-        mock_create.return_value = mock_session
-
-        self.assertEqual(SyncSession.objects.filter(active=True).count(), 0)
-        first_client = self.network_connection.create_sync_session(
-            self.subset_cert, self.root_cert
-        )
-        self.assertEqual(SyncSession.objects.filter(active=True).count(), 1)
-        second_client = self.network_connection.create_sync_session(
-            self.subset_cert, self.root_cert
-        )
-        self.assertEqual(SyncSession.objects.filter(active=True).count(), 1)
-
-        self.assertEqual(mock_session, first_client.sync_session)
-        self.assertEqual(mock_session, second_client.sync_session)
-
-    @mock.patch.object(SyncSession.objects, "create", return_value=None)
-    def test_get_pull_client(self, mock_object):
-        client = self.network_connection.get_pull_client(
-            self.subset_cert, self.root_cert
-        )
-        self.assertIsInstance(client, PullClient)
-
-    @mock.patch.object(SyncSession.objects, "create", return_value=None)
-    def test_get_push_client(self, mock_object):
-        client = self.network_connection.get_push_client(
-            self.subset_cert, self.root_cert
-        )
-        self.assertIsInstance(client, PushClient)
 
     @mock.patch.object(NetworkSyncConnection, "_create_sync_session")
     @mock.patch.object(Certificate, "verify", return_value=False)
@@ -256,10 +224,10 @@ class NetworkSyncConnectionTestCase(LiveServerTestCase):
 
         mock_create.side_effect = create
         self.assertEqual(SyncSession.objects.filter(active=True).count(), 0)
-        self.network_connection.create_sync_session(self.subset_cert, self.root_cert)
+        client = self.network_connection.create_sync_session(self.subset_cert, self.root_cert)
         self.assertEqual(SyncSession.objects.filter(active=True).count(), 1)
 
-        self.network_connection.close()
+        self.network_connection.close_sync_session(client.sync_session)
         self.assertEqual(SyncSession.objects.filter(active=True).count(), 0)
 
 
@@ -320,6 +288,20 @@ class SyncClientTestCase(LiveServerTestCase):
         )
         serialized_records = BufferSerializer(buffered_items, many=True)
         return json.dumps(serialized_records.data)
+
+    def test_get_pull_client(self):
+        session_client = self.build_client(SyncSessionClient)
+        client = session_client.get_pull_client()
+        self.assertIsInstance(client, PullClient)
+        self.assertEqual(session_client.sync_connection, client.sync_connection)
+        self.assertEqual(session_client.sync_session, client.sync_session)
+
+    def test_get_push_client(self):
+        session_client = self.build_client(SyncSessionClient)
+        client = session_client.get_push_client()
+        self.assertIsInstance(client, PushClient)
+        self.assertEqual(session_client.sync_connection, client.sync_connection)
+        self.assertEqual(session_client.sync_session, client.sync_session)
 
     @mock_patch_decorator
     def test_push_records(self):
@@ -417,7 +399,7 @@ class SyncClientTestCase(LiveServerTestCase):
         """
         mock_pull_client = mock.Mock(spec=PullClient)
         MockPullClient.return_value = mock_pull_client
-        client = self.build_client(SyncClient)
+        client = self.build_client(SyncSessionClient)
 
         filter = Filter("abc123")
         client.initiate_pull(filter)
@@ -438,7 +420,7 @@ class SyncClientTestCase(LiveServerTestCase):
         """
         mock_pull_client = mock.Mock(spec=PushClient)
         MockPushClient.return_value = mock_pull_client
-        client = self.build_client(SyncClient)
+        client = self.build_client(SyncSessionClient)
 
         sync_filter = Filter("abc123")
         client.initiate_push(sync_filter)
@@ -457,7 +439,7 @@ class SyncClientTestCase(LiveServerTestCase):
         TODO: should eventually be removed as this method is deprecated
         """
         conn = mock.Mock(spec=NetworkSyncConnection)
-        client = SyncClient(conn, self.session)
+        client = SyncSessionClient(conn, self.session)
         client.close_sync_session()
         conn.close.assert_called_once()
 

@@ -1,4 +1,5 @@
 import logging
+from urllib.parse import urlparse
 
 from requests import exceptions
 from requests.sessions import Session
@@ -36,11 +37,13 @@ class SessionWrapper(Session):
         try:
             response = super(SessionWrapper, self).request(method, url, **kwargs)
 
-            # capture bytes received from the response
+            # capture bytes received from the response, the length header could be missing if it's
+            # a chunked response though
             content_length = _headers_content_length(response.headers)
             if not content_length:
                 content_length = super_len(response.content)
 
+            self.bytes_received += len("HTTP/1.1 {} {}".format(response.status_code, response.reason))
             self.bytes_received += _length_of_headers(response.headers)
             self.bytes_received += content_length
 
@@ -65,7 +68,12 @@ class SessionWrapper(Session):
         :rtype: requests.PreparedRequest
         """
         prepped = super(SessionWrapper, self).prepare_request(request)
+        parsed_url = urlparse(request.url)
 
+        # we don't bother checking if the content length header exists here because we've probably
+        # been given the request body as Morango sends bodies that aren't streamed, so the
+        # underlying requests code will set it appropriately
+        self.bytes_sent += len("{} {} HTTP/1.1".format(request.method, parsed_url.path))
         self.bytes_sent += _length_of_headers(prepped.headers)
         self.bytes_sent += _headers_content_length(prepped.headers)
 

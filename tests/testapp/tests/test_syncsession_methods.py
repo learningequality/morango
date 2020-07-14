@@ -24,6 +24,7 @@ from morango.sync.controller import MorangoProfileController
 from morango.sync.operations import _dequeue_into_store
 from morango.sync.operations import _queue_into_buffer
 from morango.sync.syncsession import BaseSyncClient
+from morango.sync.syncsession import SyncClientSignals
 from morango.sync.syncsession import SyncSignal
 from morango.sync.syncsession import SyncSignalGroup
 
@@ -569,3 +570,19 @@ class SyncSignalGroupTestCase(TestCase):
             completed_handler.assert_not_called()
 
         completed_handler.assert_called_once_with(this_is_a_default=True, other="A")
+
+
+class SyncClientSignalsTestCase(TestCase):
+    def test_separation(self):
+        handler1 = mock.Mock()
+        signals1 = SyncClientSignals()
+        signals1.session.connect(handler1)
+
+        handler2 = mock.Mock()
+        signals2 = SyncClientSignals()
+        signals2.session.connect(handler2)
+
+        signals1.session.fire()
+        handler1.assert_called_once_with(transfer_session=None)
+        handler2.assert_not_called()
+

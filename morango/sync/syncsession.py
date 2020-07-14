@@ -38,6 +38,8 @@ from morango.models.core import InstanceIDModel
 from morango.models.core import RecordMaxCounterBuffer
 from morango.models.core import SyncSession
 from morango.models.core import TransferSession
+from morango.sync.utils import SyncSignal
+from morango.sync.utils import SyncSignalGroup
 from morango.utils import CAPABILITIES
 
 if GZIP_BUFFER_POST in CAPABILITIES:
@@ -112,8 +114,6 @@ class NetworkSyncConnection(Connection):
             urljoin(self.base_url, api_urls.INFO)
         ).json()
         self.capabilities = self.server_info.get("capabilities", [])
-        self.sync_sessions = {}
-        self.transfer_session_count = 0
 
     @property
     def bytes_sent(self):
@@ -130,14 +130,6 @@ class NetworkSyncConnection(Connection):
         return url
 
     def create_sync_session(self, client_cert, server_cert, chunk_size=500):
-        # since a sync session can be used for pulling and pushing, we'll cache session objects
-        # we create so a push and pull to the same server get the same session
-        cache_key = "session_{}_{}".format(client_cert.id, server_cert.id)
-        existing_session = self.sync_sessions.get(cache_key, None)
-        if existing_session is not None:
-            # TODO: this should return a `SyncSession` when deprecated code is cleaned up
-            return self._get_client(SyncClient, existing_session, chunk_size=chunk_size)
-
         # if server cert does not exist locally, retrieve it from server
         if not Certificate.objects.filter(id=server_cert.id).exists():
             cert_chain_response = self._get_certificate_chain(
@@ -213,51 +205,18 @@ class NetworkSyncConnection(Connection):
             "server_instance": session_resp.json().get("server_instance") or "{}",
         }
         sync_session = SyncSession.objects.create(**data)
-        self.sync_sessions.update({cache_key: sync_session})
+        return SyncSessionClient(self, sync_session, chunk_size=chunk_size)
 
-        # TODO: this should return a `SyncSession` when deprecated code is cleaned up
-        return self._get_client(SyncClient, sync_session, chunk_size=chunk_size)
+    def close_sync_session(self, sync_session):
+        # "delete" sync session on server side
+        self._close_sync_session(sync_session)
+
+        sync_session.active = False
+        sync_session.save()
 
     def close(self):
-        if self.transfer_session_count > 0:
-            raise MorangoError(
-                "Transfer Session must be closed before closing sync session."
-            )
-
-        for sync_session in self.sync_sessions.values():
-            # "delete" sync session on server side
-            self._close_sync_session(sync_session)
-            sync_session.active = False
-            sync_session.save()
-
         # close adapters on requests session object
         self.session.close()
-
-    def _increase_transfer_session_count(self, *args, **kwargs):
-        self.transfer_session_count += 1
-
-    def _decrease_transfer_session_count(self, *args, **kwargs):
-        self.transfer_session_count -= 1
-
-    def _get_client(self, client_class, sync_session, chunk_size=500):
-        client = client_class(self, sync_session, chunk_size=chunk_size)
-        client.signals.session.started.connect(self._increase_transfer_session_count)
-        client.signals.session.completed.connect(self._decrease_transfer_session_count)
-        return client
-
-    def get_pull_client(self, client_cert, server_cert, chunk_size=500):
-        """
-        Creates the sync client needed to pull data from a server
-        """
-        sync_session = self.create_sync_session(client_cert, server_cert).sync_session
-        return self._get_client(PullClient, sync_session, chunk_size=chunk_size)
-
-    def get_push_client(self, client_cert, server_cert, chunk_size=500):
-        """
-        Creates the sync client needed to push data to a server
-        """
-        sync_session = self.create_sync_session(client_cert, server_cert).sync_session
-        return self._get_client(PushClient, sync_session, chunk_size=chunk_size)
 
     def get_remote_certificates(self, primary_partition, scope_def_id=None):
         remote_certs = []
@@ -438,90 +397,7 @@ class NetworkSyncConnection(Connection):
         return self.session.get(self.urlresolve(api_urls.BUFFER), params=params)
 
 
-class SyncSignal(object):
-    """
-    Helper class for firing signals from the sync client
-    """
-
-    def __init__(self, **kwargs_defaults):
-        """
-        Default keys/values that the signal consumer can depend on being present.
-        """
-        self._handlers = []
-        self._defaults = kwargs_defaults
-
-    def connect(self, handler):
-        """
-        Adds a callable handler that will be called when the signal is fired.
-
-        :type handler: function
-        """
-        self._handlers.append(handler)
-
-    def fire(self, **kwargs):
-        """
-        Fires the handler functions connected via `connect`.
-        """
-        fire_kwargs = self._defaults.copy()
-        fire_kwargs.update(kwargs)
-
-        for handler in self._handlers:
-            handler(**fire_kwargs)
-
-
-class SyncSignalGroup(SyncSignal):
-    """
-    Breaks down a signal into `started`, `in_progress`, and `completed` stages. The
-    `kwargs_defaults` are passed through to each signal stage.
-    """
-
-    started = SyncSignal()
-    """The started signal, which will be fired at the beginning of the procedure."""
-    in_progress = SyncSignal()
-    """The in progress signal, which should be fired at least once during the procedure."""
-    completed = SyncSignal()
-    """The completed signal, which should be fired at the end of the procedure"""
-
-    def __init__(self, **kwargs_defaults):
-        super(SyncSignalGroup, self).__init__(**kwargs_defaults)
-        self.started = SyncSignal(**kwargs_defaults)
-        self.in_progress = SyncSignal(**kwargs_defaults)
-        self.completed = SyncSignal(**kwargs_defaults)
-
-        self.started.connect(self.fire)
-        self.in_progress.connect(self.fire)
-        self.completed.connect(self.fire)
-
-    def send(self, **kwargs):
-        """
-        Context manager helper that will signal started and fired when entered and exited,
-        and it'll fire those with the `kwargs`.
-
-        :rtype: SyncSignalGroup
-        """
-        defaults = self._defaults.copy()
-        defaults.update(kwargs)
-        context_group = SyncSignalGroup(**defaults)
-        context_group.started.connect(self.started.fire)
-        context_group.in_progress.connect(self.in_progress.fire)
-        context_group.completed.connect(self.completed.fire)
-        return context_group
-
-    def __enter__(self):
-        """
-        Fires the `started` signal.
-        """
-        self.started.fire()
-        return self
-
-    def __exit__(self, *args, **kwargs):
-        """
-        Fires the `completed` signal.
-        """
-        self.completed.fire()
-
-
-class SyncClientSignals(object):
+class SyncClientSignals(SyncSignal):
     """
     Class for holding all signal types, attached to `SyncClient` as attribute. All groups
     are sent the `TransferSession` object via the `transfer_session` keyword argument.
@@ -537,31 +413,43 @@ class SyncClientSignals(object):
     """Dequeuing signal group for locally or remotely dequeuing data after transfer."""
 
 
-class SyncClient(object):
-    """
-    :deprecated This class is deprecated in favor of using individual sync classes `PullClient` and `PushClient`
-    """
-
-    signals = SyncClientSignals()
+class SyncSessionClient(object):
+    signals = None
+    """A namespaced attribute clearly separating signal groups"""
 
     def __init__(self, sync_connection, sync_session, chunk_size=500):
         """
         :type sync_connection: NetworkSyncConnection
-        :type sync_session: SessionWrapper
+        :type sync_session: SyncSession
         :type chunk_size: int
         """
         self.sync_connection = sync_connection
         self.sync_session = sync_session
         self.chunk_size = chunk_size
+        self.signals = SyncClientSignals()
+
+    def get_pull_client(self):
+        """
+        :rtype PullClient:
+        """
+        return PullClient(
+            self.sync_connection, self.sync_session, chunk_size=self.chunk_size
+        )
+
+    def get_push_client(self):
+        """
+        :rtype PushClient:
+        """
+        return PushClient(
+            self.sync_connection, self.sync_session, chunk_size=self.chunk_size
+        )
 
     def initiate_pull(self, sync_filter):
         """
         :type sync_filter: Filter
-        :deprecated Please use `NetworkSyncConnection.get_pull_client`
+        :deprecated Please use `get_pull_client` and use the client
         """
-        client = PullClient(
-            self.sync_connection, self.sync_session, chunk_size=self.chunk_size
-        )
+        client = self.get_pull_client()
         client.signals = self.signals
         client.initialize(sync_filter)
         client.run()
@@ -569,11 +457,9 @@ class SyncClient(object):
 
     def initiate_push(self, sync_filter):
         """
-        :deprecated Please use `NetworkSyncConnection.get_push_client`
+        :deprecated Please use `get_push_client` and use the client
         """
-        client = PushClient(
-            self.sync_connection, self.sync_session, chunk_size=self.chunk_size
-        )
+        client = self.get_push_client()
         client.signals = self.signals
         client.initialize(sync_filter)
         client.run()
@@ -581,8 +467,9 @@ class SyncClient(object):
 
     def close_sync_session(self):
         """
-        :deprecated Please use `NetworkSyncConnection.close`
+        :deprecated Please use `NetworkSyncConnection.close_sync_session` and `NetworkSyncConnection.close`
         """
+        self.sync_connection.close_sync_session(self.sync_session)
         self.sync_connection.close()
 
 
@@ -591,19 +478,20 @@ class BaseSyncClient(object):
     Base class for handling common operations for initiating syncing and other related operations.
     """
 
-    signals = SyncClientSignals()
-    """A namespacing attribute clearly separating signal groups"""
+    signals = None
+    """A namespaced attribute clearly separating signal groups"""
 
     def __init__(self, sync_connection, sync_session, chunk_size=500):
         """
         :type sync_connection: NetworkSyncConnection
-        :type sync_session: SessionWrapper
+        :type sync_session: SyncSession
         :type chunk_size: int
         """
         self.sync_connection = sync_connection
         self.sync_session = sync_session
         self.chunk_size = chunk_size
         self.current_transfer_session = None
+        self.signals = SyncClientSignals()
 
     def initialize(self, sync_filter):
         """
@@ -616,6 +504,14 @@ class BaseSyncClient(object):
 
     def finalize(self, allow_server_timeout=False):
         raise NotImplementedError("Abstract method")
+
+    def _has_records(self):
+        # not initialized
+        if not self.current_transfer_session:
+            raise MorangoError("Client has not been initialized")
+
+        records_total = self.current_transfer_session.records_total
+        return records_total is not None and records_total > 0
 
     def _initialize_server_transfer_session(self):
         return self.sync_connection._create_transfer_session(
@@ -719,8 +615,7 @@ class PushClient(BaseSyncClient):
         )
 
     def run(self):
-        records_total = self.current_transfer_session.records_total
-        if records_total is None or records_total == 0:
+        if not self._has_records():
             return
 
         with self.signals.transferring.send(
@@ -729,6 +624,10 @@ class PushClient(BaseSyncClient):
             self._push_records(callback=status.in_progress.fire)
 
     def finalize(self, allow_server_timeout=False):
+        # if not initialized, we don't need to finalize
+        if not self.current_transfer_session:
+            return
+
         # upon successful completion of pushing records, proceed to delete buffered records
         Buffer.objects.filter(transfer_session=self.current_transfer_session).delete()
         RecordMaxCounterBuffer.objects.filter(
@@ -785,8 +684,7 @@ class PullClient(BaseSyncClient):
         self._create_transfer_session(sync_filter, push=False)
 
     def run(self):
-        records_total = self.current_transfer_session.records_total
-        if records_total is None or records_total == 0:
+        if not self._has_records():
             return
 
         with self.signals.transferring.send(
@@ -795,15 +693,21 @@ class PullClient(BaseSyncClient):
             self._pull_records(callback=status.in_progress.fire)
 
     def finalize(self, allow_server_timeout=False):
-        with self.signals.dequeuing.send(
-            transfer_session=self.current_transfer_session
-        ):
-            _dequeue_into_store(self.current_transfer_session)
+        # if not initialized, we don't need to finalize
+        if not self.current_transfer_session:
+            return
 
-        # update database max counters but use latest fsics on client
-        DatabaseMaxCounter.update_fsics(
-            json.loads(self.current_transfer_session.server_fsic), self.sync_filter
-        )
+        if self._has_records():
+            with self.signals.dequeuing.send(
+                transfer_session=self.current_transfer_session
+            ):
+                _dequeue_into_store(self.current_transfer_session)
+
+            # update database max counters but use latest fsics on client
+            DatabaseMaxCounter.update_fsics(
+                json.loads(self.current_transfer_session.server_fsic), self.sync_filter
+            )
+
         self._close_transfer_session(allow_server_timeout=allow_server_timeout)
 
     def _initialize_server_transfer_session(self):
