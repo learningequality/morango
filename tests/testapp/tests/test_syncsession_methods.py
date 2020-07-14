@@ -585,4 +585,3 @@ class SyncClientSignalsTestCase(TestCase):
         signals1.session.fire()
         handler1.assert_called_once_with(transfer_session=None)
         handler2.assert_not_called()
-
