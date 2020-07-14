@@ -389,14 +389,18 @@ class TransferSessionViewSet(viewsets.ModelViewSet):
 
     def perform_destroy(self, transfersession):
         if transfersession.push:
-            # dequeue into store and then delete records
-            with OperationLogger("Dequeuing records into store", "Dequeuing complete"):
-                _dequeue_into_store(transfersession)
-            # update database max counters but use latest fsics on server
-            DatabaseMaxCounter.update_fsics(
-                json.loads(transfersession.client_fsic),
-                certificates.Filter(transfersession.filter),
-            )
+            # if no records were transferred, we can safely skip the next steps
+            if transfersession.records_total > 0:
+                # dequeue into store and then delete records
+                with OperationLogger(
+                    "Dequeuing records into store", "Dequeuing complete"
+                ):
+                    _dequeue_into_store(transfersession)
+                # update database max counters but use latest fsics on server
+                DatabaseMaxCounter.update_fsics(
+                    json.loads(transfersession.client_fsic),
+                    certificates.Filter(transfersession.filter),
+                )
         else:
             # if pull, then delete records that were queued
             Buffer.objects.filter(transfer_session=transfersession).delete()
@@ -419,7 +423,9 @@ class BufferViewSet(mixins.ListModelMixin, viewsets.GenericViewSet):
     def create(self, request):
         data = request.data if isinstance(request.data, list) else [request.data]
         # ensure the transfer session allows pushes, and is same across records
-        transfer_session = core.TransferSession.objects.get(id=data[0]["transfer_session"])
+        transfer_session = core.TransferSession.objects.get(
+            id=data[0]["transfer_session"]
+        )
         if not transfer_session.push:
             return response.Response(
                 "Specified TransferSession does not allow pushes.",

@@ -263,9 +263,7 @@ def _deserialize_from_store(profile, skip_erroring=False, filter=None):
         # iterate through classes which are in foreign key dependency order
         for model in syncable_models.get_models(profile):
 
-            store_models = Store.objects.filter(
-                profile=profile,
-            )
+            store_models = Store.objects.filter(profile=profile)
 
             model_condition = Q(model_name=model.morango_model_name)
             for klass in model.morango_model_dependencies:
@@ -495,5 +493,6 @@ def _dequeue_into_store(transfersession):
         DBBackend._dequeuing_delete_remaining_buffer(cursor, transfersession.id)
     if getattr(settings, "MORANGO_DESERIALIZE_AFTER_DEQUEUING", True):
         # we first serialize to avoid deserialization merge conflicts
-        _serialize_into_store(transfersession.sync_session.profile, filter=transfersession.get_filter())
-        _deserialize_from_store(transfersession.sync_session.profile)
+        filter = transfersession.get_filter()
+        _serialize_into_store(transfersession.sync_session.profile, filter=filter)
+        _deserialize_from_store(transfersession.sync_session.profile, filter=filter)
