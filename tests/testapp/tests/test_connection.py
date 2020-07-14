@@ -224,7 +224,9 @@ class NetworkSyncConnectionTestCase(LiveServerTestCase):
 
         mock_create.side_effect = create
         self.assertEqual(SyncSession.objects.filter(active=True).count(), 0)
-        client = self.network_connection.create_sync_session(self.subset_cert, self.root_cert)
+        client = self.network_connection.create_sync_session(
+            self.subset_cert, self.root_cert
+        )
         self.assertEqual(SyncSession.objects.filter(active=True).count(), 1)
 
         self.network_connection.close_sync_session(client.sync_session)
@@ -569,7 +571,7 @@ class SessionWrapperTestCase(TestCase):
     def test_request(self, mocked_super_request):
         headers = {"Content-Length": 1024}
         expected = mocked_super_request.return_value = mock.Mock(
-            headers=headers, raise_for_status=mock.Mock()
+            headers=headers, raise_for_status=mock.Mock(), status_code=200, reason="OK"
         )
 
         wrapper = SessionWrapper()
@@ -577,7 +579,8 @@ class SessionWrapperTestCase(TestCase):
         mocked_super_request.assert_called_once_with("GET", "test_url", is_test=True)
         self.assertEqual(expected, actual)
 
-        self.assertEqual(wrapper.bytes_received, 1024 + _length_of_headers(headers))
+        head_length = len("HTTP/1.1 200 OK") + _length_of_headers(headers)
+        self.assertEqual(wrapper.bytes_received, 1024 + head_length)
 
     @mock.patch("morango.sync.session.logger")
     @mock.patch("morango.sync.session.Session.request")
@@ -628,11 +631,13 @@ class SessionWrapperTestCase(TestCase):
             headers=headers,
         )
 
-        request = mock.Mock()
+        request = mock.Mock(url="http://test_app/path/to/resource", method="GET")
         wrapper = SessionWrapper()
         actual = wrapper.prepare_request(request)
         mocked_super_prepare_request.assert_called_once_with(request)
 
         self.assertEqual(expected, actual)
-
-        self.assertEqual(wrapper.bytes_sent, 256 + _length_of_headers(headers))
+        head_length = len("GET /path/to/resource HTTP/1.1") + _length_of_headers(
+            headers
+        )
+        self.assertEqual(wrapper.bytes_sent, 256 + head_length)
