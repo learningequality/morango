@@ -261,11 +261,9 @@ class SyncSessionViewSet(viewsets.ModelViewSet):
                 "Nonce is not valid", status=status.HTTP_403_FORBIDDEN
             )
 
+        allow_resume = request.data.get("allow_resume", False)
         # build the data to be used for creation the syncsession
         data = {
-            "id": request.data.get("id"),
-            "start_timestamp": timezone.now(),
-            "last_activity_timestamp": timezone.now(),
             "active": True,
             "is_server": True,
             "client_certificate": client_cert,
@@ -279,15 +277,41 @@ class SyncSessionViewSet(viewsets.ModelViewSet):
             "server_instance": json.dumps(
                 serializers.InstanceIDSerializer(instance_id).data
             ),
+            "allow_resume": allow_resume,
         }
 
-        syncsession = core.SyncSession(**data)
-        syncsession.full_clean()
-        syncsession.save()
+        sync_session = None
+
+        # if we're allowing resume, then try to pull an existing session
+        if allow_resume:
+            query = (
+                core.SyncSession.objects.filter(**data)
+                .order_by("last_activity_timestamp")
+                .reverse()
+            )
+            sync_session = query.first()
+
+        # create a new session
+        if sync_session is None:
+            data.update(
+                {
+                    "id": request.data.get("id"),
+                    "start_timestamp": timezone.now(),
+                    "last_activity_timestamp": timezone.now(),
+                }
+            )
+            sync_session = core.SyncSession(**data)
+        else:
+            sync_session.last_activity_timestamp = timezone.now()
+
+        sync_session.full_clean()
+        sync_session.save()
 
         resp_data = {
+            "id": sync_session.id,
             "signature": server_cert.sign(message),
             "server_instance": data["server_instance"],
+            "allow_resume": sync_session.allow_resume,
         }
 
         return response.Response(resp_data, status=status.HTTP_201_CREATED)

@@ -170,6 +170,7 @@ class SyncSession(models.Model):
     start_timestamp = models.DateTimeField(default=timezone.now)
     last_activity_timestamp = models.DateTimeField(blank=True)
     active = models.BooleanField(default=True)
+    allow_resume = models.BooleanField(default=False)
 
     # track whether this device is acting as the server for the sync session
     is_server = models.BooleanField(default=False)

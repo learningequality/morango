@@ -128,7 +128,9 @@ class NetworkSyncConnection(Connection):
         url = urljoin(urljoin(self.base_url, endpoint), lookup)
         return url
 
-    def create_sync_session(self, client_cert, server_cert, chunk_size=500):
+    def create_sync_session(
+        self, client_cert, server_cert, chunk_size=500, allow_resume=False
+    ):
         # if server cert does not exist locally, retrieve it from server
         if not Certificate.objects.filter(id=server_cert.id).exists():
             cert_chain_response = self._get_certificate_chain(
@@ -148,10 +150,11 @@ class NetworkSyncConnection(Connection):
         url = urlparse(self.base_url)
         hostname = url.hostname or self.base_url
         port = url.port or (80 if url.scheme == "http" else 443)
+        session_id = uuid.uuid4().hex
 
         # prepare the data to send in the syncsession creation request
         data = {
-            "id": uuid.uuid4().hex,
+            "id": session_id,
             "server_certificate_id": server_cert.id,
             "client_certificate_id": client_cert.id,
             "profile": client_cert.profile,
@@ -169,24 +172,38 @@ class NetworkSyncConnection(Connection):
             "nonce": nonce,
             "client_ip": _get_client_ip_for_server(hostname, port),
             "server_ip": _get_server_ip(hostname),
+            "allow_resume": allow_resume,
         }
 
         # sign the nonce/ID combo to attach to the request
-        message = "{nonce}:{id}".format(**data)
-        data["signature"] = client_cert.sign(message)
+        request_message = "{nonce}:{id}".format(**data)
+        data["signature"] = client_cert.sign(request_message)
 
         # Sync Session creation request
-        session_resp = self._create_sync_session(data)
+        session_response = self._create_sync_session(data).json()
+        response_id = session_response.get("id", None)
+        response_allow_resume = session_response.get("allow_resume", False)
+        is_resume = False
+
+        # if ID is different, we must be resuming
+        if response_id is not None and response_id != session_id:
+            if response_allow_resume:
+                is_resume = True
+                response_message = "{nonce}:{id}".format(nonce=nonce, id=response_id)
+            else:
+                raise MorangoError(
+                    "We received a different session ID, but not resuming"
+                )
+        else:
+            # In this case, the request and response messages should be the same
+            response_message = request_message
 
         # check that the nonce/id were properly signed by the server cert
-        if not server_cert.verify(message, session_resp.json().get("signature")):
+        if not server_cert.verify(response_message, session_response.get("signature")):
             raise CertificateSignatureInvalid()
 
         # build the data to be used for creating our own syncsession
         data = {
-            "id": data["id"],
-            "start_timestamp": timezone.now(),
-            "last_activity_timestamp": timezone.now(),
             "active": True,
             "is_server": False,
             "client_certificate": client_cert,
@@ -201,9 +218,26 @@ class NetworkSyncConnection(Connection):
                     InstanceIDModel.get_or_create_current_instance()[0]
                 ).data
             ),
-            "server_instance": session_resp.json().get("server_instance") or "{}",
+            "server_instance": session_response.get("server_instance") or "{}",
+            "allow_resume": allow_resume and response_allow_resume,
         }
-        sync_session = SyncSession.objects.create(**data)
+
+        # if resume, find the session with same settings and same ID
+        if is_resume:
+            data.update(id=response_id)
+            sync_session = SyncSession.objects.get(**data)
+            sync_session.last_activity_timestamp = timezone.now()
+            sync_session.save()
+        else:
+            data.update(
+                {
+                    "id": session_id,
+                    "start_timestamp": timezone.now(),
+                    "last_activity_timestamp": timezone.now(),
+                }
+            )
+            sync_session = SyncSession.objects.create(**data)
+
         return SyncSessionClient(self, sync_session, chunk_size=chunk_size)
 
     def close_sync_session(self, sync_session):
@@ -529,18 +563,30 @@ class BaseSyncClient(object):
         )
 
     def _create_transfer_session(self, sync_filter, **data):
-        # build data for creating transfer session on server side
-        data.update(
-            id=uuid.uuid4().hex,
-            filter=str(sync_filter),
-            sync_session_id=self.sync_session.id,
-            last_activity_timestamp=timezone.now(),
-            client_fsic=json.dumps(
-                DatabaseMaxCounter.calculate_filter_max_counters(sync_filter)
-            ),
-        )
+        is_resume = False
+        if self.sync_session.allow_resume:
+            self.current_transfer_session = TransferSession.objects.filter(
+                sync_session_id=self.sync_session.id,
+                push=data.get("push", False),
+                active=True,
+            ).first()
+            if self.current_transfer_session is not None:
+                self.current_transfer_session.last_activity_timestamp = timezone.now()
+                is_resume = True
 
-        self.current_transfer_session = TransferSession.objects.create(**data)
+        if self.current_transfer_session is None:
+            # build data for creating transfer session on server side
+            data.update(
+                id=uuid.uuid4().hex,
+                filter=str(sync_filter),
+                sync_session_id=self.sync_session.id,
+                last_activity_timestamp=timezone.now(),
+                client_fsic=json.dumps(
+                    DatabaseMaxCounter.calculate_filter_max_counters(sync_filter)
+                ),
+            )
+            self.current_transfer_session = TransferSession.objects.create(**data)
+
         self.signals.session.started.fire(
             transfer_session=self.current_transfer_session
         )
@@ -548,12 +594,13 @@ class BaseSyncClient(object):
         # save transfersession locally before creating transfersession server side
         self.current_transfer_session.save()
 
-        # create transfer session on server side
-        transfer_resp = self._initialize_server_transfer_session()
-        self.current_transfer_session.server_fsic = (
-            transfer_resp.json().get("server_fsic") or "{}"
-        )
-        self.current_transfer_session.save()
+        if not is_resume:
+            # create transfer session on server side
+            transfer_resp = self._initialize_server_transfer_session()
+            self.current_transfer_session.server_fsic = (
+                transfer_resp.json().get("server_fsic") or "{}"
+            )
+            self.current_transfer_session.save()
 
     def _close_transfer_session(self, allow_server_timeout=False):
         """
