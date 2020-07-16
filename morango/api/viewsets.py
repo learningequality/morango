@@ -244,9 +244,8 @@ class SyncSessionViewSet(viewsets.ModelViewSet):
             )
 
         # check that the nonce/id were properly signed
-        message = "{nonce}:{id}".format(
-            nonce=request.data.get("nonce"), id=request.data.get("id")
-        )
+        nonce = request.data.get("nonce")
+        message = "{nonce}:{id}".format(nonce=nonce, id=request.data.get("id"))
         if not client_cert.verify(message, request.data["signature"]):
             return response.Response(
                 "Client certificate failed to verify signature",
@@ -302,6 +301,7 @@ class SyncSessionViewSet(viewsets.ModelViewSet):
             )
             sync_session = core.SyncSession(**data)
         else:
+            message = "{nonce}:{id}".format(nonce=nonce, id=sync_session.id)
             sync_session.last_activity_timestamp = timezone.now()
 
         sync_session.full_clean()
