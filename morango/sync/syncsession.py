@@ -213,12 +213,6 @@ class NetworkSyncConnection(Connection):
             "connection_path": self.base_url,
             "client_ip": data["client_ip"],
             "server_ip": data["server_ip"],
-            "client_instance": json.dumps(
-                InstanceIDSerializer(
-                    InstanceIDModel.get_or_create_current_instance()[0]
-                ).data
-            ),
-            "server_instance": session_response.get("server_instance") or "{}",
             "allow_resume": allow_resume and response_allow_resume,
         }
 
@@ -234,6 +228,12 @@ class NetworkSyncConnection(Connection):
                     "id": session_id,
                     "start_timestamp": timezone.now(),
                     "last_activity_timestamp": timezone.now(),
+                    "client_instance": json.dumps(
+                        InstanceIDSerializer(
+                            InstanceIDModel.get_or_create_current_instance()[0]
+                        ).data
+                    ),
+                    "server_instance": session_response.get("server_instance") or "{}",
                 }
             )
             sync_session = SyncSession.objects.create(**data)
@@ -581,6 +581,7 @@ class BaseSyncClient(object):
                 filter=str(sync_filter),
                 sync_session_id=self.sync_session.id,
                 last_activity_timestamp=timezone.now(),
+                active=True,
                 client_fsic=json.dumps(
                     DatabaseMaxCounter.calculate_filter_max_counters(sync_filter)
                 ),
@@ -692,13 +693,16 @@ class PushClient(BaseSyncClient):
         buffered_records = Buffer.objects.filter(
             transfer_session=self.current_transfer_session
         ).order_by("pk")
-        buffered_pages = Paginator(buffered_records, self.chunk_size)
 
-        for count in buffered_pages.page_range:
+        while (
+            self.current_transfer_session.records_transferred
+            < self.current_transfer_session.records_total
+        ):
+            offset = self.current_transfer_session.records_transferred
+            buffered_record_chunk = buffered_records.all()[offset:offset+self.chunk_size]
             # serialize and send records to server
-            serialized_recs = BufferSerializer(
-                buffered_pages.page(count).object_list, many=True
-            )
+            serialized_recs = BufferSerializer(buffered_record_chunk, many=True)
+
             self.sync_connection._push_record_chunk(serialized_recs.data)
             # update records_transferred upon successful request
             self.current_transfer_session.records_transferred = min(

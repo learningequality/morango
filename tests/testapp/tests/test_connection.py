@@ -114,6 +114,31 @@ class NetworkSyncConnectionTestCase(LiveServerTestCase):
         self.network_connection.create_sync_session(self.subset_cert, self.root_cert)
         self.assertEqual(SyncSession.objects.filter(active=True).count(), 1)
 
+    @mock.patch.object(Certificate, "verify", return_value=True)
+    @mock.patch.object(SyncSession.objects, "create", return_value=None)
+    @mock.patch("morango.sync.syncsession.NetworkSyncConnection._create_sync_session")
+    @mock.patch.object(SyncSession.objects, "get", return_value=None)
+    def test_creating_sync_session_allow_resume(self, mock_get, mock_create_other_session, mock_create, mock_verify):
+        response = mock.Mock()
+        mock_create_other_session.return_value = response
+        response.json.return_value = dict(id="abc123", allow_resume=True, signature="sig")
+
+        mock_get.return_value = mock.MagicMock(spec=SyncSession)
+        self.network_connection.create_sync_session(self.subset_cert, self.root_cert, allow_resume=True)
+        mock_get.assert_called_once_with(
+            id="abc123",
+            active=True,
+            is_server=False,
+            client_certificate=self.subset_cert,
+            server_certificate=self.root_cert,
+            profile=self.subset_cert.profile,
+            connection_kind="network",
+            connection_path=self.live_server_url,
+            client_ip=mock.ANY,
+            server_ip=mock.ANY,
+            allow_resume=True,
+        )
+
     @mock.patch.object(NetworkSyncConnection, "_create_sync_session")
     @mock.patch.object(Certificate, "verify", return_value=False)
     def test_creating_sync_session_cert_fails_to_verify(self, mock_verify, mock_create):
@@ -239,6 +264,7 @@ class SyncClientTestCase(LiveServerTestCase):
             id=uuid.uuid4().hex,
             profile="facilitydata",
             last_activity_timestamp=timezone.now(),
+            allow_resume=False,
         )
         self.transfer_session = TransferSession.objects.create(
             id=uuid.uuid4().hex,
@@ -360,9 +386,45 @@ class SyncClientTestCase(LiveServerTestCase):
     def test_create_transfer_session_push(self):
         self.syncclient.current_transfer_session.active = False
         self.syncclient.current_transfer_session.save()
+        self.syncclient.current_transfer_session = None
+
         self.assertEqual(TransferSession.objects.filter(active=True).count(), 0)
         self.syncclient._create_transfer_session("filter", push=True)
+        self.assertEqual(TransferSession.objects.filter(active=True, push=True).count(), 1)
+
+    @mock_patch_decorator
+    def test_create_transfer_session__resume__nothing(self):
+        self.syncclient.sync_session.allow_resume = True
+        self.syncclient.current_transfer_session.active = False
+        self.syncclient.current_transfer_session.save()
+        self.syncclient.current_transfer_session = None
+
+        self.assertEqual(TransferSession.objects.filter(active=True).count(), 0)
+
+        with mock.patch("morango.sync.syncsession.TransferSession.objects.filter") as mock_filter:
+            results = mock.Mock()
+            mock_filter.return_value = results
+            results.first.return_value = None
+            self.syncclient._create_transfer_session("filter", push=True)
+
+        self.assertEqual(TransferSession.objects.filter(active=True, push=True).count(), 1)
+
+    @mock_patch_decorator
+    def test_create_transfer_session__resume__something(self):
+        self.syncclient.sync_session.allow_resume = True
+        self.syncclient.current_transfer_session = None
+        last_activity = self.transfer_session.last_activity_timestamp
+
         self.assertEqual(TransferSession.objects.filter(active=True).count(), 1)
+
+        with mock.patch("morango.sync.syncsession.TransferSession.objects.filter") as mock_filter:
+            results = mock.Mock()
+            mock_filter.return_value = results
+            results.first.return_value = self.transfer_session
+            self.syncclient._create_transfer_session("filter", push=True)
+
+        self.assertGreaterEqual(self.transfer_session.last_activity_timestamp, last_activity)
+        self.assertEqual(TransferSession.objects.filter(active=True, push=True).count(), 1)
 
     @mock_patch_decorator
     def test_close_transfer_session_push(self):
