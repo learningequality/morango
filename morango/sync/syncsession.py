@@ -5,7 +5,6 @@ import uuid
 from io import BytesIO
 
 from django.conf import settings
-from django.core.paginator import Paginator
 from django.utils import timezone
 from django.utils.six import iteritems
 from requests.adapters import HTTPAdapter
@@ -699,7 +698,9 @@ class PushClient(BaseSyncClient):
             < self.current_transfer_session.records_total
         ):
             offset = self.current_transfer_session.records_transferred
-            buffered_record_chunk = buffered_records.all()[offset:offset+self.chunk_size]
+            buffered_record_chunk = buffered_records.all()[
+                offset : offset + self.chunk_size
+            ]
             # serialize and send records to server
             serialized_recs = BufferSerializer(buffered_record_chunk, many=True)
 

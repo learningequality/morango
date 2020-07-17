@@ -208,8 +208,7 @@ class SyncSessionViewSet(viewsets.ModelViewSet):
     permission_classes = (permissions.SyncSessionPermissions,)
     serializer_class = serializers.SyncSessionSerializer
 
-    def create(self, request):
-
+    def create(self, request):  # noqa: C901
         instance_id, _ = core.InstanceIDModel.get_or_create_current_instance()
 
         # verify and save the certificate chain to our cert store
@@ -272,10 +271,6 @@ class SyncSessionViewSet(viewsets.ModelViewSet):
             "connection_path": request.data.get("connection_path"),
             "client_ip": get_ip(request) or "",
             "server_ip": request.data.get("server_ip") or "",
-            "client_instance": request.data.get("instance"),
-            "server_instance": json.dumps(
-                serializers.InstanceIDSerializer(instance_id).data
-            ),
             "allow_resume": allow_resume,
         }
 
@@ -293,11 +288,13 @@ class SyncSessionViewSet(viewsets.ModelViewSet):
         # create a new session
         if sync_session is None:
             data.update(
-                {
-                    "id": request.data.get("id"),
-                    "start_timestamp": timezone.now(),
-                    "last_activity_timestamp": timezone.now(),
-                }
+                id=request.data.get("id"),
+                start_timestamp=timezone.now(),
+                last_activity_timestamp=timezone.now(),
+                client_instance=request.data.get("instance"),
+                server_instance=json.dumps(
+                    serializers.InstanceIDSerializer(instance_id).data
+                ),
             )
             sync_session = core.SyncSession(**data)
         else:
