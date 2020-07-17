@@ -91,6 +91,8 @@ class InstanceIDModel(models.Model):
     as well as its counter with all the records that were serialized at the time.
     """
 
+    _cached_instance = None
+
     uuid_input_fields = (
         "platform",
         "hostname",
@@ -114,37 +116,57 @@ class InstanceIDModel(models.Model):
 
     @classmethod
     @transaction.atomic
-    def get_or_create_current_instance(cls):
+    def get_or_create_current_instance(cls, clear_cache=False):
         """Get the instance model corresponding to the current system, or create a new
-        one if the system is new or its properties have changed (e.g. OS from upgrade)."""
+        one if the system is new or its properties have changed (e.g. new MAC address)."""
 
-        # check if a matching legacy instance ID is already current, and don't mess with it
-        kwargs = get_0_4_system_parameters(
-            database_id=DatabaseIDModel.get_or_create_current_database_id().id
-        )
-        try:
-            obj = InstanceIDModel.objects.get(current=True, **kwargs)
-            return obj, False
-        except InstanceIDModel.DoesNotExist:
-            pass
+        if clear_cache:
+            cls._cached_instance = None
 
-        # calculate the new ID based on system ID and mac address
-        kwargs["system_id"] = get_0_5_system_id()
-        kwargs["node_id"] = get_0_5_mac_address()
-        kwargs["id"] = sha2_uuid(
-            kwargs["database_id"], kwargs["system_id"], kwargs["node_id"]
-        )
-        kwargs["current"] = True
+        if cls._cached_instance:
+            instance = cls._cached_instance
+            # make sure we have the latest counter value and "current" flag
+            try:
+                instance.refresh_from_db(fields=["counter", "current"])
+                # only use cached instance if it's still marked as current, otherwise skip
+                if instance.current:
+                    return cls._cached_instance, False
+            except InstanceIDModel.DoesNotExist:
+                # instance does not exist, so skip here so we create a new one
+                pass
 
-        # ensure we only ever have 1 current instance ID
-        InstanceIDModel.objects.exclude(id=kwargs["id"], current=False).update(
-            current=False
-        )
-        # create the model, or get existing if one already exists with this ID
-        obj, created = InstanceIDModel.objects.update_or_create(
-            id=kwargs["id"], defaults=kwargs
-        )
-        return obj, created
+        with transaction.atomic():
+
+            # check if a matching legacy instance ID is already current, and don't mess with it
+            kwargs = get_0_4_system_parameters(
+                database_id=DatabaseIDModel.get_or_create_current_database_id().id
+            )
+            try:
+                instance = InstanceIDModel.objects.get(current=True, **kwargs)
+                cls._cached_instance = instance
+                return instance, False
+            except InstanceIDModel.DoesNotExist:
+                pass
+
+            # calculate the new ID based on system ID and mac address
+            kwargs["system_id"] = get_0_5_system_id()
+            kwargs["node_id"] = get_0_5_mac_address()
+            kwargs["id"] = sha2_uuid(
+                kwargs["database_id"], kwargs["system_id"], kwargs["node_id"]
+            )
+            kwargs["current"] = True
+
+            # ensure we only ever have 1 current instance ID
+            InstanceIDModel.objects.exclude(id=kwargs["id"], current=False).update(
+                current=False
+            )
+            # create the model, or get existing if one already exists with this ID
+            instance, created = InstanceIDModel.objects.update_or_create(
+                id=kwargs["id"], defaults=kwargs
+            )
+
+            cls._cached_instance = instance
+            return instance, created
 
     @classmethod
     @transaction.atomic

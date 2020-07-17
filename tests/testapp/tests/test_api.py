@@ -929,7 +929,7 @@ class MorangoInfoTestCase(APITestCase):
         old_id_hash = self.m_info.data['instance_hash']
         with EnvironmentVarGuard() as env:
             env['MORANGO_SYSTEM_ID'] = 'new_sys_id'
-            InstanceIDModel.get_or_create_current_instance()
+            InstanceIDModel.get_or_create_current_instance(clear_cache=True)
             m_info = self.client.get(reverse('morangoinfo-detail', kwargs={"pk": 1}), format='json')
         self.assertNotEqual(m_info.data['instance_hash'], old_id_hash)
 

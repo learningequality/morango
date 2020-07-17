@@ -103,7 +103,7 @@ class SerializeIntoStoreTestCase(TestCase):
 
         with EnvironmentVarGuard() as env:
             env['MORANGO_SYSTEM_ID'] = 'new_sys_id'
-            (new_id, _) = InstanceIDModel.get_or_create_current_instance()
+            (new_id, _) = InstanceIDModel.get_or_create_current_instance(clear_cache=True)
 
             Facility.objects.all().update(name=self.new_name)
             self.mc.serialize_into_store()
@@ -294,7 +294,7 @@ class RecordMaxCounterUpdatesDuringSerialization(TestCase):
     def test_new_rmc_for_existing_model(self):
         with EnvironmentVarGuard() as env:
             env['MORANGO_SYSTEM_ID'] = 'new_sys_id'
-            (new_id, _) = InstanceIDModel.get_or_create_current_instance()
+            (new_id, _) = InstanceIDModel.get_or_create_current_instance(clear_cache=True)
 
             Facility.objects.update(name="facility")
             self.mc.serialize_into_store()
@@ -331,7 +331,7 @@ class RecordMaxCounterUpdatesDuringSerialization(TestCase):
     def test_new_rmc_for_non_existent_model(self):
         with EnvironmentVarGuard() as env:
             env['MORANGO_SYSTEM_ID'] = 'new_sys_id'
-            (new_id, _) = InstanceIDModel.get_or_create_current_instance()
+            (new_id, _) = InstanceIDModel.get_or_create_current_instance(clear_cache=True)
 
             new_fac = FacilityModelFactory(name="college")
             self.mc.serialize_into_store()
