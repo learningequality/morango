@@ -108,7 +108,9 @@ def create_dummy_store_data():
     with EnvironmentVarGuard() as env:
         env["MORANGO_SYSTEM_ID"] = "new_sys_id"
 
-        data["group2_id"] = InstanceIDModel.get_or_create_current_instance()[
+        data["group2_id"] = InstanceIDModel.get_or_create_current_instance(
+            clear_cache=True
+        )[
             0
         ]  # new counter is at 0
 

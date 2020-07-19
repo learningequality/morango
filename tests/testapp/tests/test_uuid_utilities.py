@@ -160,9 +160,40 @@ class InstanceIDModelTestCase(TestCase):
             self.assertEqual(get_0_5_system_id(), "54940f560a55bbf7d86b")
             self.assertEqual(get_0_5_mac_address(), "804f4c20d3b2b5a29b95")
 
-            instance, _ = InstanceIDModel.get_or_create_current_instance()
+            instance, _ = InstanceIDModel.get_or_create_current_instance(clear_cache=True)
 
             self.assertEqual(instance.id, "e45c06595d820f4581e0c82930359592")
+
+    @mock.patch(
+        "ifcfg.interfaces",
+        return_value={"eth0": {"device": "eth0", "ether": "a0:aa:aa:aa:aa"}},
+    )
+    def test_instance_id_caching(self, *args):
+        """
+        Ensure that the cache works but that clearing it works as well.
+        """
+
+        with EnvironmentVarGuard() as env:
+
+            env["MORANGO_SYSTEM_ID"] = "oldmagicsysid"
+
+            old_instance, created = InstanceIDModel.get_or_create_current_instance(clear_cache=True)
+            self.assertTrue(created)
+
+            env["MORANGO_SYSTEM_ID"] = "newmagicsysid"
+
+            cached_instance, created = InstanceIDModel.get_or_create_current_instance()
+            self.assertFalse(created)
+
+            uncached_instance, created = InstanceIDModel.get_or_create_current_instance(clear_cache=True)
+            self.assertTrue(created)
+
+            recached_instance, created = InstanceIDModel.get_or_create_current_instance()
+            self.assertFalse(created)
+
+            self.assertEqual(old_instance.id, cached_instance.id)
+            self.assertNotEqual(old_instance.id, uncached_instance.id)
+            self.assertEqual(uncached_instance.id, recached_instance.id)
 
 
 class DatabaseIDModelTestCase(TestCase):
