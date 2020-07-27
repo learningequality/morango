@@ -390,7 +390,10 @@ class TransferSessionViewSet(viewsets.ModelViewSet):
     def perform_destroy(self, transfersession):
         if transfersession.push:
             # if no records were transferred, we can safely skip the next steps
-            if transfersession.records_total > 0:
+            if (
+                transfersession.records_total is not None
+                and transfersession.records_total > 0
+            ):
                 # dequeue into store and then delete records
                 with OperationLogger(
                     "Dequeuing records into store", "Dequeuing complete"

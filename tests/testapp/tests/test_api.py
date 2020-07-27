@@ -647,6 +647,20 @@ class TransferSessionEndpointTestCase(CertificateTestCaseMixin, APITestCase):
         transfersession = TransferSession.objects.get()
         self.assertEqual(transfersession.active, True)
 
+        self._delete_transfer_session(transfersession)
+
+    def test_transfersession_with_null_records_total_can_be_deleted(self):
+
+        self.test_transfersession_can_be_created()
+
+        transfersession = TransferSession.objects.get()
+        transfersession.records_total = None
+        transfersession.save()
+
+        self._delete_transfer_session(transfersession)
+
+    def _delete_transfer_session(self, transfersession):
+
         response = self.client.delete(reverse('transfersessions-detail', kwargs={"pk": transfersession.id}), format='json')
         self.assertEqual(response.status_code, 204)
 
