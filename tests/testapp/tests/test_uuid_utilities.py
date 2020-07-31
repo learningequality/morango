@@ -168,6 +168,36 @@ class InstanceIDModelTestCase(TestCase):
         "ifcfg.interfaces",
         return_value={"eth0": {"device": "eth0", "ether": "a0:aa:aa:aa:aa"}},
     )
+    def test_envvar_overrides(self, *args):
+
+        with EnvironmentVarGuard() as env:
+            env["MORANGO_SYSTEM_ID"] = "magicsysid"
+            env["MORANGO_NODE_ID"] = "magicnodeid"
+
+            DatabaseIDModel.objects.all().update(current=False)
+            database_id = DatabaseIDModel.objects.create(
+                id="7fe445b75cea11858c00fb97bdee8878", current=True
+            ).id
+
+            system_id = get_0_5_system_id()
+            node_id = get_0_5_mac_address()
+
+            self.assertEqual(system_id, "54940f560a55bbf7d86b")
+            self.assertEqual(node_id, "9ed21d0fb4dacfa4009d")
+
+            instance, _ = InstanceIDModel.get_or_create_current_instance(clear_cache=True)
+
+            self.assertEqual(instance.id, "9033c0cec24d8a8d906dcba416f77625")
+
+            expected_id = sha2_uuid(database_id, system_id, node_id)
+
+            self.assertEqual(instance.id, expected_id)
+
+
+    @mock.patch(
+        "ifcfg.interfaces",
+        return_value={"eth0": {"device": "eth0", "ether": "a0:aa:aa:aa:aa"}},
+    )
     def test_instance_id_caching(self, *args):
         """
         Ensure that the cache works but that clearing it works as well.
