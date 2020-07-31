@@ -157,7 +157,7 @@ class InstanceIDModel(models.Model):
             kwargs["current"] = True
 
             # ensure we only ever have 1 current instance ID
-            InstanceIDModel.objects.exclude(id=kwargs["id"], current=False).update(
+            InstanceIDModel.objects.filter(current=True).exclude(id=kwargs["id"]).update(
                 current=False
             )
             # create the model, or get existing if one already exists with this ID

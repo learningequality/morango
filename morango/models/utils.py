@@ -205,6 +205,11 @@ def _mac_is_local(mac):
 
 def get_0_5_mac_address():
 
+    # check whether envvar was set, and use that if available
+    node_id = os.environ.get("MORANGO_NODE_ID")
+    if node_id and len(node_id.strip()) >= 3:
+        return _do_salted_hash(node_id)
+
     # first, try using ifcfg
     interfaces = []
     try:
@@ -218,9 +223,8 @@ def get_0_5_mac_address():
 
     # fall back to trying uuid.getnode
     mac = uuid.getnode()
-    if not _mac_is_multicast(
-        mac
-    ):  # when uuid.getnode returns a fake MAC, it marks as multicast
+    # when uuid.getnode returns a fake MAC, it marks as multicast
+    if not _mac_is_multicast(mac):
         return _do_salted_hash(_mac_int_to_ether(mac))
 
     return ""
