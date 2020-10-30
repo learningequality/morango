@@ -41,15 +41,14 @@ Operations
 .. image:: ./img/operations.png
 
 1. Serialization: This is the process of serializing data that is associated with Django models
-   in the Application layer, and storing it in JSON format in a record in the Store layer, along
+   in the Application layer of Instance A, and storing it in JSON format in a record in the Store layer, along
    with additional metadata fields needed to facilitate syncing and integration.
 2. Queueing: Queuing is similar to snapshotting where a chunk of serialized records that need
    to be sent during the sync process are stored in Outgoing Buffer. This prevents inconsistencies
    caused by a record being sent on network and its copy being changed by an in-process serialization.
 3. Sending data through Network: The morango models will be serialized into JSON to send them over
-   the network to another morango instance. We will be sending them by x number of records at a time, or another batch number specified
-   by the user.
-4. Integration: Process of merging the data received in an Incoming Buffer(by another morango instance)
+   the network from Instance A to Instance B. The data is sent in batches.
+4. Integration: Process of merging the data received in an Incoming Buffer by another Instance B
    to Store layer as well as Application layer.
 5. Deserialize: After integrating the received data into the store, we can then deserialize the data into models
-   to be used in the application.
+   to be used in the application in Instance B.
