@@ -644,7 +644,7 @@ class PushClient(BaseSyncClient):
         # paginate buffered records so we do not load them all into memory
         buffered_records = Buffer.objects.filter(
             transfer_session=self.current_transfer_session
-        ).order_by("pk")
+        )
         buffered_pages = Paginator(buffered_records, self.chunk_size)
 
         for count in buffered_pages.page_range:
