@@ -7,7 +7,7 @@ Sync Process
 .. image:: ./img/sync_process.png
 
 The Application layer is where app logic and app data (in the form of App Models) resides.
-There is the Morango layer where the store, outgoing buffer, and incoming buffer reside.
+The Morango layer is where the store, outgoing buffer, and incoming buffer reside.
 The application models are serialized in JSON format and saved to the Morango DB Store layer. Sync between
 2 Morango instances proceeds through a handshake.  Morango instance A, which is  responsible for sending the data,
 queues this data to the Outgoing Buffer from the Store layer. The transfer happens from the
@@ -20,20 +20,20 @@ Store
 The store is a table in the default database that holds the serialized versions
 of the models on the installed application. Whenever a sync happens, we
 serialize the latest models and put them into the Store for transfer. The Store data structure is
-where data that is on the current device and data synced from other devices
+where both the data that is on the current device and the data synced from other devices
 lives.
 
 Outgoing Buffer
 ~~~~~~~~~~~~~~~
-The outgoing buffer mimics the schema of the store, with an added transfer
-session identifier. This transfer session identifier is used to identify groups
-of data that are being synced together to other morango instances.
+The outgoing buffer mirrors the schema of the store, with an added "transfer
+session" identifier. This transfer session identifier is used to identify groups
+of data that are being synced together to other Morango instances.
 
 Incoming Buffer
 ~~~~~~~~~~~~~~~
-The incoming buffer also mimics the schema of the store, with an added transfer
+The incoming buffer also mirrors the schema of the store, with an added transfer
 session identifier. This transfer session identifier is used to identify groups
-of data that are being synced together to other morango instances.
+of data that are being synced together to other Morango instances.
 
 Operations
 ----------
