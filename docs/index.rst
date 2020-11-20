@@ -1,9 +1,12 @@
 
-.. mdinclude:: ../README.md
+Morango
+-------
+
+A pure Python Django DB replication engine
 
 
 Table of contents
------------------
+=================
 
 .. toctree::
    :maxdepth: 2
@@ -16,5 +19,3 @@ Table of contents
    contributing
    authors
    changelog
-
-.. include:: ../README.rst

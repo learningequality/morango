@@ -7,4 +7,23 @@
 Pure Python Django DB replication engine.
 
   - Free software: MIT license
-  - Documentation: <https://morango.readthedocs.io>.
+  - Documentation: [morango.readthedocs.io](https://morango.readthedocs.io)
+
+
+## Building and editing the documentation
+
+
+```bash
+# install requirements
+pip install -r requirements/docs.txt
+pip install -e .
+
+# build docs
+make docs
+
+# build docs
+make docs
+
+# auto-build and refresh docs on edit
+make docs-autobuild
+```
