@@ -9,6 +9,7 @@ from django.test.utils import override_settings
 from django.utils import timezone
 from facility_profile.models import MyUser
 from rest_framework.test import APITestCase as BaseTestCase
+from test.support import EnvironmentVarGuard
 
 from morango.api.serializers import BufferSerializer
 from morango.api.serializers import CertificateSerializer
@@ -18,6 +19,7 @@ from morango.models.certificates import Key
 from morango.models.certificates import Nonce
 from morango.models.certificates import ScopeDefinition
 from morango.models.core import Buffer
+from morango.models.core import DatabaseMaxCounter
 from morango.models.core import InstanceIDModel
 from morango.models.core import RecordMaxCounterBuffer
 from morango.models.core import SyncSession
@@ -645,11 +647,28 @@ class TransferSessionEndpointTestCase(CertificateTestCaseMixin, APITestCase):
         transfersession = TransferSession.objects.get()
         self.assertEqual(transfersession.active, True)
 
+        self._delete_transfer_session(transfersession)
+
+    def test_transfersession_with_null_records_total_can_be_deleted(self):
+
+        self.test_transfersession_can_be_created()
+
+        transfersession = TransferSession.objects.get()
+        transfersession.records_total = None
+        transfersession.save()
+
+        self._delete_transfer_session(transfersession)
+
+    def _delete_transfer_session(self, transfersession):
+
         response = self.client.delete(reverse('transfersessions-detail', kwargs={"pk": transfersession.id}), format='json')
         self.assertEqual(response.status_code, 204)
 
         # check that the transfersession was "deleted"
         self.assertEqual(TransferSession.objects.get().active, False)
+
+        # check that we didn't create a DatabaseMaxCounter with empty partition in the process
+        self.assertEqual(DatabaseMaxCounter.objects.filter(partition="").count(), 0)
 
     def test_inactive_transfersession_cannot_be_deleted(self):
 
@@ -922,8 +941,9 @@ class MorangoInfoTestCase(APITestCase):
 
     def test_id_changes_id_hash_changes(self):
         old_id_hash = self.m_info.data['instance_hash']
-        with mock.patch('platform.platform', return_value='platform'):
-            InstanceIDModel.get_or_create_current_instance()
+        with EnvironmentVarGuard() as env:
+            env['MORANGO_SYSTEM_ID'] = 'new_sys_id'
+            InstanceIDModel.get_or_create_current_instance(clear_cache=True)
             m_info = self.client.get(reverse('morangoinfo-detail', kwargs={"pk": 1}), format='json')
         self.assertNotEqual(m_info.data['instance_hash'], old_id_hash)
 

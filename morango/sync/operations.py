@@ -6,6 +6,8 @@ from django.conf import settings
 from django.core import exceptions
 from django.core.serializers.json import DjangoJSONEncoder
 from django.db import connection
+from django.db import connections
+from django.db import router
 from django.db import transaction
 from django.db.models import Q
 from django.db.models import signals
@@ -28,6 +30,31 @@ from morango.registry import syncable_models
 logger = logging.getLogger(__name__)
 
 DBBackend = load_backend(connection).SQLWrapper()
+
+# if postgres, get serializable db connection
+db_name = router.db_for_write(Store)
+USING_DB = db_name
+if "postgresql" in transaction.get_connection(USING_DB).vendor:
+    USING_DB = db_name + "-serializable"
+    assert (
+        USING_DB in connections
+    ), "Please add a `default-serializable` database connection in your django settings file, \
+                                     which copies all the configuration settings of the `default` db connection"
+
+
+class OperationLogger(object):
+    def __init__(self, start_msg, end_msg):
+        self.start_msg = start_msg
+        self.end_msg = end_msg
+
+    def __enter__(self):
+        logger.info(self.start_msg)
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        if exc_type is None:
+            logger.info(self.end_msg)
+        else:
+            logger.info("Error: {}".format(self.start_msg))
 
 
 def _join_with_logical_operator(lst, operator):
@@ -74,11 +101,10 @@ def _serialize_into_store(profile, filter=None):
     2. If there is no store record for this app model, we proceed to create an in memory store model and append to a list to be
     bulk created on a per class model basis.
     """
-    logger.info("Serializing records")
     # ensure that we write and retrieve the counter in one go for consistency
     current_id = InstanceIDModel.get_current_instance_and_increment_counter()
 
-    with transaction.atomic():
+    with transaction.atomic(using=USING_DB):
         # create Q objects for filtering by prefixes
         prefix_condition = None
         if filter:
@@ -223,10 +249,9 @@ def _serialize_into_store(profile, filter=None):
                     partition=f,
                     defaults={"counter": current_id.counter},
                 )
-    logger.info("Serialization complete")
 
 
-def _deserialize_from_store(profile):
+def _deserialize_from_store(profile, skip_erroring=False, filter=None):
     """
     Takes data from the store and integrates into the application.
 
@@ -238,32 +263,40 @@ def _deserialize_from_store(profile):
 
     If a model fails to deserialize/validate, we exclude it from being marked as clean in the store.
     """
-    # we first serialize to avoid deserialization merge conflicts
-    _serialize_into_store(profile)
 
-    logger.info("Deserializing records")
     fk_cache = {}
-    with transaction.atomic():
+    with transaction.atomic(using=USING_DB):
         excluded_list = []
         # iterate through classes which are in foreign key dependency order
         for model in syncable_models.get_models(profile):
-            # handle cases where a class has a single FK reference to itself
-            self_ref_fk = _self_referential_fk(model)
-            query = Q(model_name=model.morango_model_name)
-            # this will handle the case of getting the clean parents, since they will be deserialized first
+
+            store_models = Store.objects.filter(profile=profile)
+
+            model_condition = Q(model_name=model.morango_model_name)
             for klass in model.morango_model_dependencies:
-                query |= Q(model_name=klass.morango_model_name)
-            if self_ref_fk:
-                clean_parents = (
-                    Store.objects.filter(dirty_bit=False, profile=profile)
-                    .filter(query)
-                    .char_ids_list()
+                model_condition |= Q(model_name=klass.morango_model_name)
+
+            store_models = store_models.filter(model_condition)
+
+            if filter:
+                # create Q objects for filtering by prefixes
+                prefix_condition = functools.reduce(
+                    lambda x, y: x | y,
+                    [Q(partition__startswith=prefix) for prefix in filter],
                 )
+                store_models = store_models.filter(prefix_condition)
+
+            # if requested, skip any records that previously errored, to be faster
+            if skip_erroring:
+                store_models = store_models.filter(deserialization_error="")
+
+            # handle cases where a class has a single FK reference to itself
+            if _self_referential_fk(model):
+                clean_parents = store_models.filter(dirty_bit=False).char_ids_list()
                 dirty_children = (
-                    Store.objects.filter(dirty_bit=True, profile=profile)
+                    store_models.filter(dirty_bit=True)
                     # handle parents or if the model has no parent
                     .filter(Q(_self_ref_fk__in=clean_parents) | Q(_self_ref_fk=""))
-                    .filter(query)
                 )
 
                 # keep iterating until size of dirty_children is 0
@@ -276,27 +309,46 @@ def _deserialize_from_store(profile):
                                     app_model.save(update_dirty_bit_to=False)
                             # we update a store model after we have deserialized it to be able to mark it as a clean parent
                             store_model.dirty_bit = False
-                            store_model.save(update_fields=["dirty_bit"])
-                        except exceptions.ValidationError:
-                            # if the app model did not validate, we leave the store dirty bit set
+                            store_model.deserialization_error = ""
+                            store_model.save(
+                                update_fields=["dirty_bit", "deserialization_error"]
+                            )
+                        except (
+                            exceptions.ValidationError,
+                            exceptions.ObjectDoesNotExist,
+                        ) as e:
                             excluded_list.append(store_model.id)
+                            # if the app model did not validate, we leave the store dirty bit set, but mark the error
+                            store_model.deserialization_error = str(e)
+                            store_model.save(update_fields=["deserialization_error"])
 
                     # update lists with new clean parents and dirty children
-                    clean_parents = (
-                        Store.objects.filter(dirty_bit=False, profile=profile)
-                        .filter(query)
-                        .char_ids_list()
-                    )
-                    dirty_children = Store.objects.filter(
-                        dirty_bit=True, profile=profile, _self_ref_fk__in=clean_parents
-                    ).filter(query)
+                    clean_parents = store_models.filter(dirty_bit=False).char_ids_list()
+                    dirty_children = store_models.filter(
+                        dirty_bit=True, _self_ref_fk__in=clean_parents
+                    ).exclude(id__in=excluded_list)
+
+                # A. Mark records that were skipped due to missing parents with error info
+                # A(i). The ones that have a parent Store entry but it's dirty
+                dirty_parents = store_models.filter(dirty_bit=True).char_ids_list()
+                store_models.filter(
+                    dirty_bit=True, _self_ref_fk__in=dirty_parents
+                ).exclude(id__in=excluded_list).update(
+                    deserialization_error="Parent is dirty; could not deserialize."
+                )
+                # A(ii). The ones that don't even have Store entries for parent at all
+                all_parents = store_models.char_ids_list()
+                store_models.filter(dirty_bit=True).exclude(
+                    _self_ref_fk__in=all_parents
+                ).exclude(id__in=excluded_list).update(
+                    deserialization_error="Parent does not exist in Store; could not deserialize."
+                )
+
             else:
                 # array for holding db values from the fields of each model for this class
                 db_values = []
                 fields = model._meta.fields
-                for store_model in Store.objects.filter(
-                    model_name=model.morango_model_name, profile=profile, dirty_bit=True
-                ):
+                for store_model in store_models.filter(dirty_bit=True):
                     try:
                         app_model = store_model._deserialize_store_model(fk_cache)
                         # if the model was not deleted add its field values to the list
@@ -305,9 +357,14 @@ def _deserialize_from_store(profile):
                                 value = getattr(app_model, f.attname)
                                 db_value = f.get_db_prep_value(value, connection)
                                 db_values.append(db_value)
-                    except exceptions.ValidationError:
+                    except (
+                        exceptions.ValidationError,
+                        exceptions.ObjectDoesNotExist,
+                    ) as e:
                         # if the app model did not validate, we leave the store dirty bit set
                         excluded_list.append(store_model.id)
+                        store_model.deserialization_error = str(e)
+                        store_model.save(update_fields=["deserialization_error"])
 
                 if db_values:
                     # number of rows to update
@@ -327,14 +384,13 @@ def _deserialize_from_store(profile):
                             placeholder_list,
                         )
 
-        # clear dirty bit for all store models for this profile except for models that did not validate
-        Store.objects.exclude(id__in=excluded_list).filter(
-            profile=profile, dirty_bit=True
-        ).update(dirty_bit=False)
-    logger.info("Deserialization complete")
+                # clear dirty bit for all store records for this model/profile except for rows that did not validate
+                store_models.exclude(id__in=excluded_list).filter(
+                    dirty_bit=True
+                ).update(dirty_bit=False)
 
 
-@transaction.atomic()
+@transaction.atomic(using=USING_DB)
 def _queue_into_buffer(transfersession):
     """
     Takes a chunk of data from the store to be put into the buffer to be sent to another morango instance.
@@ -343,7 +399,6 @@ def _queue_into_buffer(transfersession):
     We use raw sql queries to place data in the buffer and the record max counter buffer, which matches the conditions of the FSIC,
     as well as the partition for the data we are syncing.
     """
-    logger.info("Queuing records for transfer")
     last_saved_by_conditions = []
     filter_prefixes = Filter(transfersession.filter)
     server_fsic = json.loads(transfersession.server_fsic)
@@ -418,10 +473,9 @@ def _queue_into_buffer(transfersession):
             outgoing_buffer=Buffer._meta.db_table,
         )
         cursor.execute(queue_rmc_buffer)
-    logger.info("Queuing complete")
 
 
-@transaction.atomic()
+@transaction.atomic(using=USING_DB)
 def _dequeue_into_store(transfersession):
     """
     Takes data from the buffers and merges into the store and record max counters.
@@ -429,7 +483,6 @@ def _dequeue_into_store(transfersession):
     ALGORITHM: Incrementally insert and delete on a case by case basis to ensure subsequent cases
     are not effected by previous cases.
     """
-    logger.info("Dequeuing records into store")
     with connection.cursor() as cursor:
         DBBackend._dequeuing_delete_rmcb_records(cursor, transfersession.id)
         DBBackend._dequeuing_delete_buffered_records(cursor, transfersession.id)
@@ -447,6 +500,8 @@ def _dequeue_into_store(transfersession):
         DBBackend._dequeuing_insert_remaining_rmcb(cursor, transfersession.id)
         DBBackend._dequeuing_delete_remaining_rmcb(cursor, transfersession.id)
         DBBackend._dequeuing_delete_remaining_buffer(cursor, transfersession.id)
-    logger.info("Dequeuing complete")
     if getattr(settings, "MORANGO_DESERIALIZE_AFTER_DEQUEUING", True):
-        _deserialize_from_store(transfersession.sync_session.profile)
+        # we first serialize to avoid deserialization merge conflicts
+        filter = transfersession.get_filter()
+        _serialize_into_store(transfersession.sync_session.profile, filter=filter)
+        _deserialize_from_store(transfersession.sync_session.profile, filter=filter)

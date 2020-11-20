@@ -70,7 +70,7 @@ class mute_signals(object):
         return wrapper
 
 
-def validate_and_create_buffer_data(data, transfer_session):
+def validate_and_create_buffer_data(data, transfer_session, connection=None):  # noqa: C901
     data = copy.deepcopy(data)
     rmcb_list = []
     buffer_list = []
@@ -135,6 +135,102 @@ def validate_and_create_buffer_data(data, transfer_session):
 
     with transaction.atomic():
         transfer_session.records_transferred += len(data)
+
+        if connection is not None:
+            transfer_session.bytes_sent = connection.bytes_sent
+        if connection is not None:
+            transfer_session.bytes_received = connection.bytes_received
+
         transfer_session.save()
+
         Buffer.objects.bulk_create(buffer_list)
         RecordMaxCounterBuffer.objects.bulk_create(rmcb_list)
+
+
+class SyncSignal(object):
+    """
+    Helper class for firing signals from the sync client
+    """
+
+    def __init__(self, **kwargs_defaults):
+        """
+        Default keys/values that the signal consumer can depend on being present.
+        """
+        self._handlers = []
+        self._defaults = kwargs_defaults
+
+        # any class attributes defined as signals we'll automatically recreate with same args
+        for attr_name, attr in self.__class__.__dict__.items():
+            if isinstance(attr, SyncSignal):
+                signal_attr = attr.clone(**kwargs_defaults)
+                signal_attr.connect(self.fire)
+                setattr(self, attr_name, signal_attr)
+
+    def clone(self, **kwargs_defaults):
+        """
+        Clone the signal, it's defaults, and handlers
+        """
+        defaults = self._defaults.copy()
+        defaults.update(kwargs_defaults)
+        clone = self.__class__(**defaults)
+        for handler in self._handlers:
+            clone.connect(handler)
+        return clone
+
+    def connect(self, handler):
+        """
+        Adds a callable handler that will be called when the signal is fired.
+
+        :type handler: function
+        """
+        self._handlers.append(handler)
+
+    def fire(self, **kwargs):
+        """
+        Fires the handler functions connected via `connect`.
+        """
+        fire_kwargs = self._defaults.copy()
+        fire_kwargs.update(kwargs)
+
+        for handler in self._handlers:
+            handler(**fire_kwargs)
+
+
+class SyncSignalGroup(SyncSignal):
+    """
+    Breaks down a signal into `started`, `in_progress`, and `completed` stages. The
+    `kwargs_defaults` are passed through to each signal stage.
+    """
+
+    started = SyncSignal()
+    """The started signal, which will be fired at the beginning of the procedure."""
+    in_progress = SyncSignal()
+    """The in progress signal, which should be fired at least once during the procedure."""
+    completed = SyncSignal()
+    """The completed signal, which should be fired at the end of the procedure"""
+
+    def send(self, **kwargs):
+        """
+        Context manager helper that will signal started and fired when entered and exited,
+        and it'll fire those with the `kwargs`.
+
+        :rtype: SyncSignalGroup
+        """
+        context_group = self.clone(**kwargs)
+        context_group.started.connect(self.started.fire)
+        context_group.in_progress.connect(self.in_progress.fire)
+        context_group.completed.connect(self.completed.fire)
+        return context_group
+
+    def __enter__(self):
+        """
+        Fires the `started` signal.
+        """
+        self.started.fire()
+        return self
+
+    def __exit__(self, *args, **kwargs):
+        """
+        Fires the `completed` signal.
+        """
+        self.completed.fire()

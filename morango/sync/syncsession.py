@@ -12,10 +12,11 @@ from django.core.paginator import Paginator
 from django.utils import timezone
 from django.utils.six import iteritems
 from requests.adapters import HTTPAdapter
+from requests.exceptions import Timeout
 from requests.packages.urllib3.util.retry import Retry
 from rest_framework.exceptions import ValidationError
-from six.moves.urllib.parse import urljoin
-from six.moves.urllib.parse import urlparse
+from django.utils.six.moves.urllib.parse import urljoin
+from django.utils.six.moves.urllib.parse import urlparse
 
 from .operations import _dequeue_into_store
 from .operations import _queue_into_buffer
@@ -32,7 +33,6 @@ from morango.errors import CertificateSignatureInvalid
 from morango.errors import MorangoError
 from morango.errors import MorangoServerDoesNotAllowNewCertPush
 from morango.models.certificates import Certificate
-from morango.models.certificates import Filter
 from morango.models.certificates import Key
 from morango.models.core import Buffer
 from morango.models.core import DatabaseMaxCounter
@@ -40,6 +40,8 @@ from morango.models.core import InstanceIDModel
 from morango.models.core import RecordMaxCounterBuffer
 from morango.models.core import SyncSession
 from morango.models.core import TransferSession
+from morango.sync.utils import SyncSignal
+from morango.sync.utils import SyncSignalGroup
 from morango.utils import CAPABILITIES
 
 if GZIP_BUFFER_POST in CAPABILITIES:
@@ -119,6 +121,14 @@ class NetworkSyncConnection(Connection):
             urljoin(self.base_url, api_urls.INFO)
         ).json()
         self.capabilities = self.server_info.get("capabilities", [])
+
+    @property
+    def bytes_sent(self):
+        return self.session.bytes_sent
+
+    @property
+    def bytes_received(self):
+        return self.session.bytes_received
 
     def urlresolve(self, endpoint, lookup=None):
         if lookup:
@@ -202,8 +212,18 @@ class NetworkSyncConnection(Connection):
             "server_instance": session_resp.json().get("server_instance") or "{}",
         }
         sync_session = SyncSession.objects.create(**data)
+        return SyncSessionClient(self, sync_session, chunk_size=chunk_size)
 
-        return SyncClient(self, sync_session, chunk_size=chunk_size)
+    def close_sync_session(self, sync_session):
+        # "delete" sync session on server side
+        self._close_sync_session(sync_session)
+
+        sync_session.active = False
+        sync_session.save()
+
+    def close(self):
+        # close adapters on requests session object
+        self.session.close()
 
     def get_remote_certificates(self, primary_partition, scope_def_id=None):
         remote_certs = []
@@ -384,42 +404,236 @@ class NetworkSyncConnection(Connection):
         return self.session.get(self.urlresolve(api_urls.BUFFER), params=params)
 
 
-class SyncClient(object):
+class SyncClientSignals(SyncSignal):
     """
-    Controller to support client in initiating syncing and performing related operations.
+    Class for holding all signal types, attached to `SyncClient` as attribute. All groups
+    are sent the `TransferSession` object via the `transfer_session` keyword argument.
     """
 
+    session = SyncSignalGroup(transfer_session=None)
+    """Signal group firing for each push and pull `TransferSession`."""
+    queuing = SyncSignalGroup(transfer_session=None)
+    """Queuing signal group for locally or remotely queuing data before transfer."""
+    transferring = SyncSignalGroup(transfer_session=None)
+    """Transferring signal group for tracking progress of push/pull on `TransferSession`."""
+    dequeuing = SyncSignalGroup(transfer_session=None)
+    """Dequeuing signal group for locally or remotely dequeuing data after transfer."""
+
+
+class SyncSessionClient(object):
+    signals = None
+    """A namespaced attribute clearly separating signal groups"""
+
     def __init__(self, sync_connection, sync_session, chunk_size=500):
+        """
+        :type sync_connection: NetworkSyncConnection
+        :type sync_session: SyncSession
+        :type chunk_size: int
+        """
+        self.sync_connection = sync_connection
+        self.sync_session = sync_session
+        self.chunk_size = chunk_size
+        self.signals = SyncClientSignals()
+
+    def get_pull_client(self):
+        """
+        :rtype PullClient:
+        """
+        return PullClient(
+            self.sync_connection, self.sync_session, chunk_size=self.chunk_size
+        )
+
+    def get_push_client(self):
+        """
+        :rtype PushClient:
+        """
+        return PushClient(
+            self.sync_connection, self.sync_session, chunk_size=self.chunk_size
+        )
+
+    def initiate_pull(self, sync_filter):
+        """
+        :type sync_filter: Filter
+        :deprecated Please use `get_pull_client` and use the client
+        """
+        client = self.get_pull_client()
+        client.signals = self.signals
+        client.initialize(sync_filter)
+        client.run()
+        client.finalize()
+
+    def initiate_push(self, sync_filter):
+        """
+        :deprecated Please use `get_push_client` and use the client
+        """
+        client = self.get_push_client()
+        client.signals = self.signals
+        client.initialize(sync_filter)
+        client.run()
+        client.finalize()
+
+    def close_sync_session(self):
+        """
+        :deprecated Please use `NetworkSyncConnection.close_sync_session` and `NetworkSyncConnection.close`
+        """
+        self.sync_connection.close_sync_session(self.sync_session)
+        self.sync_connection.close()
+
+
+class BaseSyncClient(object):
+    """
+    Base class for handling common operations for initiating syncing and other related operations.
+    """
+
+    signals = None
+    """A namespaced attribute clearly separating signal groups"""
+
+    def __init__(self, sync_connection, sync_session, chunk_size=500):
+        """
+        :type sync_connection: NetworkSyncConnection
+        :type sync_session: SyncSession
+        :type chunk_size: int
+        """
         self.sync_connection = sync_connection
         self.sync_session = sync_session
         self.chunk_size = chunk_size
         self.current_transfer_session = None
+        self.signals = SyncClientSignals()
 
-    def initiate_push(self, sync_filter):
+    def initialize(self, sync_filter):
+        """
+        :type sync_filter: Filter
+        """
+        raise NotImplementedError("Abstract method")
 
-        logger.info("Initiating push sync")
-        self._create_transfer_session(True, sync_filter)
+    def run(self):
+        raise NotImplementedError("Abstract method")
 
-        _queue_into_buffer(self.current_transfer_session)
+    def finalize(self, allow_server_timeout=False):
+        raise NotImplementedError("Abstract method")
+
+    def _has_records(self):
+        # not initialized
+        if not self.current_transfer_session:
+            raise MorangoError("Client has not been initialized")
+
+        records_total = self.current_transfer_session.records_total
+        return records_total is not None and records_total > 0
+
+    def _initialize_server_transfer_session(self):
+        return self.sync_connection._create_transfer_session(
+            dict(
+                id=self.current_transfer_session.id,
+                filter=self.current_transfer_session.filter,
+                push=self.current_transfer_session.push,
+                sync_session_id=self.sync_session.id,
+                client_fsic=self.current_transfer_session.client_fsic,
+            )
+        )
+
+    def _close_server_transfer_session(self):
+        return self.sync_connection._close_transfer_session(
+            self.current_transfer_session
+        )
+
+    def _create_transfer_session(self, sync_filter, **data):
+        # build data for creating transfer session on server side
+        data.update(
+            id=uuid.uuid4().hex,
+            filter=str(sync_filter),
+            sync_session_id=self.sync_session.id,
+            last_activity_timestamp=timezone.now(),
+            client_fsic=json.dumps(
+                DatabaseMaxCounter.calculate_filter_max_counters(sync_filter)
+            ),
+        )
+
+        self.current_transfer_session = TransferSession.objects.create(**data)
+        self.signals.session.started.fire(
+            transfer_session=self.current_transfer_session
+        )
+
+        # save transfersession locally before creating transfersession server side
+        self.current_transfer_session.save()
+
+        # create transfer session on server side
+        transfer_resp = self._initialize_server_transfer_session()
+        self.current_transfer_session.server_fsic = (
+            transfer_resp.json().get("server_fsic") or "{}"
+        )
+        self.current_transfer_session.save()
+
+    def _close_transfer_session(self, allow_server_timeout=False):
+        """
+        :param allow_server_timeout: Ignores timeout errors during remote close of transfer session
+        """
+        try:
+            # "delete" transfer session on server side
+            self._close_server_transfer_session()
+        except Timeout as e:
+            # re-raise error if we weren't told to ignore it
+            if not allow_server_timeout:
+                raise e
+            else:
+                logger.warning(
+                    "Request to close server's transfer session has timed out"
+                )
+
+        # "delete" our own local transfer session
+        self.current_transfer_session.active = False
+        self.current_transfer_session.save()
+        self.signals.session.completed.fire(
+            transfer_session=self.current_transfer_session
+        )
+        self.current_transfer_session = None
+
+
+class PushClient(BaseSyncClient):
+    """
+    Sync client for pushing to a server
+    """
+
+    def initialize(self, sync_filter):
+        """
+        :type sync_filter: Filter
+        """
+        # before pushing or creating the transfer session, we want to serialize the most recent
+        # data and update database max counters
+        if getattr(settings, "MORANGO_SERIALIZE_BEFORE_QUEUING", True):
+            _serialize_into_store(
+                self.sync_session.profile, filter=sync_filter,
+            )
+
+        self._create_transfer_session(sync_filter, push=True)
+
+        with self.signals.queuing.send(transfer_session=self.current_transfer_session):
+            _queue_into_buffer(self.current_transfer_session)
 
         # update the records_total for client and server transfer session
         records_total = Buffer.objects.filter(
             transfer_session=self.current_transfer_session
         ).count()
-        if records_total == 0:
-            logger.info("There are no records to transfer")
-            self._close_transfer_session()
-            return
-        logger.info("{} records have been queued for transfer".format(records_total))
+
         self.current_transfer_session.records_total = records_total
         self.current_transfer_session.save()
+
         self.sync_connection._update_transfer_session(
             {"records_total": records_total}, self.current_transfer_session
         )
 
-        logger.info("Beginning pushing of data...")
-        self._push_records()
-        logger.info("Completed push of data")
+    def run(self):
+        if not self._has_records():
+            return
+
+        with self.signals.transferring.send(
+            transfer_session=self.current_transfer_session
+        ) as status:
+            self._push_records(callback=status.in_progress.fire)
+
+    def finalize(self, allow_server_timeout=False):
+        # if not initialized, we don't need to finalize
+        if not self.current_transfer_session:
+            return
 
         # upon successful completion of pushing records, proceed to delete buffered records
         Buffer.objects.filter(transfer_session=self.current_transfer_session).delete()
@@ -427,36 +641,91 @@ class SyncClient(object):
             transfer_session=self.current_transfer_session
         ).delete()
 
-        # close client and server transfer session
-        self._close_transfer_session()
+        # makes a remote call to the server to close the transfer session, which dequeues the
+        # data remotely
+        with self.signals.dequeuing.send(
+            transfer_session=self.current_transfer_session
+        ):
+            self._close_transfer_session(allow_server_timeout=allow_server_timeout)
 
-    def initiate_pull(self, sync_filter):
+    def _push_records(self, callback=None):
+        # paginate buffered records so we do not load them all into memory
+        buffered_records = Buffer.objects.filter(
+            transfer_session=self.current_transfer_session
+        ).order_by("pk")
+        buffered_pages = Paginator(buffered_records, self.chunk_size)
 
-        logger.info("Initiating pull sync")
-        self._create_transfer_session(False, sync_filter)
+        for count in buffered_pages.page_range:
+            # serialize and send records to server
+            serialized_recs = BufferSerializer(
+                buffered_pages.page(count).object_list, many=True
+            )
+            self.sync_connection._push_record_chunk(serialized_recs.data)
+            # update records_transferred upon successful request
+            self.current_transfer_session.records_transferred = min(
+                self.current_transfer_session.records_transferred + self.chunk_size,
+                self.current_transfer_session.records_total,
+            )
+            self.current_transfer_session.bytes_sent = self.sync_connection.bytes_sent
+            self.current_transfer_session.bytes_received = (
+                self.sync_connection.bytes_received
+            )
+            self.current_transfer_session.save()
 
-        if self.current_transfer_session.records_total == 0:
-            logger.info("There are no records to transfer")
-            self._close_transfer_session()
+            if callback is not None:
+                callback()
+
+
+class PullClient(BaseSyncClient):
+    """
+    Sync class to pull from server
+    """
+
+    sync_filter = None
+
+    def initialize(self, sync_filter):
+        """
+        :type sync_filter: Filter
+        """
+        self.sync_filter = sync_filter
+        self._create_transfer_session(sync_filter, push=False)
+
+    def run(self):
+        if not self._has_records():
             return
 
-        logger.info(
-            "{} records have been queued server side for transfer".format(
-                self.current_transfer_session.records_total
+        with self.signals.transferring.send(
+            transfer_session=self.current_transfer_session
+        ) as status:
+            self._pull_records(callback=status.in_progress.fire)
+
+    def finalize(self, allow_server_timeout=False):
+        # if not initialized, we don't need to finalize
+        if not self.current_transfer_session:
+            return
+
+        if self._has_records():
+            with self.signals.dequeuing.send(
+                transfer_session=self.current_transfer_session
+            ):
+                _dequeue_into_store(self.current_transfer_session)
+
+            # update database max counters but use latest fsics on client
+            DatabaseMaxCounter.update_fsics(
+                json.loads(self.current_transfer_session.server_fsic), self.sync_filter
             )
-        )
-        # pull records and close transfer session upon completion
-        logger.info("Beginning pulling of data...")
-        self._pull_records()
-        logger.info("Completed pull of data")
-        _dequeue_into_store(self.current_transfer_session)
 
-        # update database max counters but use latest fsics on client
-        DatabaseMaxCounter.update_fsics(
-            json.loads(self.current_transfer_session.server_fsic), sync_filter
-        )
+        self._close_transfer_session(allow_server_timeout=allow_server_timeout)
 
-        self._close_transfer_session()
+    def _initialize_server_transfer_session(self):
+        # this makes a remote call to the server, which triggers queuing for our pull session
+        with self.signals.queuing.send(transfer_session=self.current_transfer_session):
+            response = super(PullClient, self)._initialize_server_transfer_session()
+
+        self.current_transfer_session.records_total = response.json().get(
+            "records_total"
+        )
+        return response
 
     def _pull_records(self, callback=None):
         while (
@@ -493,112 +762,19 @@ class SyncClient(object):
                     "Specified TransferSession does not match this SyncClient's current TransferSession."
                 )
 
-            validate_and_create_buffer_data(data, self.current_transfer_session)
+            validate_and_create_buffer_data(
+                data, self.current_transfer_session, connection=self.sync_connection
+            )
             # update the records transferred so client and server are in agreement
             self.sync_connection._update_transfer_session(
                 {
-                    "records_transferred": self.current_transfer_session.records_transferred
+                    "records_transferred": self.current_transfer_session.records_transferred,
+                    # flip each of these since we're talking about the remote instance
+                    "bytes_received": self.current_transfer_session.bytes_sent,
+                    "bytes_sent": self.current_transfer_session.bytes_received,
                 },
                 self.current_transfer_session,
             )
-            logger.info(
-                "Received {}/{} records".format(
-                    self.current_transfer_session.records_transferred,
-                    self.current_transfer_session.records_total,
-                )
-            )
 
-    def _push_records(self, callback=None):
-        # paginate buffered records so we do not load them all into memory
-        buffered_records = Buffer.objects.filter(
-            transfer_session=self.current_transfer_session
-        ).order_by("pk")
-        buffered_pages = Paginator(buffered_records, self.chunk_size)
-        for count in buffered_pages.page_range:
-
-            # serialize and send records to server
-            serialized_recs = BufferSerializer(
-                buffered_pages.page(count).object_list, many=True
-            )
-            self.sync_connection._push_record_chunk(serialized_recs.data)
-            # update records_transferred upon successful request
-            self.current_transfer_session.records_transferred = min(
-                self.current_transfer_session.records_transferred + self.chunk_size,
-                self.current_transfer_session.records_total,
-            )
-            self.current_transfer_session.save()
-            logger.info(
-                "Sent {}/{} records".format(
-                    self.current_transfer_session.records_transferred,
-                    self.current_transfer_session.records_total,
-                )
-            )
-
-    def close_sync_session(self):
-
-        # "delete" sync session on server side
-        self.sync_connection._close_sync_session(self.sync_session)
-
-        # "delete" our own local sync session
-        if self.current_transfer_session is not None:
-            raise MorangoError(
-                "Transfer Session must be closed before closing sync session."
-            )
-        self.sync_session.active = False
-        self.sync_session.save()
-        self.sync_session = None
-        # close adapters on requests session object
-        self.sync_connection.session.close()
-
-    def _create_transfer_session(self, push, filter):
-
-        logger.info("Creating transfer session")
-        # build data for creating transfer session on server side
-        data = {
-            "id": uuid.uuid4().hex,
-            "filter": str(filter),
-            "push": push,
-            "sync_session_id": self.sync_session.id,
-        }
-
-        data["last_activity_timestamp"] = timezone.now()
-        self.current_transfer_session = TransferSession.objects.create(**data)
-        data.pop("last_activity_timestamp")
-
-        if push:
-            # before pushing, we want to serialize the most recent data and update database max counters
-            if getattr(settings, "MORANGO_SERIALIZE_BEFORE_QUEUING", True):
-                _serialize_into_store(
-                    self.current_transfer_session.sync_session.profile,
-                    filter=Filter(self.current_transfer_session.filter),
-                )
-
-        data["client_fsic"] = json.dumps(
-            DatabaseMaxCounter.calculate_filter_max_counters(filter)
-        )
-        self.current_transfer_session.client_fsic = data["client_fsic"]
-
-        # save transfersession locally before creating transfersession server side
-        self.current_transfer_session.save()
-        # create transfer session on server side
-        transfer_resp = self.sync_connection._create_transfer_session(data)
-
-        self.current_transfer_session.server_fsic = (
-            transfer_resp.json().get("server_fsic") or "{}"
-        )
-        if not push:
-            self.current_transfer_session.records_total = transfer_resp.json().get(
-                "records_total"
-            )
-        self.current_transfer_session.save()
-
-    def _close_transfer_session(self):
-
-        logger.info("Closing transfer session")
-        # "delete" transfer session on server side
-        self.sync_connection._close_transfer_session(self.current_transfer_session)
-
-        # "delete" our own local transfer session
-        self.current_transfer_session.active = False
-        self.current_transfer_session.save()
-        self.current_transfer_session = None
+            if callback is not None:
+                callback()
