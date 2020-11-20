@@ -17,7 +17,7 @@ There are several high-level goals (often competing with one another) in the des
 
 - **Privacy**: Data should only be synced to the devices which are authorized to access that data, and made available to users with the appropriate permissions.
 - **Ease** of use: The sync process should be as streamlined and hands-off as possible.
-- **Efficiency**: Storage, bandwidth, and processing power all come at a premium in these contexts, and requirements should be minimized.
+- **Efficiency**: Storage, bandwidth, and processing power all come at a premium and requirements should be minimized.
 - **Integrity**: We need to avoid corruption of data, protecting it from either accidental or malicious damage.
 - **Flexibility**: In some cases, we may, for instance, only want to sync a subset of the data from a database (e.g. the data for a particular user).
 - **Peer to Peer network**: Devices should be able to communicate without a central server.
