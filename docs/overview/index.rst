@@ -46,7 +46,7 @@ High-Level Data Structures and Flow
 -----------------------------------
 Certificate Exchange
 ~~~~~~~~~~~~~~~~~~~~
-One of the first actions that must occur is an exchange of certificates between two morango instances.
+One of the first actions that must occur is an exchange of certificates between two Morango instances.
 This ensures that both sides have the proper permissions to sync the data.
 
 .. image:: ./img/cert_exchange.png
@@ -56,7 +56,7 @@ This ensures that both sides have the proper permissions to sync the data.
 Sync Process
 ~~~~~~~~~~~~
 The next step is the actual exchange of data in a sync session. A sequence of steps initializes, prepares, and exchanges data between
-the morango instances.
+the Morango instances.
 A general push sync scenario follows steps in this order:
 
 1. ``Serialization`` - process of serializing data that is associated with Django models in the Application layer, and storing it in JSON format in a record in the ``Store``

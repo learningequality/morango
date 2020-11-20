@@ -1,7 +1,7 @@
 Certificate Authentication System
 =================================
 
-Certificates are a core part of morango to protect privacy and integrity of data.
+Certificates are a core part of Morango to protect privacy and integrity of data.
 
 .. toctree::
    :maxdepth: 1

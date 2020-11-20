@@ -13,7 +13,7 @@ UUID Collisions
 Each instance of a syncable model is identified by a 32-digit hex UUID as its primary key, to avoid collisions.
 By default, within Morango, this UUID is calculated randomly (UUID4), but models can define their own behavior for calculating these UUIDs.
 This is usually recommended, by overriding the ``calculate_source_id`` to return a string that is made up of unique model fields. We also
-take into account the calculated partition and morango model name, when calculating the unique identifier.
+take into account the calculated partition and Morango model name, when calculating the unique identifier.
 
 Scopes
 ------

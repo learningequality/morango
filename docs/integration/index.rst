@@ -26,8 +26,8 @@ in order to maintain syncability for these models.
 
 Attributes that need to be defined for models that inherit from ``SyncableModel``:
 
-- ``morango_model_name`` - allows morango to register it as syncable under a sync profile
-- ``morango_profile`` - allows morango to register it under a sync profile
+- ``morango_model_name`` - allows Morango to register it as syncable under a sync profile
+- ``morango_profile`` - allows Morango to register it under a sync profile
 
 Defining your partitions
 ------------------------
@@ -56,11 +56,11 @@ Morango is designed to be resilient to changing fields between version changes, 
 Orchestrating synchronization
 -----------------------------
 In order to facilitate synchronization between several instances, we recommend creating a django management command
-which uses the morango machinery to initiate syncing sessions.
+which uses the Morango machinery to initiate syncing sessions.
 
-Particularly of importance is the ``MorangoProfileController`` which can create a ``NetworkSyncConnection`` with another morango instance.
+Particularly of importance is the ``MorangoProfileController`` which can create a ``NetworkSyncConnection`` with another Morango instance.
 Once the client establishes a network connection, both instances must exchange certificates so that each side can prove that they have the proper
 permissions in order to push or pull the data. If the client side lacks the proper certificates, they should use the
 network connection to do a ``certificate_signing_request``, where they enter admin credentials of the other instance to generate a certificate
 with the valid permissions. Once both sides have the proper certificates, the client can initiate a sync session with ``create_sync_session``.
-This creates a ``SyncClient`` that can handle either pushing or pulling data to/from the other morango instance.
+This creates a ``SyncClient`` that can handle either pushing or pulling data to/from the other Morango instance.

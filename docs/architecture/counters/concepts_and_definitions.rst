@@ -1,9 +1,9 @@
 Concepts and Definitions
 ========================
 
-Instance ID
------------
-Each morango instance is identified by its own unique instance ID, ``InstanceIDModel``. This ID is
+Morango Instance ID
+-------------------
+Each Morango instance is identified by its own unique instance ID, ``InstanceIDModel``. This ID is
 calculated as a function of a number of system properties. This ID may change if
 system properties change. It is not a big deal if the ``InstanceIDModel`` changes
 occasionally within an installation, though we want to minimize the frequency of
@@ -32,7 +32,7 @@ Database Max Counters
 ---------------------
 ``DatabaseMaxCounter`` is an external data structure that is a hashmap with
 filters as key mapped to a list of (instance ID, counter) pairs. These (instance
-ID, counter) pairs reflect different morango instances that have been synced
+ID, counter) pairs reflect different Morango instances that have been synced
 with before at their respective counters. To efficiently find out the difference
 of data between 2 devices, we would like to exchange Database Max Counters. As
 exchanging all this data can be costly and unnecessary, we instead send the
@@ -43,7 +43,7 @@ Filter Max Counters
 -------------------
 We calculate highest counters associated to all the unique instance IDs for a
 filter and all filter’s supersets. We generate a list of instance ID and
-associated highest counters pertaining to a filter, which the requesting morango
-instance should send to another morango instance that it would like data from.
-This becomes an efficient way to determine what data a morango instance already
-has, so we can only send the data that the morango instance needs.
+associated highest counters pertaining to a filter, which the requesting Morango
+instance should send to another Morango instance that it would like data from.
+This becomes an efficient way to determine what data a Morango instance already
+has, so we can only send the data that the Morango instance needs.
