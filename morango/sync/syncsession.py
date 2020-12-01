@@ -426,9 +426,9 @@ class SyncSessionClient(object):
 
     def __init__(self, sync_connection, sync_session, chunk_size=500):
         """
-        :type sync_connection: NetworkSyncConnection
-        :type sync_session: SyncSession
-        :type chunk_size: int
+        :param sync_connection: NetworkSyncConnection
+        :param sync_session: SyncSession
+        :param chunk_size: int
         """
         self.sync_connection = sync_connection
         self.sync_session = sync_session
@@ -437,7 +437,7 @@ class SyncSessionClient(object):
 
     def get_pull_client(self):
         """
-        :rtype PullClient:
+        returns ``PullClient``
         """
         return PullClient(
             self.sync_connection, self.sync_session, chunk_size=self.chunk_size
@@ -445,7 +445,7 @@ class SyncSessionClient(object):
 
     def get_push_client(self):
         """
-        :rtype PushClient:
+        returns ``PushClient``
         """
         return PushClient(
             self.sync_connection, self.sync_session, chunk_size=self.chunk_size
@@ -453,8 +453,8 @@ class SyncSessionClient(object):
 
     def initiate_pull(self, sync_filter):
         """
-        :type sync_filter: Filter
-        :deprecated Please use `get_pull_client` and use the client
+        Deprecated - Please use ``get_pull_client`` and use the client
+        :param sync_filter: Filter
         """
         client = self.get_pull_client()
         client.signals = self.signals
@@ -464,7 +464,7 @@ class SyncSessionClient(object):
 
     def initiate_push(self, sync_filter):
         """
-        :deprecated Please use `get_push_client` and use the client
+        Deprecated - Please use ``get_push_client`` and use the client
         """
         client = self.get_push_client()
         client.signals = self.signals
@@ -474,7 +474,7 @@ class SyncSessionClient(object):
 
     def close_sync_session(self):
         """
-        :deprecated Please use `NetworkSyncConnection.close_sync_session` and `NetworkSyncConnection.close`
+        Deprecated - Please use ``NetworkSyncConnection.close_sync_session`` and ``NetworkSyncConnection.close``
         """
         self.sync_connection.close_sync_session(self.sync_session)
         self.sync_connection.close()
@@ -490,9 +490,9 @@ class BaseSyncClient(object):
 
     def __init__(self, sync_connection, sync_session, chunk_size=500):
         """
-        :type sync_connection: NetworkSyncConnection
-        :type sync_session: SyncSession
-        :type chunk_size: int
+        :param sync_connection: NetworkSyncConnection
+        :param sync_session: SyncSession
+        :param chunk_size: int
         """
         self.sync_connection = sync_connection
         self.sync_session = sync_session
@@ -502,7 +502,7 @@ class BaseSyncClient(object):
 
     def initialize(self, sync_filter):
         """
-        :type sync_filter: Filter
+        :param sync_filter: Filter
         """
         raise NotImplementedError("Abstract method")
 
@@ -595,13 +595,14 @@ class PushClient(BaseSyncClient):
 
     def initialize(self, sync_filter):
         """
-        :type sync_filter: Filter
+        :param sync_filter: Filter
         """
         # before pushing or creating the transfer session, we want to serialize the most recent
         # data and update database max counters
         if getattr(settings, "MORANGO_SERIALIZE_BEFORE_QUEUING", True):
             _serialize_into_store(
-                self.sync_session.profile, filter=sync_filter,
+                self.sync_session.profile,
+                filter=sync_filter,
             )
 
         self._create_transfer_session(sync_filter, push=True)
@@ -685,7 +686,7 @@ class PullClient(BaseSyncClient):
 
     def initialize(self, sync_filter):
         """
-        :type sync_filter: Filter
+        :param sync_filter: Filter
         """
         self.sync_filter = sync_filter
         self._create_transfer_session(sync_filter, push=False)

@@ -1,16 +1,9 @@
-# Credits
+Add your name to this list if you have contributed:
 
-## Development Lead and Copyright Holder
-
-Learning Equality – info@learningequality.org
-
-## Community
-
-Please feel free to add your name to this list if you make a PR
-
-* Rafael Aguayo (ralphiee22)
-* Jamie Alexandre (jamalex)
-* Benjamin Bach (benjaoming)
-* José Redrejo Rodríguez (jredrejo)
-* Aron Asor (aronasorman)
-* Blaine Jester (bjester)
+-   Rafael Aguayo (ralphiee22)
+-   Jamie Alexandre (jamalex)
+-   Aron Asor (aronasorman)
+-   Benjamin Bach (benjaoming)
+-   Blaine Jester (bjester)
+-   José Redrejo Rodríguez (jredrejo)
+-   Devon Rueckner (indirectlylit)

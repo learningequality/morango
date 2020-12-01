@@ -105,8 +105,8 @@ source_suffix = [".rst", ".md"]
 master_doc = 'index'
 
 # General information about the project.
-project = u'Morango Developer Docs'
-copyright = u"2016, Learning Equality"
+project = u"Morango developer documentation"
+copyright = u"2020 Learning Equality"
 
 # The version info for the project you're documenting, acts as replacement
 # for |version| and |release|, also used in various other places throughout
@@ -322,12 +322,15 @@ man_pages = [
 # (source start file, target name, title, author,
 #  dir menu entry, description, category)
 texinfo_documents = [
-    ('index', 'morango',
-     u'morango Documentation',
-     u'Learning Equality',
-     'morango',
-     'One line description of project.',
-     'Miscellaneous'),
+    (
+        "index",
+        "morango",
+        "morango Documentation",
+        "Learning Equality",
+        "morango",
+        "",
+        "",
+    ),
 ]
 
 # Documents to append as an appendix to all manuals.

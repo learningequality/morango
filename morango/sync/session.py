@@ -66,7 +66,7 @@ class SessionWrapper(Session):
         Override request preparer so we can get the prepared content length, for tracking
         transfer sizes
 
-        :type request: requests.Request
+        :param request: requests.Request
         :rtype: requests.PreparedRequest
         """
         prepped = super(SessionWrapper, self).prepare_request(request)
