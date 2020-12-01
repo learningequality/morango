@@ -2,7 +2,7 @@
 Morango
 -------
 
-A pure Python Django DB replication engine
+A pure Python Django DB replication engine, designed and maintained primarily in support of `Kolibri <https://github.com/learningequality/kolibri/>`__.
 
 
 Table of contents
