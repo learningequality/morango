@@ -1,7 +1,15 @@
-Counters
-========
+IDs and Counters
+================
 
-A counter system helps identify what data needs to be synced and how to resolve conflicting data.
+Identifiers
+-----------
+
+Each Morango device is identified by its own unique instance ID, ``InstanceIDModel``. This ID is calculated as a function of a number of system properties, and will change when those properties change. Changes to ``InstanceIDModel`` are not fatal, but stability is preferable to avoid data bloat.
+
+
+The ``DatabaseIDModel`` helps us uniquely define databases that are shared across Morango instances. If a database has been copied over or backed up, we generate a new ``DatabaseIDModel`` to be used in the calculation of the unique instance ID.
+
+Each syncable model instance within the database is identified by a 32-digit hex UUID as its primary key. By default this unique identifier is calculated randomly, taking into account the calculated partition and Morango model name. Models can also define their own behavior by overriding ``calculate_source_id``.
 
 
 Record-max counters

@@ -1,88 +1,84 @@
 Architecture
 ============
 
+Profiles
+--------
+
+A *profile* is a unique, semantically meaningful name within the Kolibri ecosystem. It corresponds to a set of interrelated `syncable models <#syncable-models>`__ that "make sense" when synced together.
+
+Currently there is just a single profile in the Kolibri ecosystem: ``facilitydata``.
 
 Syncable models
 ---------------
 
-To make a Django model syncable, inherit from ``SyncableModel``.
+A *syncable model* is a Django model which can be synced between devices using Morango. Every syncable model is associated with exactly one `profile <#profiles>`__, and exactly one `partition <#partitions>`__ within the profile.
 
-If you create custom querysets or managers and your model inherits from ``SyncableModel``, then your custom classes should also inherit from ``SyncableModelQuerySet`` or ``SyncableModelManager`` in order to maintain syncability for these models.
+To make a Django model syncable, inherit from ``SyncableModel``. All subclasses need to define:
 
-Attributes that need to be defined for models that inherit from ``SyncableModel``:
+- ``morango_profile`` - the name of the model's profile
+- ``morango_model_name`` - a unique name within the profile
+- ``calculate_source_id`` - a method that returns a unique ID of the record
+- ``calculate_partition`` - a method that returns the `partition string <#partitions>`__ of the record
 
-- ``morango_model_name`` - allows Morango to register it as syncable under a sync profile
-- ``morango_profile`` - allows Morango to register it under a sync profile
+There are some constraints to Django models that are serialized and synced in Morango:
 
-Most Django models can be serialized and synced in Morango, with some constraints. Models which you would like to make syncable must not:
-
-- have self-referential foreign keys or dependency loops
-- use relationships based on Django `generic foreign keys <https://docs.djangoproject.com/en/1.11/ref/contrib/contenttypes/#django.contrib.contenttypes.fields.GenericForeignKey>`_
-- use `many-to-many <https://docs.djangoproject.com/en/1.11/topics/db/examples/many_to_many/>`_ relationships
+- models must not have self-referential foreign keys or dependency loops
+- models must not use relationships based on Django `generic foreign keys <https://docs.djangoproject.com/en/1.11/ref/contrib/contenttypes/#django.contrib.contenttypes.fields.GenericForeignKey>`_
+- models must not use `many-to-many <https://docs.djangoproject.com/en/1.11/topics/db/examples/many_to_many/>`_ relationships
 
 In order to ensure that schema migrations work cleanly, always provide default values when defining model fields on syncable models.
 
-In Kolibri, we define a base ``SyncableModel`` called ``FacilityDataSyncableModel``. Both ``FacilityDataset`` and ``AbstractFacilityDataModel`` inherit from this. In turn, the kolibri models inherit from ``AbstractFacilityDataModel`` as shown below:
+If you create custom querysets or managers and your model inherits from ``SyncableModel``, then your custom classes should also inherit from ``SyncableModelQuerySet`` or ``SyncableModelManager`` in order to maintain syncability for these models.
+
+In Kolibri, we currently define a base ``SyncableModel`` called ``FacilityDataSyncableModel``. Both ``FacilityDataset`` and ``AbstractFacilityDataModel`` inherit from this. In turn, other syncable Kolibri models inherit from ``AbstractFacilityDataModel`` as shown below:
 
 .. image:: ./inheritance.png
-
-Identifiers
------------
-
-Each Morango device is identified by its own unique instance ID, ``InstanceIDModel``. This ID is calculated as a function of a number of system properties, and will change when those properties change. Changes to ``InstanceIDModel`` are not fatal, but stability is preferable to avoid data bloat.
-
-
-The ``DatabaseIDModel`` helps us uniquely define databases that are shared across Morango instances. If a database has been copied over or backed up, we generate a new ``DatabaseIDModel`` to be used in the calculation of the unique instance ID.
-
-Each syncable model instance within the database is identified by a 32-digit hex UUID as its primary key. By default this unique identifier is calculated randomly, taking into account the calculated partition and Morango model name. Models can also define their own behavior by overriding ``calculate_source_id``.
-
-Profiles
---------
-
-You can define different profiles for sets of models that you would like to be syncable. If models do not seem in any way related or you would like to group them under a different set of syncing criteria, then you should define them under different profiles.
-
 
 Partitions
 ----------
 
+A *partition* is a colon-delimited string that defines a subset of the `syncable models <#syncable-models>`__ in a `profile <#profiles>`__. Taken together, the partitions of a profile define mutually exclusive and complete segmented coverage of all syncable model records.
 
-Partitions are the attributes associated with a row/record specifying which segment of data they’re part of.
+For example, a syncable model record like a content interaction log might be associated with a user in a facility. The combination of the user and the facility could be used to define a partition like ``${facility_id}:${user_id}`` that and other similar records.
 
-For example, a particular record can be associated to User A under Facility B. User A and Facility B will be this record’s partitions.
+Partition strings are constructed to be hierarchical. "Containment" of one partition in another can be checked with a simple ``startswith`` check. Here, the partition ``${facility_id}:${user_id}`` would be contained in the partition ``${facility_id}`` for user ``U1`` in facility ``F1`` because ``"F1:U1".startswith("F1")``. The leading part of a partition string its "prefix" designating the parent partition is a *partition prefix*.
+
+Partition strings use colon characters to delimit levels of the hierarchy and `Python template strings <https://docs.python.org/3/library/string.html#template-strings>`__ to dynamically insert source IDs of models. Aside from this, Morango places no constraints on the structure of partition strings, and they can be constructed using other conventions and strategies.
+
+In Kolibri, we currently have five mutually-exclusive partitions in the ``facilitydata`` profile, where the source ID of the facility is the ``dataset_id``:
+
+- everyone has write-only access
+    - partition string: ``${dataset_id}:anonymous``
+    - used for content session logs
+- all authenticated users have read-only access
+    - partition string: ``${dataset_id}:allusers-ro``
+    - used for facility metadata, classes, and other collections
+- a learner has personalized read-only access
+    - partition string: ``${dataset_id}:user-ro:${user_id}``
+    - used for user roles and membership in classes and groups
+- a learner has personalized read and write access
+    - partition string: ``${dataset_id}:user-rw:${user_id}``
+    - used for content interaction logs
+- everything else
+    - partition string: ``${dataset_id}``
+    - used for quizzes and lessons
+
+Note that all facility models share the prefix ``${dataset_id}``, which means that they are all "contained" in that top-level partition.
 
 
-Each model must have a defined partition, which must fall under one of the defined scope definitions below.
-
-
-In Kolibri, models have five possible partitions defined for them:
-
-- ``${dataset_id}`` - for exams and lessons
-- ``${dataset_id}:allusers-ro`` - for facility dataset and collections
-- ``${dataset_id}:user-ro:${user_id}`` - for user roles and memberships
-- ``${dataset_id}:anonymous`` - for content session logs
-- ``${dataset_id}:user-rw:${user_id}`` - for all logs
-
-Since all these models have the root partition of ``${dataset_id}``, they will all be synced for a ``Certificate`` with ``ScopeDefinition`` of ``full-facility``.
-
-When giving ``single-user`` permissions, we only want to allow the user to `write` content related logs. We need to allow the user to `read` the heirarchical structures, so that Kolibri is still able to function properly with the correct related models.
-
-
-
-Certificate scopes
+Filters and scopes
 ------------------
 
-Certificates permissions for syncing, and their level of permission depends on their scope.
-Scope gets specified in a certificate, granting particular permissions to holders of the private key for that certificate. Usually, these permissions are related to the data that they are allowed to sync. The permissions are defined at the read, write, and read/write level.
+A *filter* is a list of `partition prefixes <#partitions>`__. They are represented as an end-line-delimited list of partition prefix strings.
 
-
-In order to define certain permissions when generating certificates, one must define scope definitions, which should reflect the defined partitions of your models. A *scopedefinitions.json* file should be created under a fixtures folder which can be loaded into your database. The scope definitions should define templates which specify what subset of data can be accessed when applied through a certificate. You must define templates for read, write and read/write permissions.
+A *scope* uses multiple filters to specify permission limits a device has for syncing data.
 
 As of this writing, there are currently two scope definitions defined in Kolibri for the ``facilitydata`` profile:
 
-- The ``full-facility`` scope syncs all data related to a facility. This includes the facility model itself plus associated classes, lessons, users, groups, content interaction logs, and everything else related to running a typical Kolibri classroom server.
-- The ``single-user`` scope syncs data related to a user, specifically the content interaction logs. Note that this does *not* sync all data related to the user. For example, lessons that have been assigned to the user will not be automatically synced, and must be synced through another mechanism outside of Morango such as through the Kolibri API.
+- The ``full-facility`` scope provides full read and write access to all data related to a facility. This includes the facility model itself plus associated classes, lessons, users, groups, content interaction logs, and everything else related to running a typical Kolibri classroom server.
+- The ``single-user`` scope provides some of the access needed by a single learner, specifically the content interaction logs. Note that this does *not* currently include all necessary data. For example, lessons that have been assigned to the user are not in this scope, and must currently be synced through another mechanism to-be-determined.
 
-This is what `Kolibri's scope definition file <https://github.com/learningequality/kolibri/blob/bd3fe9a04e21e446da39fed92e83c75e11ef1714/kolibri/core/auth/fixtures/scopedefinitions.json>`__ looks like:
+Scopes are generally hard-coded into the application using `Django fixtures <https://docs.djangoproject.com/en/3.1/howto/initial-data/#providing-data-with-fixtures>`__. This is what `Kolibri's scope definition fixture <https://github.com/learningequality/kolibri/blob/bd3fe9a04e21e446da39fed92e83c75e11ef1714/kolibri/core/auth/fixtures/scopedefinitions.json>`__ looks like:
 
 .. code-block:: json
 
@@ -116,9 +112,27 @@ This is what `Kolibri's scope definition file <https://github.com/learningequali
     ]
 
 
-Models
-------
+Note that the ``single-user`` scope allows the user to write content-related logs and to read other facility data so that Kolibri is still able to function properly.
 
-.. automodule:: morango.models
-    :noindex:
-    :members: InstanceIDModel, DatabaseIDModel
+
+Certificates
+------------
+
+*Certificates* are hierarchical pairs of private/public keys that grant device-level permission to sync data within a `scope <#scopes>`__ of a `profile <#profiles>`__. Once a device has been granted access to a scope of a profile, that device can grant that scope or a subset of it to other devices by generating child certificate pairs.
+
+Scope access and the chain of trust are established as follows:
+
+- The private key associated with a parent certificate can be used to issue a child certificate to another device with at most the permission granted by the scope of the parent certificate
+- The child certificate can be used by the new device to allow it to prove to other devices that it is authorized to access the scope
+- The entire chain of signed certificates back to the origin must be exchanged during sync between devices, and the signatures and hierarchy must be verified
+
+In the example below, *Instance A* is able to establish a future sync relationship with *Instance B* by providing admin credentials to *Instance B* and requesting a signed certificate:
+
+.. image:: ./cert_exchange.png
+
+In Kolibri, on the ``FacilityDataset`` model, we generate the certificate as a function of the ``calculate_source_id`` method. Note that we currently set the ID of the certificate to be the same as the ID of the facility model. This allows queries on the certificate hierarchy tree to find certificates that are associated with the facility.
+
+.. warning::
+
+    Certificates can not currently be revoked. This means that a stolen or hijacked device will have indefinite access to all data it has been granted. We would need to add a centralized (non-p2p) revocation system to support this.
+
