@@ -26,7 +26,7 @@ The learner uses *Home* for a week, engaging with the assigned resources. They (
 
 An admin user wants to get the recent user engagement data from the *Facility* device onto their *City* device. In order to achieve this, the admin may bring *City* to the remote area. Once *City* arrives in the remote area, *Facility* and *City* can sync over the school's local network.
 
-Finally, the admin brings *City* back to the city and syncs with *Cloud* over the internet. At this point, *Facility*, *City*, and *Cloud* all have the same data. Now, imagine a second admin in another city syncs their own laptop (*City 2*) with *Cloud*. Now they, too would have the recent data from *Facility*.
+Finally, the admin brings *City* back to the city and syncs with *Cloud* over the internet. At this point, *Facility*, *City*, and *Cloud* all have the same data. Now, imagine a second admin in another city syncs their own laptop (*City 2*) with *Cloud*. Now they too would have the recent data from *Facility*.
 
 
 Objectives

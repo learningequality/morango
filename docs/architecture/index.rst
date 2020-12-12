@@ -39,11 +39,11 @@ Partitions
 
 A *partition* is a colon-delimited string that defines a subset of the `syncable models <#syncable-models>`__ in a `profile <#profiles>`__. Taken together, the partitions of a profile define mutually exclusive and complete segmented coverage of all syncable model records.
 
-For example, a syncable model record like a content interaction log might be associated with a user in a facility. The combination of the user and the facility could be used to define a partition like ``${facility_id}:${user_id}`` that and other similar records.
+For example, a syncable model record like a content interaction log might be associated with a user in a facility. The combination of the user and the facility could be used to define a partition like ``${facility_id}:${user_id}`` for that and other similar records.
 
-Partition strings are constructed to be hierarchical. "Containment" of one partition in another can be checked with a simple ``startswith`` check. Here, the partition ``${facility_id}:${user_id}`` would be contained in the partition ``${facility_id}`` for user ``U1`` in facility ``F1`` because ``"F1:U1".startswith("F1")``. The leading part of a partition string its "prefix" designating the parent partition is a *partition prefix*.
+Partition strings are constructed to be hierarchical. "Containment" of one partition in another can be checked with a simple Python ``startswith`` string check. Here, the partition ``${facility_id}:${user_id}`` would be contained in the partition ``${facility_id}`` for user ``U1`` in facility ``F1`` because ``"F1:U1".startswith("F1") == True``. The leading part of a partition string designating the parent partition is called a *partition prefix*.
 
-Partition strings use colon characters to delimit levels of the hierarchy and `Python template strings <https://docs.python.org/3/library/string.html#template-strings>`__ to dynamically insert source IDs of models. Aside from this, Morango places no constraints on the structure of partition strings, and they can be constructed using other conventions and strategies.
+Partition strings use colon characters to delimit levels of the hierarchy and `Python template strings <https://docs.python.org/3/library/string.html#template-strings>`__ to dynamically insert source IDs of models. Aside from this, Morango places no constraints on the structure of partition strings, and they can be constructed using any convention or strategy.
 
 In Kolibri, we currently have five mutually-exclusive partitions in the ``facilitydata`` profile, where the source ID of the facility is the ``dataset_id``:
 
