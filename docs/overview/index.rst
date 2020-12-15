@@ -39,3 +39,17 @@ Objectives
 - **Integrity:** Protect data from accidental and malicious data corruption
 - **Peer-to-peer:** Devices should be able to communicate without a central server
 - **Eventual consistency:**  Eventually all devices will converge to the same data
+
+
+Usage in Kolibri
+----------------
+
+Morango is not the only way that Kolibri instances communicate with each other and other services. Some other ways Kolibri communicates are:
+
+- Discovering other Kolibri instances with Zeroconf
+- Calling REST APIs for getting meta-information about discovered Kolibri instances
+- Calling REST APIs for sending anonymous usage statistics to an LE telemetry server
+- Calling REST APIs for browsing content available for import from Studio and other Kolibri instances
+- Downloading static channel database and media files from Studio and other Kolibri instances
+
+Morango's cerificate, change-tracking, and partitioning features are useful especially in situations where diff-based updates and guarantees about distributed data consistency and coherence are useful.
