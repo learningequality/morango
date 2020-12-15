@@ -1,8 +1,17 @@
 Syncing
 =======
 
-Sync process
-------------
+
+Concepts
+--------
+
+The **store** holds serialized versions of syncable models. This includes both data that is on the current device and data synced from other devices.
+
+The **outgoing buffer** and **incoming buffer** mirror the schema of the store. They also include a transfer session ID which used to identify sets of data that are being synced as a coherent group to other Morango instances.
+
+
+Process
+-------
 
 Syncing is the actual exchange of data in a sync session. The general steps for syncing data are:
 
