@@ -97,7 +97,6 @@ def _serialize_into_store(profile, filter=None):
 
     1. If there is a store record pertaining to that app model, we update the serialized store record with
     the latest changes from the model's fields. We also update the counter's based on this device's current Instance ID.
-
     2. If there is no store record for this app model, we proceed to create an in memory store model and append to a list to be
     bulk created on a per class model basis.
     """
@@ -258,7 +257,6 @@ def _deserialize_from_store(profile, skip_erroring=False, filter=None):
     ALGORITHM: On a per syncable model basis, we iterate through each class model and we go through 2 possible cases:
 
     1. For class models that have a self referential foreign key, we iterate down the dependency tree deserializing model by model.
-
     2. On a per app model basis, we append the field values to a single list, and do a single bulk insert/replace query.
 
     If a model fails to deserialize/validate, we exclude it from being marked as clean in the store.
