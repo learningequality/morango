@@ -4,14 +4,14 @@ Architecture
 Profiles
 --------
 
-A *profile* is a unique, semantically meaningful name within the Kolibri ecosystem. It corresponds to a set of interrelated `syncable models <#syncable-models>`__ that "make sense" when synced together.
+A **profile** is a unique, semantically meaningful name within the Kolibri ecosystem. It corresponds to a set of interrelated `syncable models <#syncable-models>`__ that "make sense" when synced together.
 
 Currently there is just a single profile in the Kolibri ecosystem: ``facilitydata``.
 
 Syncable models
 ---------------
 
-A *syncable model* is a Django model which can be synced between devices using Morango. Every syncable model is associated with exactly one `profile <#profiles>`__, and exactly one `partition <#partitions>`__ within the profile.
+A **syncable model** is a Django model which can be synced between devices using Morango. Every syncable model is associated with exactly one `profile <#profiles>`__, and exactly one `partition <#partitions>`__ within the profile.
 
 To make a Django model syncable, inherit from ``SyncableModel``. All subclasses need to define:
 
@@ -37,13 +37,11 @@ In Kolibri, we currently define a base ``SyncableModel`` called ``FacilityDataSy
 Partitions
 ----------
 
-A *partition* is a colon-delimited string that defines a subset of the `syncable models <#syncable-models>`__ in a `profile <#profiles>`__. Taken together, the partitions of a profile define mutually exclusive and complete segmented coverage of all syncable model records.
+A **partition** is a string that defines a subset of the `syncable models <#syncable-models>`__ in a `profile <#profiles>`__. Taken together, the partitions of a profile define mutually exclusive and complete segmented coverage of all syncable model records.
 
-For example, a syncable model record like a content interaction log might be associated with a user in a facility. The combination of the user and the facility could be used to define a partition like ``${facility_id}:${user_id}`` for that and other similar records.
+Partition strings use colon characters to delimit levels of a hierarchy, and `Python template strings <https://docs.python.org/3/library/string.html#template-strings>`__ to dynamically insert source IDs of models. Aside from this, Morango places no constraints on the structure of partition strings, and they can be constructed using any convention or strategy. A leading part part of a colon-delimited partition string designating some parent partition is called a **partition prefix**.
 
-Partition strings are constructed to be hierarchical. "Containment" of one partition in another can be checked with a simple Python ``startswith`` string check. Here, the partition ``${facility_id}:${user_id}`` would be contained in the partition ``${facility_id}`` for user ``U1`` in facility ``F1`` because ``"F1:U1".startswith("F1") == True``. The leading part of a partition string designating the parent partition is called a *partition prefix*.
-
-Partition strings use colon characters to delimit levels of the hierarchy and `Python template strings <https://docs.python.org/3/library/string.html#template-strings>`__ to dynamically insert source IDs of models. Aside from this, Morango places no constraints on the structure of partition strings, and they can be constructed using any convention or strategy.
+As a hypothetical example, a record for a syncable model like a content interaction log might be associated with a syncable user in a syncable facility. The combination of the user ID and the facility ID could be used to dynamically define a partition like ``${facility_id}:${user_id}`` for that and other similar records. "Containment" of partitions in the hierarchy can be checked with a simple Python ``startswith`` string check between partitions. In the example above, the partition ``${facility_id}:${user_id}`` is said to be contained by the partition ``${facility_id}`` for user ``U1`` in facility ``F1`` because ``"F1:U1".startswith("F1") == True`` and ``F1`` is the partition prefix.
 
 In Kolibri, we currently have five mutually-exclusive partitions in the ``facilitydata`` profile, where the source ID of the facility is the ``dataset_id``:
 
@@ -69,16 +67,16 @@ Note that all facility models share the prefix ``${dataset_id}``, which means th
 Filters and scopes
 ------------------
 
-A *filter* is a list of `partition prefixes <#partitions>`__. They are represented as an end-line-delimited list of partition prefix strings.
+A **filter** is a set of `partition prefixes <#partitions>`__ represented as an end-line-delimited string.  A **scope** is a set of filters which defines the permissions confered by a `certificate <#certificates>`__ and stored in a ``ScopeDefinition`` object.
 
-A *scope* uses multiple filters to specify permission limits a device has for syncing data.
+When designing scopes – i.e. composing scopes from filters and partitions – care must be taken to ensure that foreign keys in synced models refer to other models that were also synced in the same scope. Otherwise, an alternative would be to ensure that the application can gracefully handle missing records when necessary because there would be no guarantee of coherence.
 
 As of this writing, there are currently two scope definitions defined in Kolibri for the ``facilitydata`` profile:
 
 - The ``full-facility`` scope provides full read and write access to all data related to a facility. This includes the facility model itself plus associated classes, lessons, users, groups, content interaction logs, and everything else related to running a typical Kolibri classroom server.
-- The ``single-user`` scope provides some of the access needed by a single learner, specifically the content interaction logs. Note that this does *not* currently include all necessary data. For example, lessons that have been assigned to the user are not in this scope, and must currently be synced through another mechanism to-be-determined.
+- The ``single-user`` scope provides some of the access needed by a single learner, specifically the content interaction logs. Note that this does *not* currently include all necessary data. For example, lessons that have been assigned to the user are not in this scope, and must currently be synced through another mechanism (as yet to be determined).
 
-Scopes are generally hard-coded into the application using `Django fixtures <https://docs.djangoproject.com/en/3.1/howto/initial-data/#providing-data-with-fixtures>`__. This is what `Kolibri's scope definition fixture <https://github.com/learningequality/kolibri/blob/bd3fe9a04e21e446da39fed92e83c75e11ef1714/kolibri/core/auth/fixtures/scopedefinitions.json>`__ looks like:
+Kolibri's `scope definition fixture <https://github.com/learningequality/kolibri/blob/bd3fe9a04e21e446da39fed92e83c75e11ef1714/kolibri/core/auth/fixtures/scopedefinitions.json>`__ is shown below. Here, note that the ``single-user`` scope allows the user to write content-related logs and to read other facility data so that Kolibri is still able to function properly.
 
 .. code-block:: json
 
@@ -112,13 +110,10 @@ Scopes are generally hard-coded into the application using `Django fixtures <htt
     ]
 
 
-Note that the ``single-user`` scope allows the user to write content-related logs and to read other facility data so that Kolibri is still able to function properly.
-
-
 Certificates
 ------------
 
-*Certificates* are hierarchical pairs of private/public keys that grant device-level permission to sync data within a `scope <#scopes>`__ of a `profile <#profiles>`__. Once a device has been granted access to a scope of a profile, that device can grant that scope or a subset of it to other devices by generating child certificate pairs.
+**Certificates** are hierarchical pairs of private/public keys that grant device-level permission to sync data within a `filtered scope <#filers-and-scopes>`__ of a `profile <#profiles>`__. Once a device has been granted access to a scope of a profile, that device can grant that scope or a subset of it to other devices by generating child certificate pairs.
 
 Scope access and the chain of trust are established as follows:
 
@@ -130,9 +125,8 @@ In the example below, *Instance A* is able to establish a future sync relationsh
 
 .. image:: ./cert_exchange.png
 
+It should be cautioned that there is currenly no mechanism for revoking certificates. This means that a stolen or hijacked device will have access to all data it has been granted, and updates to that data when another device is on the same network.
+
 In Kolibri, on the ``FacilityDataset`` model, we generate the certificate as a function of the ``calculate_source_id`` method. Note that we currently set the ID of the certificate to be the same as the ID of the facility model. This allows queries on the certificate hierarchy tree to find certificates that are associated with the facility.
 
-.. warning::
-
-    Certificates can not currently be revoked. This means that a stolen or hijacked device will have indefinite access to all data it has been granted. We would need to add a centralized (non-p2p) revocation system to support this.
-
+There's flexibility in the application layer for determing the validity of a root certificate, and it's specified on a per-profile basis. For the ``facilitydata`` profile, Kolibri leverages its ``auth`` models for this.
