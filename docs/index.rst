@@ -13,5 +13,5 @@ Morango is a Django database replication engine written in pure Python. It is de
    syncing/index
    counters/index
    merging/index
-   delete/index
+   deletion/index
    api/index
