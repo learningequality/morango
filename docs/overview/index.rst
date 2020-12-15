@@ -52,4 +52,4 @@ Morango is not the only way that Kolibri instances communicate with each other a
 - Calling REST APIs for browsing content available for import from Studio and other Kolibri instances
 - Downloading static channel database and media files from Studio and other Kolibri instances
 
-Morango's cerificate, change-tracking, and partitioning features are useful especially in situations where diff-based updates and guarantees about distributed data consistency and coherence are useful.
+Morango's certificate, change-tracking, and partitioning features are useful especially in situations where diff-based updates and guarantees about distributed data consistency and coherence are useful.
