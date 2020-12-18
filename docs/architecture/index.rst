@@ -67,7 +67,7 @@ Note that all facility models share the prefix ``${dataset_id}``, which means th
 Filters and scopes
 ------------------
 
-A **filter** is a set of `partition prefixes <#partitions>`__ represented as an end-line-delimited string.  A **scope** is a set of filters which defines the permissions confered by a `certificate <#certificates>`__ and stored in a ``ScopeDefinition`` object.
+A **filter** is a set of `partition prefixes <#partitions>`__ represented as an end-line-delimited string.  A **scope** is a set of filters which defines the permissions conferred by a `certificate <#certificates>`__ and stored in a ``ScopeDefinition`` object.
 
 When designing scopes – i.e. composing scopes from filters and partitions – care must be taken to ensure that foreign keys in synced models refer to other models that were also synced in the same scope. Otherwise, an alternative would be to ensure that the application can gracefully handle missing records when necessary because there would be no guarantee of coherence.
 
@@ -125,8 +125,8 @@ In the example below, *Instance A* is able to establish a future sync relationsh
 
 .. image:: ./cert_exchange.png
 
-It should be cautioned that there is currenly no mechanism for revoking certificates. This means that a stolen or hijacked device will have access to all data it has been granted, and updates to that data when another device is on the same network.
+It should be cautioned that there is currently no mechanism for revoking certificates. This means that a stolen or hijacked device will have access to all data it has been granted, and updates to that data when another device is on the same network.
 
 In Kolibri, on the ``FacilityDataset`` model, we generate the certificate as a function of the ``calculate_source_id`` method. Note that we currently set the ID of the certificate to be the same as the ID of the facility model. This allows queries on the certificate hierarchy tree to find certificates that are associated with the facility.
 
-There's flexibility in the application layer for determing the validity of a root certificate, and it's specified on a per-profile basis. For the ``facilitydata`` profile, Kolibri leverages its ``auth`` models for this.
+There's flexibility in the application layer for determining the validity of a root certificate, and it's specified on a per-profile basis. For the ``facilitydata`` profile, Kolibri leverages its ``auth`` models for this.

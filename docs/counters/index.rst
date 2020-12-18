@@ -6,7 +6,7 @@ Identifiers
 
 There is generally one Morango instance for every Kolibri instance, and each of these are identified by a unique Morango **instance ID**. The instance ID is calculated as a function of a number of system properties, and will change when those properties change. Changes to the instance ID are not fatal, but stability is generally preferable.
 
-The **database ID** identifies the actual database being used by a Morango instance. If a database has been backed up and restored or copied to a different Morange instance, a new database ID should be generated to help other Morango instances that may have already seen the previous state of the databse.
+The **database ID** identifies the actual database being used by a Morango instance. If a database has been backed up and restored or copied to a different Morango instance, a new database ID should be generated to help other Morango instances that may have already seen the previous state of the database.
 
 Each syncable model instance within the database is identified by a unique **model source ID**. This is calculated randomly by default and takes the calculated partition and Morango model name into account. Models can also define their own behavior by overriding ``calculate_source_id``.
 
