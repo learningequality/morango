@@ -1,16 +1,17 @@
 
-.. mdinclude:: ../README.md
+Morango developer documentation
+-------------------------------
 
+Morango is a Django database replication engine written in pure Python. It is designed and maintained in support of the `Kolibri <https://github.com/learningequality/kolibri/>`__ product ecosystem.
 
-Table of contents
------------------
 
 .. toctree::
    :maxdepth: 2
 
-   dev/index
-   contributing
-   authors
-   changelog
-
-.. include:: ../README.rst
+   overview/index
+   architecture/index
+   syncing/index
+   counters/index
+   merging/index
+   deletion/index
+   api/index

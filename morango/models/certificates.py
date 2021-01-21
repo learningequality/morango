@@ -1,3 +1,8 @@
+"""
+``Certificate`` objects are the core of the authentication system which allows the synchronization of data with varying permissions.
+Each certificate has a ``private_key`` used for signing (child) certificates (thus giving certain permissions)
+and a ``public_key`` used for verifying that a certificate(s) was properly signed.
+"""
 from __future__ import unicode_literals
 
 import json

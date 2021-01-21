@@ -284,10 +284,9 @@ class HardDeletedModels(models.Model):
 
 class AbstractStore(models.Model):
     """
-    ``AbstractStore`` is a base model for storing serialized data.
+    Base abstract model for storing serialized data.
 
-    This model is an abstract model, and is inherited by both ``Store`` and
-    ``Buffer``.
+    Inherited by both ``Store`` and ``Buffer``.
     """
 
     profile = models.CharField(max_length=40)
@@ -508,8 +507,8 @@ class DatabaseMaxCounter(AbstractCounter):
 class RecordMaxCounter(AbstractCounter):
     """
     ``RecordMaxCounter`` keeps track of the maximum counter each serialized record has been saved at,
-     for each instance that has modified it. This is used to determine fast-forwards and merge conflicts
-     during the sync process.
+    for each instance that has modified it. This is used to determine fast-forwards and merge conflicts
+    during the sync process.
     """
 
     store_model = models.ForeignKey(Store)

@@ -74,8 +74,8 @@ docs: clean-docs
 browserdocs: docs
 	$(BROWSER) docs/_build/html/index.html
 
-servedocs: browserdocs ## compile the docs watching for changes
-	watchmedo shell-command -p '*.rst' -c '$(MAKE) -C docs html' -R -D .
+docs-autobuild:
+	sphinx-autobuild docs docs/_build/
 
 release:
 	ls -l dist/

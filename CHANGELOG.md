@@ -1,5 +1,4 @@
-Release Notes
-=============
+# Release Notes
 
 List of the most important changes for each release.
 
