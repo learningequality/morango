@@ -1,7 +1,16 @@
 # These are for building the docs
 sphinx==1.7.6
 sphinx-rtd-theme==0.4.3
-sphinx-autobuild
+sphinx-autobuild==2020.9.1
 m2r==0.2.1
-watchdog
-argh
+watchdog==0.10.3
+argh==0.26.2
+
+# for extracting model docs
+django==1.11.29  # pyup: >=1.11,<2
+djangorestframework==3.9.1
+django-mptt==0.9.1
+rsa==3.4.2
+ifcfg==0.21
+
+-r ./accelerated.txt
