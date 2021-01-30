@@ -208,8 +208,7 @@ class SyncSessionViewSet(viewsets.ModelViewSet):
     permission_classes = (permissions.SyncSessionPermissions,)
     serializer_class = serializers.SyncSessionSerializer
 
-    def create(self, request):
-
+    def create(self, request):  # noqa: C901
         instance_id, _ = core.InstanceIDModel.get_or_create_current_instance()
 
         # verify and save the certificate chain to our cert store
@@ -244,9 +243,8 @@ class SyncSessionViewSet(viewsets.ModelViewSet):
             )
 
         # check that the nonce/id were properly signed
-        message = "{nonce}:{id}".format(
-            nonce=request.data.get("nonce"), id=request.data.get("id")
-        )
+        nonce = request.data.get("nonce")
+        message = "{nonce}:{id}".format(nonce=nonce, id=request.data.get("id"))
         if not client_cert.verify(message, request.data["signature"]):
             return response.Response(
                 "Client certificate failed to verify signature",
@@ -261,11 +259,9 @@ class SyncSessionViewSet(viewsets.ModelViewSet):
                 "Nonce is not valid", status=status.HTTP_403_FORBIDDEN
             )
 
+        allow_resume = request.data.get("allow_resume", False)
         # build the data to be used for creation the syncsession
         data = {
-            "id": request.data.get("id"),
-            "start_timestamp": timezone.now(),
-            "last_activity_timestamp": timezone.now(),
             "active": True,
             "is_server": True,
             "client_certificate": client_cert,
@@ -275,19 +271,44 @@ class SyncSessionViewSet(viewsets.ModelViewSet):
             "connection_path": request.data.get("connection_path"),
             "client_ip": get_ip(request) or "",
             "server_ip": request.data.get("server_ip") or "",
-            "client_instance": request.data.get("instance"),
-            "server_instance": json.dumps(
-                serializers.InstanceIDSerializer(instance_id).data
-            ),
+            "allow_resume": allow_resume,
         }
 
-        syncsession = core.SyncSession(**data)
-        syncsession.full_clean()
-        syncsession.save()
+        sync_session = None
+
+        # if we're allowing resume, then try to pull an existing session
+        if allow_resume:
+            query = (
+                core.SyncSession.objects.filter(**data)
+                .order_by("last_activity_timestamp")
+                .reverse()
+            )
+            sync_session = query.first()
+
+        # create a new session
+        if sync_session is None:
+            data.update(
+                id=request.data.get("id"),
+                start_timestamp=timezone.now(),
+                last_activity_timestamp=timezone.now(),
+                client_instance=request.data.get("instance"),
+                server_instance=json.dumps(
+                    serializers.InstanceIDSerializer(instance_id).data
+                ),
+            )
+            sync_session = core.SyncSession(**data)
+        else:
+            message = "{nonce}:{id}".format(nonce=nonce, id=sync_session.id)
+            sync_session.last_activity_timestamp = timezone.now()
+
+        sync_session.full_clean()
+        sync_session.save()
 
         resp_data = {
+            "id": sync_session.id,
             "signature": server_cert.sign(message),
             "server_instance": data["server_instance"],
+            "allow_resume": sync_session.allow_resume,
         }
 
         return response.Response(resp_data, status=status.HTTP_201_CREATED)
