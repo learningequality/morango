@@ -10,7 +10,7 @@ argh==0.26.2
 django==1.11.29  # pyup: >=1.11,<2
 djangorestframework==3.9.1
 django-mptt==0.9.1
-rsa==3.4.2
+rsa==4.7
 ifcfg==0.21
 
 -r ./accelerated.txt
