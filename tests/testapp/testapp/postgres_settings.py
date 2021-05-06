@@ -17,6 +17,7 @@ from .settings import *  # noqa
 DATABASES = {
     'default': {
         'ENGINE': 'django.db.backends.postgresql',
+        'HOST': 'localhost',
         'USER': 'postgres',
         'PASSWORD': 'postgres',
         'NAME': 'default',  # This module should never be used outside of tests -- so this name is irrelevant
@@ -26,6 +27,7 @@ DATABASES = {
     },
     'default-serializable': {
         'ENGINE': 'django.db.backends.postgresql',
+        'HOST': 'localhost',
         'USER': 'postgres',
         'PASSWORD': 'postgres',
         'NAME': 'default',  # This module should never be used outside of tests -- so this name is irrelevant
