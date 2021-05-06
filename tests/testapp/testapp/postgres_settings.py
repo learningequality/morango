@@ -18,19 +18,19 @@ DATABASES = {
     'default': {
         'ENGINE': 'django.db.backends.postgresql',
         'USER': 'postgres',
-        'PASSWORD': '',
+        'PASSWORD': 'postgres',
         'NAME': 'default',  # This module should never be used outside of tests -- so this name is irrelevant
         'TEST': {
-            'NAME': 'travis_ci_default'
+            'NAME': 'test'
         }
     },
     'default-serializable': {
         'ENGINE': 'django.db.backends.postgresql',
         'USER': 'postgres',
-        'PASSWORD': '',
+        'PASSWORD': 'postgres',
         'NAME': 'default',  # This module should never be used outside of tests -- so this name is irrelevant
         'TEST': {
-            'NAME': 'travis_ci_default'
+            'NAME': 'test'
         },
         'OPTIONS': {
             'isolation_level': isolation_level,
