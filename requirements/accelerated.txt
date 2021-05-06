@@ -1,2 +1,2 @@
-M2Crypto==0.26.0
-cryptography==1.8.1
+M2Crypto==0.37.1
+cryptography==2.3.1
