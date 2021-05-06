@@ -1,6 +1,6 @@
 # Morango
 
-[![image](https://img.shields.io/travis/learningequality/morango.svg)](https://travis-ci.org/learningequality/morango)
+[![build](https://github.com/learningequality/morango/actions/workflows/tox.yml/badge.svg?branch=master)](https://github.com/learningequality/morango/actions)
 [![image](http://codecov.io/github/learningequality/morango/coverage.svg?branch=master)](http://codecov.io/github/learningequality/morango?branch=master)
 [![image](https://readthedocs.org/projects/morango/badge/?version=latest)](http://morango.readthedocs.org/en/latest/)
 
