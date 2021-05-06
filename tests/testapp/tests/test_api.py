@@ -29,13 +29,16 @@ from morango.registry import syncable_models
 from morango.sync.syncsession import compress_string
 from morango.sync.utils import validate_and_create_buffer_data
 
-
-# A weird hack because of http://bugs.python.org/issue17866
 if sys.version_info >= (3,):
+    from base64 import encodebytes as b64encode
+
+    # A weird hack because of http://bugs.python.org/issue17866
     class APITestCase(BaseTestCase):
         def assertItemsEqual(self, *args, **kwargs):
             self.assertCountEqual(*args, **kwargs)
 else:
+    from base64 import encodestring as b64encode
+
     class APITestCase(BaseTestCase):
         pass
 
@@ -155,7 +158,7 @@ class CertificateTestCaseMixin(object):
         return (response, data)
 
     def perform_basic_authentication(self, user):
-        basic_auth_header = b'Basic ' + base64.encodestring(("username=%s:%s" % (user.username, user.actual_password)).encode())
+        basic_auth_header = b'Basic ' + b64encode(("username=%s:%s" % (user.username, user.actual_password)).encode())
         self.client.credentials(HTTP_AUTHORIZATION=basic_auth_header)
 
     def create_syncsession(self, client_certificate=None, server_certificate=None):
