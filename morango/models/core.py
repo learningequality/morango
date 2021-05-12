@@ -159,9 +159,9 @@ class InstanceIDModel(models.Model):
             kwargs["current"] = True
 
             # ensure we only ever have 1 current instance ID
-            InstanceIDModel.objects.filter(current=True).exclude(id=kwargs["id"]).update(
-                current=False
-            )
+            InstanceIDModel.objects.filter(current=True).exclude(
+                id=kwargs["id"]
+            ).update(current=False)
             # create the model, or get existing if one already exists with this ID
             instance, created = InstanceIDModel.objects.update_or_create(
                 id=kwargs["id"], defaults=kwargs
@@ -261,8 +261,12 @@ class TransferSession(models.Model):
     server_fsic = models.TextField(blank=True, default="{}")
 
     # stages and stage status of transfer session
-    transfer_stage = models.CharField(max_length=20, choices=transfer_stage.CHOICES, blank=True)
-    transfer_stage_status = models.CharField(max_length=20, choices=transfer_status.CHOICES, blank=True)
+    transfer_stage = models.CharField(
+        max_length=20, choices=transfer_stage.CHOICES, blank=True
+    )
+    transfer_stage_status = models.CharField(
+        max_length=20, choices=transfer_status.CHOICES, blank=True
+    )
 
     def get_filter(self):
         return Filter(self.filter)
@@ -413,7 +417,6 @@ class Store(AbstractStore):
 
                 # if we got here, it means the validation error wasn't handled by propagating deletion, so re-raise it
                 raise e
-
 
 
 class Buffer(AbstractStore):
@@ -583,9 +586,11 @@ class SyncableModel(UUIDModelMixin):
         self, using=None, keep_parents=False, hard_delete=False, *args, **kwargs
     ):
         using = using or router.db_for_write(self.__class__, instance=self)
-        assert self._get_pk_val() is not None, (
-            "%s object can't be deleted because its %s attribute is set to None."
-            % (self._meta.object_name, self._meta.pk.attname)
+        assert (
+            self._get_pk_val() is not None
+        ), "%s object can't be deleted because its %s attribute is set to None." % (
+            self._meta.object_name,
+            self._meta.pk.attname,
         )
         collector = Collector(using=using)
         collector.collect([self], keep_parents=keep_parents)
