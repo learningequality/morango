@@ -1,20 +1,16 @@
 """
-This module contains constants representing the possible stages of a transfer session.
+This module contains constants representing the possible statuses of a transfer session stage.
 """
 from django.utils.translation import ugettext_lazy as _
 
+PENDING = "pending"
 STARTED = "started"
-QUEUING = "queuing"
-DEQUEUING = "dequeuing"
-PUSHING = "pushing"
-PULLING = "pulling"
 COMPLETED = "completed"
+ERRORED = "errored"
 
-choices = (
+CHOICES = (
+    (PENDING, _("Pending")),
     (STARTED, _("Started")),
-    (QUEUING, _("Queuing")),
-    (DEQUEUING, _("Dequeuing")),
-    (PUSHING, _("Pushing")),
-    (PULLING, _("Pulling")),
     (COMPLETED, _("Completed")),
+    (ERRORED, _("Errored")),
 )

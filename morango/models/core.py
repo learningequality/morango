@@ -19,18 +19,19 @@ from django.db.models.functions import Cast
 from django.utils import six
 from django.utils import timezone
 
-from .. import proquint
-from ..registry import syncable_models
-from .certificates import Certificate
-from .certificates import Filter
-from .fields.uuids import sha2_uuid
-from .fields.uuids import UUIDField
-from .fields.uuids import UUIDModelMixin
-from .manager import SyncableModelManager
-from .morango_mptt import MorangoMPTTModel
-from .utils import get_0_4_system_parameters
-from .utils import get_0_5_system_id
-from .utils import get_0_5_mac_address
+from morango import proquint
+from morango.registry import syncable_models
+from morango.models.certificates import Certificate
+from morango.models.certificates import Filter
+from morango.models.fields.uuids import sha2_uuid
+from morango.models.fields.uuids import UUIDField
+from morango.models.fields.uuids import UUIDModelMixin
+from morango.models.manager import SyncableModelManager
+from morango.models.morango_mptt import MorangoMPTTModel
+from morango.models.utils import get_0_4_system_parameters
+from morango.models.utils import get_0_5_system_id
+from morango.models.utils import get_0_5_mac_address
+from morango.constants import transfer_stage
 from morango.constants import transfer_status
 
 logger = logging.getLogger(__name__)
@@ -259,8 +260,9 @@ class TransferSession(models.Model):
     client_fsic = models.TextField(blank=True, default="{}")
     server_fsic = models.TextField(blank=True, default="{}")
 
-    # stages of transfer session
-    transfer_stage = models.CharField(max_length=20, choices=transfer_status.choices, blank=True)
+    # stages and stage status of transfer session
+    transfer_stage = models.CharField(max_length=20, choices=transfer_stage.CHOICES, blank=True)
+    transfer_stage_status = models.CharField(max_length=20, choices=transfer_status.CHOICES, blank=True)
 
     def get_filter(self):
         return Filter(self.filter)
