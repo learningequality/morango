@@ -670,9 +670,10 @@ class SyncableModel(UUIDModelMixin):
         return sha2_uuid(partition_value, source_id_value, model_name)
 
     def calculate_uuid(self):
-        self._morango_source_id = self.calculate_source_id()
-        if self._morango_source_id is None:
-            self._morango_source_id = uuid.uuid4().hex
+        if self._morango_source_id is None: 
+            self._morango_source_id = self.calculate_source_id()
+            if self._morango_source_id is None:
+                self._morango_source_id = uuid.uuid4().hex
 
         namespaced_id = self.compute_namespaced_id(
             self.calculate_partition(), self._morango_source_id, self.morango_model_name
