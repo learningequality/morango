@@ -13,8 +13,9 @@ from django.db.models import Q
 from django.db.models import signals
 from django.utils import six
 
-from .backends.utils import load_backend
-from .utils import mute_signals
+from morango.constants.capabilities import ASYNC_OPERATIONS
+from morango.constants import transfer_stage
+from morango.constants import transfer_status
 from morango.models.certificates import Filter
 from morango.models.core import Buffer
 from morango.models.core import DatabaseMaxCounter
@@ -25,6 +26,10 @@ from morango.models.core import RecordMaxCounter
 from morango.models.core import RecordMaxCounterBuffer
 from morango.models.core import Store
 from morango.registry import syncable_models
+from morango.sync.backends.utils import load_backend
+from morango.sync.controller import LocalSessionContext
+from morango.sync.controller import NetworkSessionContext
+from morango.sync.utils import mute_signals
 
 
 logger = logging.getLogger(__name__)
@@ -503,3 +508,381 @@ def _dequeue_into_store(transfersession):
         filter = transfersession.get_filter()
         _serialize_into_store(transfersession.sync_session.profile, filter=filter)
         _deserialize_from_store(transfersession.sync_session.profile, filter=filter)
+
+
+MIDDLEWARE_SUPPORT_VERSION = "0.6.0"
+
+
+class BaseOperation(object):
+    __slots__ = ()
+    expects_context = None
+
+    def __call__(self, context):
+        """
+        :type context: morango.sync.controller.SessionContext
+        """
+        try:
+            # verify context object matches what the operation expects
+            assert self.expects_context is None or isinstance(context, self.expects_context)
+            result = self.handle(context)
+            if result is None:
+                raise NotImplementedError("Transfer operation must return False, or a transfer status")
+            return result
+        except AssertionError:
+            # if the operation raises an AssertionError, we equate that to returning False, which
+            # means that this operation did not handle it and so other operation instances should
+            # be tried to handle it
+            return False
+
+    def handle(self, context):
+        """
+        :type context: TransferContext
+        :return: transfer_status.* - See `SessionController` for how the return status is handled
+        """
+        raise NotImplementedError("Transfer operation handler not implemented")
+
+
+class LocalOperation(BaseOperation):
+    expects_context = LocalSessionContext
+
+
+class LocalInitializeOperation(LocalOperation):
+    __slots__ = ()
+
+    def handle(self, context):
+        """
+        :type context: LocalSessionContext
+        """
+        return transfer_status.COMPLETED
+
+
+class LocalSerializeOperation(LocalOperation):
+    __slots__ = ()
+
+    def handle(self, context):
+        """
+        :type context: LocalSessionContext
+        """
+        assert context.transfer_session is not None
+        assert context.sync_session is not None
+        assert context.filter is not None
+
+        # we only trigger serialize if we're going to be pulled from as a server, or push as client
+        if context.transfer_session.push == context.is_server:
+            return transfer_status.COMPLETED
+
+        if getattr(settings, "MORANGO_SERIALIZE_BEFORE_QUEUING", True):
+            _serialize_into_store(
+                context.sync_session.profile,
+                filter=context.filter,
+            )
+
+        # before queuing, update fsic and set on transfer session
+        fsic = json.dumps(
+            DatabaseMaxCounter.calculate_filter_max_counters(context.filter)
+        )
+        if context.is_server:
+            context.transfer_session.server_fsic = fsic
+        else:
+            context.transfer_session.client_fsic = fsic
+
+        return transfer_status.COMPLETED
+
+
+class LocalQueueOperation(LocalOperation):
+    __slots__ = ()
+
+    def handle(self, context):
+        """
+        :type context: LocalSessionContext
+        """
+        assert context.sync_session is not None
+        assert context.transfer_session is not None
+
+        # we only trigger queue if we're going to be pulled from as a server, or push as client
+        if context.transfer_session.push == context.is_server:
+            return transfer_status.COMPLETED
+
+        _queue_into_buffer(context.transfer_session)
+
+        # update the records_total for client and server transfer session
+        records_total = Buffer.objects.filter(
+            transfer_session=context.transfer_session
+        ).count()
+
+        context.transfer_session.records_total = records_total
+        context.transfer_session.save()
+        return transfer_status.COMPLETED
+
+
+class LocalDequeueOperation(LocalOperation):
+    __slots__ = ()
+
+    def handle(self, context):
+        """
+        :type context: LocalSessionContext
+        """
+        assert context.transfer_session is not None
+        assert context.filter is not None
+
+        # we only trigger dequeue if we're going to be pulled from as a client,
+        # or pushed to as server
+        if context.transfer_session.pull == context.is_server:
+            return transfer_status.COMPLETED
+
+        # if no records were transferred, we can safely skip
+        if (
+            context.transfer_session.records_transferred is None
+            or context.transfer_session.records_transferred == 0
+        ):
+            return transfer_status.COMPLETED
+
+        _dequeue_into_store(context.transfer_session)
+
+        # depends on whether it was a push or not
+        fsic = context.transfer_session.client_fsic \
+            if context.is_server \
+            else context.transfer_session.server_fsic
+
+        # update database max counters but use latest fsics on client
+        DatabaseMaxCounter.update_fsics(json.loads(fsic), context.filter)
+        return transfer_status.COMPLETED
+
+
+class LocalDeserializeOperation(LocalOperation):
+    __slots__ = ()
+
+    def handle(self, context):
+        """
+        :type context: LocalSessionContext
+        """
+        assert context.sync_session is not None
+        assert context.transfer_session is not None
+        assert context.filter is not None
+
+        # we only trigger deserialize if we're going to be pulled from as a client,
+        # or pushed to as server
+        if context.transfer_session.pull == context.is_server:
+            return transfer_status.COMPLETED
+
+        if getattr(settings, "MORANGO_DESERIALIZE_AFTER_DEQUEUING", True):
+            # we first serialize to avoid deserialization merge conflicts
+            _serialize_into_store(
+                context.sync_session.profile,
+                filter=context.filter,
+            )
+            _deserialize_from_store(
+                context.sync_session.profile,
+                filter=context.filter,
+            )
+
+        return transfer_status.COMPLETED
+
+
+class LocalCleanupOperation(LocalOperation):
+    __slots__ = ()
+
+    def handle(self, context):
+        """
+        :type context: LocalSessionContext
+        """
+        assert context.transfer_session
+
+        # if in the context of a request, we know we're acting as the server, so we can ensure
+        # we only trigger deserialize if we were pushed to
+        if context.transfer_session.push == context.is_server:
+            return transfer_status.COMPLETED
+
+        Buffer.objects.filter(transfer_session=context.transfer_session).delete()
+        RecordMaxCounterBuffer.objects.filter(transfer_session=context.transfer_session).delete()
+        context.transfer_session.active = False
+        context.transfer_session.save()
+        return transfer_status.COMPLETED
+
+
+class RemoteNetworkOperation(BaseOperation):
+    expects_context = NetworkSessionContext
+
+    def create_transfer_session(self, context):
+        return context.connection._create_transfer_session(
+            dict(
+                id=context.transfer_session.id,
+                filter=context.transfer_session.filter,
+                push=context.transfer_session.push,
+                sync_session_id=context.sync_session.id,
+                client_fsic=context.transfer_session.client_fsic,
+            )
+        ).json()
+
+    def get_transfer_session(self, context):
+        return context.connection._get_transfer_session(context.transfer_session).json()
+
+    def update_transfer_session(self, context, **data):
+        return context.connection._update_transfer_session(data, context.transfer_session).json()
+
+    def close_transfer_session(self, context):
+        return context.connection._close_transfer_session(context.transfer_session).json()
+
+    def remote_proceed_to(self, context, stage):
+        """
+        Uses server API's to push updates to a remote `TransferSession`, which triggers the
+        controller's `.proceed_to()` for the stage
+
+        :type context: NetworkSessionContext
+        :param stage: A transfer_stage.*
+        :return: A tuple of the remote's status, and the server response JSON
+        """
+        stage = transfer_stage.stage(stage)
+        data = self.get_transfer_session(context)
+        remote_stage = transfer_stage.stage(data.get("transfer_stage"))
+        remote_status = data.get("transfer_stage_status")
+
+        if remote_stage < stage:
+            # if current stage is not yet at `stage`, push it to that stage through update
+            data = self.update_transfer_session(context, transfer_stage=stage)
+            remote_status = data.get("transfer_stage_status")
+        elif remote_stage > stage:
+            # if past this stage, then we just make sure returned status is completed
+            remote_status = transfer_status.COMPLETED
+
+        # if still in progress, then we return PENDING which will cause controller
+        # to again call the middleware that contains this operation, and check the server status
+        if remote_status in transfer_status.IN_PROGRESS_STATES:
+            remote_status = transfer_status.PENDING
+
+        return remote_status, data
+
+
+class RemoteSynchronousInitializeOperation(RemoteNetworkOperation):
+    def handle(self, context):
+        """
+        :type context: NetworkSessionContext
+        """
+        assert context.transfer_session is not None
+        assert ASYNC_OPERATIONS not in context.capabilities
+
+        # if local stage is transferring or beyond, we definitely don't need to initialize
+        local_stage = context.stage
+        if transfer_stage.stage(local_stage) >= transfer_stage.stage(transfer_stage.TRANSFERRING):
+            return transfer_status.COMPLETED
+
+        data = self.create_transfer_session(context)
+        context.transfer_session.server_fsic = data.get("server_fsic") or "{}"
+
+        if context.transfer_session.pull:
+            context.transfer_session.records_total = data.get("records_total", 0)
+
+        context.transfer_session.save()
+
+        # force update to COMPLETE QUEUED since obsolete handling serializes and queues during
+        # the creation of the transfer session
+        context.update(stage=transfer_stage.QUEUING, stage_status=transfer_status.COMPLETED)
+        return transfer_status.COMPLETED
+
+
+class RemoteInitializeOperation(RemoteNetworkOperation):
+    def handle(self, context):
+        """
+        :type context: NetworkSessionContext
+        """
+        assert context.transfer_session is not None
+        assert ASYNC_OPERATIONS in context.capabilities
+
+        # if local stage is transferring or beyond, we definitely don't need to initialize
+        if transfer_stage.stage(context.stage) < transfer_stage.stage(transfer_stage.TRANSFERRING):
+            self.create_transfer_session(context)
+
+        return transfer_status.COMPLETED
+
+
+class RemoteSynchronousNoOpMixin(object):
+    def handle(self, context):
+        """
+        :type context: NetworkSessionContext
+        """
+        assert ASYNC_OPERATIONS not in context.capabilities
+        return transfer_status.COMPLETED
+
+
+class RemoteSynchronousSerializeOperation(RemoteSynchronousNoOpMixin, RemoteNetworkOperation):
+    pass
+
+
+class RemoteSerializeOperation(RemoteNetworkOperation):
+    def handle(self, context):
+        """
+        :type context: NetworkSessionContext
+        """
+        assert context.transfer_session is not None
+        assert ASYNC_OPERATIONS in context.capabilities
+
+        remote_status, data = self.remote_proceed_to(context, transfer_stage.SERIALIZING)
+
+        if remote_status == transfer_status.COMPLETED:
+            context.transfer_session.server_fsic = data.get("server_fsic") or "{}"
+            context.transfer_session.save()
+
+        return remote_status
+
+
+class RemoteSynchronousQueueOperation(RemoteSynchronousNoOpMixin, RemoteNetworkOperation):
+    pass
+
+
+class RemoteQueueOperation(RemoteNetworkOperation):
+    def handle(self, context):
+        """
+        :type context: NetworkSessionContext
+        """
+        assert context.transfer_session is not None
+        assert ASYNC_OPERATIONS in context.capabilities
+
+        remote_status, data = self.remote_proceed_to(context, transfer_stage.QUEUING)
+
+        if remote_status == transfer_status.COMPLETED:
+            context.transfer_session.records_total = data.get("records_total", 0)
+            context.transfer_session.save()
+
+        return remote_status
+
+
+class RemoteSynchronousDequeueOperation(RemoteSynchronousNoOpMixin, RemoteNetworkOperation):
+    pass
+
+
+class RemoteDequeueOperation(RemoteNetworkOperation):
+    def handle(self, context):
+        """
+        :type context: NetworkSessionContext
+        """
+        assert ASYNC_OPERATIONS in context.capabilities
+
+        remote_status, _ = self.remote_proceed_to(context, transfer_stage.DEQUEUING)
+        return remote_status
+
+
+class RemoteSynchronousDeserializeOperation(RemoteSynchronousNoOpMixin, RemoteNetworkOperation):
+    pass
+
+
+class RemoteDeserializeOperation(RemoteNetworkOperation):
+    def handle(self, context):
+        """
+        :type context: NetworkSessionContext
+        """
+        assert context.transfer_session is not None
+        assert ASYNC_OPERATIONS in context.capabilities
+
+        remote_status, _ = self.remote_proceed_to(context, transfer_stage.DESERIALIZING)
+        return remote_status
+
+
+class RemoteCleanupOperation(RemoteNetworkOperation):
+    def handle(self, context):
+        """
+        :type context: NetworkSessionContext
+        """
+
+        if ASYNC_OPERATIONS not in context.capabilities:
+            pass
+

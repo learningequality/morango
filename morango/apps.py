@@ -2,6 +2,7 @@ from __future__ import unicode_literals
 
 from django.apps import AppConfig
 
+from morango.registry import session_middleware
 from morango.registry import syncable_models
 
 
@@ -14,3 +15,6 @@ class MorangoConfig(AppConfig):
 
         # populate syncable model registry by profile
         syncable_models.populate()
+
+        # populate session controller middleware from settings
+        session_middleware.populate()

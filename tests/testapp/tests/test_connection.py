@@ -29,7 +29,7 @@ from morango.sync.controller import MorangoProfileController
 from morango.sync.session import _length_of_headers
 from morango.sync.session import SessionWrapper
 from morango.sync.syncsession import NetworkSyncConnection
-from morango.sync.syncsession import BaseSyncClient
+from morango.sync.syncsession import TransferClient
 from morango.sync.syncsession import PullClient
 from morango.sync.syncsession import PushClient
 from morango.sync.syncsession import SyncSessionClient
@@ -250,7 +250,7 @@ class SyncClientTestCase(LiveServerTestCase):
         )
         self.chunk_size = 3
         self.conn = NetworkSyncConnection(base_url=self.live_server_url)
-        self.syncclient = self.build_client(BaseSyncClient)
+        self.syncclient = self.build_client(TransferClient)
         InstanceIDModel.get_or_create_current_instance()
 
     def build_client(self, client_class):

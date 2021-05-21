@@ -23,7 +23,7 @@ from morango.models.core import Store
 from morango.models.core import SyncSession
 from morango.models.core import TransferSession
 from morango.sync.controller import MorangoProfileController
-from morango.sync.syncsession import BaseSyncClient
+from morango.sync.syncsession import TransferClient
 
 
 class FacilityFactory(factory.DjangoModelFactory):
@@ -75,7 +75,7 @@ def create_dummy_store_data():
 
     # create controllers for app/store/buffer operations
     data["mc"] = MorangoProfileController("facilitydata")
-    data["sc"] = BaseSyncClient(None, "host")
+    data["sc"] = TransferClient(None, "host")
     session = SyncSession.objects.create(
         id=uuid.uuid4().hex,
         profile="facilitydata",

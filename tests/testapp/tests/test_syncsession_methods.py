@@ -23,7 +23,7 @@ from morango.sync.backends.utils import load_backend
 from morango.sync.controller import MorangoProfileController
 from morango.sync.operations import _dequeue_into_store
 from morango.sync.operations import _queue_into_buffer
-from morango.sync.syncsession import BaseSyncClient
+from morango.sync.syncsession import TransferClient
 from morango.sync.syncsession import SyncClientSignals
 from morango.sync.syncsession import SyncSignal
 from morango.sync.syncsession import SyncSignalGroup
@@ -153,7 +153,7 @@ class BufferIntoStoreTestCase(TestCase):
 
         # create controllers for app/store/buffer operations
         self.data["mc"] = MorangoProfileController("facilitydata")
-        self.data["sc"] = BaseSyncClient(None, "host")
+        self.data["sc"] = TransferClient(None, "host")
         session = SyncSession.objects.create(
             id=uuid.uuid4().hex, profile="", last_activity_timestamp=timezone.now()
         )

@@ -5,6 +5,8 @@ from requests.sessions import Session
 from requests.utils import super_len
 from requests.packages.urllib3.util.url import parse_url
 
+from morango.utils import serialize_capabilities_to_client_request
+
 
 logger = logging.getLogger(__name__)
 
@@ -66,9 +68,11 @@ class SessionWrapper(Session):
         Override request preparer so we can get the prepared content length, for tracking
         transfer sizes
 
-        :param request: requests.Request
+        :type request: requests.Request
         :rtype: requests.PreparedRequest
         """
+        # add header with client's morango capabilities so server has that information
+        serialize_capabilities_to_client_request(request)
         prepped = super(SessionWrapper, self).prepare_request(request)
         parsed_url = parse_url(request.url)
 

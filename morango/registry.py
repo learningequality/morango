@@ -4,13 +4,16 @@ This class is registered at app load time for morango in `apps.py`.
 """
 import sys
 from collections import OrderedDict
+from importlib import import_module
 
 from django.db.models.fields.related import ForeignKey
 from django.utils import six
 
+from morango.constants import transfer_stage
 from morango.errors import InvalidMorangoModelConfiguration
 from morango.errors import ModelRegistryNotReady
 from morango.errors import UnsupportedFieldType
+from morango.utils import SETTINGS
 
 
 def _get_foreign_key_classes(m):
@@ -185,3 +188,67 @@ class SyncableModelRegistry(object):
 
 
 syncable_models = SyncableModelRegistry()
+
+
+class SessionMiddlewareOperations(list):
+    """
+    Iterable list class that holds and initializes a list of transfer operations as configured
+    through Morango settings, and associate the group with a transfer stage by `related_stage`
+    """
+    __slots__ = ('related_stage',)
+
+    def __init__(self, related_stage):
+        super(SessionMiddlewareOperations, self).__init__()
+        self.related_stage = related_stage
+
+    def populate(self, operation_classes):
+        """
+        Middleware operations are executed in the same order that they're populated,
+        through settings, so order is important!
+
+        :param operation_classes: A list of strings referencing `BaseOperation` classes
+        :type operation_classes: str[]
+        """
+        for op_cls in operation_classes:
+            TransferOperation = import_module(op_cls)
+            self.append(TransferOperation())
+
+    def __call__(self, context):
+        # As middleware list, we expect that one of the operations should handle the request context
+        # so executing the middleware loops through each of the operations and executes them until
+        # a non-false value is returned. At least one of the operations must "handle" it by
+        # returning the non-false value, otherwise the middleware has failed to handle the operation
+        # for the related transfer stage
+        for operation in self:
+            result = operation(context)
+            # operation tells us it has "handled" the context by returning result that is not False
+            if result is not False:
+                return result
+        else:
+            raise NotImplementedError(
+                "Operation for {} stage has no middleware".format(self.related_stage)
+            )
+
+
+STAGE_TO_SETTINGS = {
+    transfer_stage.INITIALIZING: "MORANGO_INITIALIZE_OPERATIONS",
+    transfer_stage.SERIALIZING: "MORANGO_SERIALIZE_OPERATIONS",
+    transfer_stage.QUEUING: "MORANGO_QUEUE_OPERATIONS",
+    transfer_stage.DEQUEUING: "MORANGO_DEQUEUE_OPERATIONS",
+    transfer_stage.DESERIALIZING: "MORANGO_DESERIALIZE_OPERATIONS",
+    transfer_stage.CLEANUP: "MORANGO_CLEANUP_OPERATIONS",
+}
+
+
+class SessionMiddlewareRegistry(list):
+    """Middleware registry is a list of middleware configurable through settings"""
+
+    def populate(self):
+        sorted_stage_map = sorted(STAGE_TO_SETTINGS.items(), key=lambda s: transfer_stage.precedence(s[0]))
+        for stage, setting in sorted_stage_map:
+            transfer_middleware = SessionMiddlewareOperations(stage)
+            transfer_middleware.populate(getattr(SETTINGS, setting))
+            self.append(transfer_middleware)
+
+
+session_middleware = SessionMiddlewareRegistry()

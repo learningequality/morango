@@ -3,29 +3,31 @@ This module contains constants representing the possible stages of a transfer se
 """
 from django.utils.translation import ugettext_lazy as _
 
+INITIALIZING = "initializing"
 SERIALIZING = "serializing"
 QUEUING = "queuing"
 DEQUEUING = "dequeuing"
 DESERIALIZING = "deserializing"
-PUSHING = "pushing"
-PULLING = "pulling"
+TRANSFERRING = "transferring"
+CLEANUP = "cleanup"
 
 CHOICES = (
+    (INITIALIZING, _("Initializing")),
     (SERIALIZING, _("Serializing")),
     (QUEUING, _("Queuing")),
+    (TRANSFERRING, _("Transferring")),
     (DEQUEUING, _("Dequeuing")),
     (DESERIALIZING, _("Deserializing")),
-    (PUSHING, _("Pushing")),
-    (PULLING, _("Pulling")),
+    (CLEANUP, _("Cleanup")),
 )
 
 PRECEDENCE = {
     SERIALIZING: 1,
     QUEUING: 2,
-    PULLING: 3,
-    PUSHING: 3,
+    TRANSFERRING: 3,
     DEQUEUING: 4,
     DESERIALIZING: 5,
+    CLEANUP: 6,
 }
 
 

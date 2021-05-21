@@ -14,3 +14,13 @@ CHOICES = (
     (COMPLETED, _("Completed")),
     (ERRORED, _("Errored")),
 )
+
+IN_PROGRESS_STATES = (
+    PENDING,
+    STARTED,
+)
+
+FINISHED_STATES = (
+    COMPLETED,
+    ERRORED
+)

@@ -231,7 +231,7 @@ class SyncSession(models.Model):
 
 class TransferSession(models.Model):
     """
-    ``TransferSession`` holds metatada that is related to a specific transfer (push/pull) session
+    ``TransferSession`` holds metadata that is related to a specific transfer (push/pull) session
     between 2 morango instances.
     """
 
@@ -268,8 +268,25 @@ class TransferSession(models.Model):
         max_length=20, choices=transfer_status.CHOICES, blank=True
     )
 
+    @property
+    def pull(self):
+        """Getter for `not push` condition, which adds complexity in conditional statements"""
+        return not self.push
+
     def get_filter(self):
         return Filter(self.filter)
+
+    def update_state(self, stage=None, stage_status=None):
+        """
+        :type stage: morango.constants.transfer_stage.*|None
+        :type stage_status: morango.constants.transfer_status.*|None
+        """
+        if stage is not None:
+            self.transfer_stage = stage
+        if stage_status is not None:
+            self.transfer_stage_status = stage_status
+        if stage is not None or stage_status is not None:
+            self.save()
 
 
 class DeletedModels(models.Model):
