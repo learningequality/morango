@@ -12,7 +12,6 @@ from morango.sync.context import NetworkSessionContext
 from morango.sync.operations import _deserialize_from_store
 from morango.sync.operations import _serialize_into_store
 from morango.sync.operations import OperationLogger
-from morango.sync.syncsession import NetworkSyncConnection
 
 
 logger = logging.getLogger(__name__)
@@ -51,6 +50,7 @@ class MorangoProfileController(object):
             _deserialize_from_store(self.profile, filter=filter, skip_erroring=skip_erroring)
 
     def create_network_connection(self, base_url):
+        from morango.sync.syncsession import NetworkSyncConnection
         return NetworkSyncConnection(base_url=base_url)
 
     def create_disk_connection(path):
@@ -101,7 +101,7 @@ class SessionController(object):
         Factory method that instantiates the `SessionController` with a `NetworkSessionContext`
         containing the arguments, and the global middleware registry `session_middleware`
 
-        :type connection: NetworkSyncConnection
+        :type connection: morango.sync.syncsession.NetworkSyncConnection
         :type sync_session: SyncSession|None
         :type transfer_session: TransferSession|None
         :return: A new transfer controller
@@ -151,8 +151,14 @@ class SessionController(object):
         result = False
         # inside "session_middleware"
         for middleware in self.middleware:
+            # break when we find middleware beyond proceed-to stage
+            if transfer_stage.stage(middleware.related_stage) > stage:
+                break
             # execute middleware, up to and including the requested stage
-            if transfer_stage.stage(middleware.related_stage) <= stage:
+            elif (
+                transfer_stage.stage(middleware.related_stage) > current_stage
+                or self.context.stage_status == transfer_status.PENDING
+            ):
                 # if the result is not completed status, then break because that means we can't
                 # proceed to the next stage (yet)
                 result = self._invoke_middleware(middleware)

@@ -48,13 +48,13 @@ class stage(str):
     """
 
     def __gt__(self, other):
-        return precedence(self) < precedence(other)
-
-    def __ge__(self, other):
-        return precedence(self) <= precedence(other)
-
-    def __lt__(self, other):
         return precedence(self) > precedence(other)
 
-    def __le__(self, other):
+    def __ge__(self, other):
         return precedence(self) >= precedence(other)
+
+    def __lt__(self, other):
+        return precedence(self) < precedence(other)
+
+    def __le__(self, other):
+        return precedence(self) <= precedence(other)

@@ -1,8 +1,10 @@
 import json
 import uuid
+import contextlib
 
 import factory
 import mock
+from django.test import SimpleTestCase
 from django.test import TestCase
 from facility_profile.models import Facility
 from facility_profile.models import MyUser
@@ -10,14 +12,18 @@ from facility_profile.models import SummaryLog
 from test.support import EnvironmentVarGuard
 
 from .helpers import serialized_facility_factory
+from morango.constants import transfer_stage
+from morango.constants import transfer_status
 from morango.models.certificates import Filter
 from morango.models.core import DeletedModels
 from morango.models.core import HardDeletedModels
 from morango.models.core import InstanceIDModel
 from morango.models.core import RecordMaxCounter
 from morango.models.core import Store
+from morango.sync.context import SessionContext
 from morango.sync.controller import _self_referential_fk
 from morango.sync.controller import MorangoProfileController
+from morango.sync.controller import SessionController
 
 
 class FacilityModelFactory(factory.DjangoModelFactory):
@@ -627,3 +633,55 @@ class SelfReferentialFKDeserializationTestCase(TestCase):
         new_log.refresh_from_db()
         self.assertTrue(new_log.dirty_bit)
         self.assertIn("exist", new_log.deserialization_error)
+
+
+class SessionControllerTestCase(SimpleTestCase):
+    def setUp(self):
+        super(SessionControllerTestCase, self).setUp()
+        self.middleware = [
+            mock.Mock(related_stage=stage)
+            for stage, _ in transfer_stage.CHOICES
+        ]
+        self.context = SessionContext()
+        self.controller = SessionController(self.middleware, self.context, False)
+
+    @contextlib.contextmanager
+    def _mock_invoke(self):
+        with mock.patch('morango.sync.controller.SessionController._invoke_middleware') as invoke:
+            yield invoke
+
+    def test_proceed_to__passed_stage(self):
+        self.context.update(stage=transfer_stage.CLEANUP)
+        result = self.controller.proceed_to(transfer_stage.TRANSFERRING)
+        self.assertEqual(transfer_status.COMPLETED, result)
+
+    def test_proceed_to__in_progress(self):
+        self.context.update(stage=transfer_stage.TRANSFERRING, stage_status=transfer_status.STARTED)
+        result = self.controller.proceed_to(transfer_stage.TRANSFERRING)
+        self.assertEqual(transfer_status.STARTED, result)
+
+    def test_proceed_to__errored(self):
+        self.context.update(stage=transfer_stage.TRANSFERRING, stage_status=transfer_status.ERRORED)
+        result = self.controller.proceed_to(transfer_stage.TRANSFERRING)
+        self.assertEqual(transfer_status.ERRORED, result)
+
+    def test_proceed_to__executes_middleware__incrementally(self):
+        self.context.update(stage=transfer_stage.SERIALIZING, stage_status=transfer_status.COMPLETED)
+        with self._mock_invoke() as invoke:
+            invoke.return_value = transfer_status.STARTED
+            result = self.controller.proceed_to(transfer_stage.QUEUING)
+            self.assertEqual(transfer_status.STARTED, result)
+            self.assertEqual(1, len(invoke.call_args_list))
+            call = invoke.call_args[0]
+            self.assertEqual(transfer_stage.QUEUING, call[0].related_stage)
+
+    def test_proceed_to__executes_middleware__all(self):
+        self.context.update(stage=transfer_stage.SERIALIZING, stage_status=transfer_status.COMPLETED)
+        with self._mock_invoke() as invoke:
+            invoke.return_value = transfer_status.COMPLETED
+            result = self.controller.proceed_to(transfer_stage.CLEANUP)
+            self.assertEqual(transfer_status.COMPLETED, result)
+            self.assertEqual(5, len(invoke.call_args_list))
+
+    def test_invoke_middleware(self):
+        pass
