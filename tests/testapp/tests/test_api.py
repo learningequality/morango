@@ -14,6 +14,8 @@ from test.support import EnvironmentVarGuard
 from morango.api.serializers import BufferSerializer
 from morango.api.serializers import CertificateSerializer
 from morango.api.serializers import InstanceIDSerializer
+from morango.constants import transfer_stage
+from morango.constants import transfer_status
 from morango.models.certificates import Certificate
 from morango.models.certificates import Key
 from morango.models.certificates import Nonce
@@ -648,6 +650,7 @@ class TransferSessionEndpointTestCase(CertificateTestCaseMixin, APITestCase):
         self.test_transfersession_can_be_created()
 
         transfersession = TransferSession.objects.get()
+        transfersession.update_state(stage=transfer_stage.DESERIALIZING, stage_status=transfer_status.COMPLETED)
         self.assertEqual(transfersession.active, True)
 
         self._delete_transfer_session(transfersession)
@@ -658,7 +661,7 @@ class TransferSessionEndpointTestCase(CertificateTestCaseMixin, APITestCase):
 
         transfersession = TransferSession.objects.get()
         transfersession.records_total = None
-        transfersession.save()
+        transfersession.update_state(stage=transfer_stage.DESERIALIZING, stage_status=transfer_status.COMPLETED)
 
         self._delete_transfer_session(transfersession)
 

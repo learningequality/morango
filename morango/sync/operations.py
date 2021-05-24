@@ -680,13 +680,10 @@ class LocalCleanupOperation(LocalOperation):
         """
         assert context.transfer_session
 
-        # if in the context of a request, we know we're acting as the server, so we can ensure
-        # we only trigger deserialize if we were pushed to
-        if context.transfer_session.push == context.is_server:
-            return transfer_status.COMPLETED
+        if context.transfer_session.push != context.is_server:
+            Buffer.objects.filter(transfer_session=context.transfer_session).delete()
+            RecordMaxCounterBuffer.objects.filter(transfer_session=context.transfer_session).delete()
 
-        Buffer.objects.filter(transfer_session=context.transfer_session).delete()
-        RecordMaxCounterBuffer.objects.filter(transfer_session=context.transfer_session).delete()
         context.transfer_session.active = False
         context.transfer_session.save()
         return transfer_status.COMPLETED

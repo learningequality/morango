@@ -1,3 +1,5 @@
+from morango.constants import transfer_stage
+from morango.constants import transfer_status
 from morango.models.core import SyncSession
 from morango.models.core import TransferSession
 from morango.utils import parse_capabilities_from_server_request
@@ -12,24 +14,23 @@ class SessionContext(object):
         'sync_session', 'transfer_session', 'stage', 'stage_status', 'capabilities'
     )
 
-    def __init__(self, sync_session=None, transfer_session=None, stage=None, stage_status=None, capabilities=None):
+    def __init__(self, sync_session=None, transfer_session=None, capabilities=None):
         """
         :param sync_session: The sync session instance
         :type sync_session: SyncSession|None
         :param transfer_session: The current transfer session that will be operated against
         :type transfer_session: TransferSession|None
-        :param stage: Independent class property for the current stage of the session
-        :type stage: str|None
-        :type stage_status: str|None
-        :param stage_status: Independent class property for the current stage status of the session
         :param capabilities: Capabilities set that is combined (union) against our own capabilities
         :type capabilities: set|None
         """
         self.sync_session = sync_session
         self.transfer_session = transfer_session
-        self.stage = stage
-        self.stage_status = stage_status
+        self.stage = transfer_stage.INITIALIZING
+        self.stage_status = transfer_status.PENDING
         self.capabilities = set(capabilities or []) & CAPABILITIES
+        if self.transfer_session:
+            self.stage = transfer_session.transfer_stage or self.stage
+            self.stage_status = transfer_session.transfer_stage_status or self.stage_status
 
     def update(self, transfer_session=None, stage=None, stage_status=None, capabilities=None):
         """
