@@ -646,8 +646,8 @@ class SessionControllerTestCase(SimpleTestCase):
         self.controller = SessionController(self.middleware, self.context, False)
 
     @contextlib.contextmanager
-    def _mock_invoke(self):
-        with mock.patch('morango.sync.controller.SessionController._invoke_middleware') as invoke:
+    def _mock_method(self, method):
+        with mock.patch('morango.sync.controller.SessionController.{}'.format(method)) as invoke:
             yield invoke
 
     def test_proceed_to__passed_stage(self):
@@ -667,7 +667,7 @@ class SessionControllerTestCase(SimpleTestCase):
 
     def test_proceed_to__executes_middleware__incrementally(self):
         self.context.update(stage=transfer_stage.SERIALIZING, stage_status=transfer_status.COMPLETED)
-        with self._mock_invoke() as invoke:
+        with self._mock_method('_invoke_middleware') as invoke:
             invoke.return_value = transfer_status.STARTED
             result = self.controller.proceed_to(transfer_stage.QUEUING)
             self.assertEqual(transfer_status.STARTED, result)
@@ -677,11 +677,46 @@ class SessionControllerTestCase(SimpleTestCase):
 
     def test_proceed_to__executes_middleware__all(self):
         self.context.update(stage=transfer_stage.SERIALIZING, stage_status=transfer_status.COMPLETED)
-        with self._mock_invoke() as invoke:
+        with self._mock_method('_invoke_middleware') as invoke:
             invoke.return_value = transfer_status.COMPLETED
             result = self.controller.proceed_to(transfer_stage.CLEANUP)
             self.assertEqual(transfer_status.COMPLETED, result)
             self.assertEqual(5, len(invoke.call_args_list))
 
+    def test_proceed_to_and_wait_for(self):
+        with self._mock_method('proceed_to') as proceed_to:
+            proceed_to.side_effect = [
+                transfer_status.PENDING,
+                transfer_status.PENDING,
+                transfer_status.COMPLETED
+            ]
+            result = self.controller.proceed_to_and_wait_for(transfer_stage.CLEANUP, interval=0.1)
+            self.assertEqual(result, transfer_status.COMPLETED)
+
+    def test_proceed_to_and_wait_for__errored(self):
+        with self._mock_method('proceed_to') as proceed_to:
+            proceed_to.side_effect = [
+                transfer_status.PENDING,
+                transfer_status.ERRORED
+            ]
+            result = self.controller.proceed_to_and_wait_for(transfer_stage.CLEANUP, interval=0.1)
+            self.assertEqual(result, transfer_status.ERRORED)
+
     def test_invoke_middleware(self):
-        pass
+        self.controller.context = mock.Mock(spec=SessionContext)
+        with self._mock_method('_log_invocation') as log:
+            middleware = self.middleware[0]
+            middleware.return_value = transfer_status.STARTED
+            result = self.controller._invoke_middleware(middleware)
+            self.assertEqual(result, transfer_status.STARTED)
+
+            context_update_calls = self.controller.context.update.call_args_list
+            self.assertEqual(2, len(context_update_calls))
+            self.assertEqual(mock.call(stage=middleware.related_stage, stage_status=transfer_status.PENDING), context_update_calls[0])
+            self.assertEqual(mock.call(stage_status=transfer_status.STARTED), context_update_calls[1])
+
+            self.assertEqual(2, len(log.call_args_list))
+            self.assertEqual(mock.call(middleware.related_stage), log.call_args_list[0])
+            self.assertEqual(mock.call(middleware.related_stage, result=transfer_status.STARTED), log.call_args_list[1])
+
+

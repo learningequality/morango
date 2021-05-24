@@ -219,7 +219,7 @@ class SessionController(object):
         try:
             self.context.update(stage=stage, stage_status=transfer_status.PENDING)
             result = middleware(self.context)
-            self._log_invocation(stage, result)
+            self._log_invocation(stage, result=result)
             self.context.update(stage_status=result)
             return result
         except Exception as e:
