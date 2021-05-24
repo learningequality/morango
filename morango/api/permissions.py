@@ -1,6 +1,5 @@
 import json
 
-from django.conf import settings
 from django.contrib.auth import authenticate
 from django.contrib.auth import get_user_model
 from rest_framework import authentication
@@ -8,6 +7,7 @@ from rest_framework import exceptions
 from rest_framework import permissions
 
 from morango.models.core import TransferSession
+from morango.utils import SETTINGS
 
 
 class BasicMultiArgumentAuthentication(authentication.BasicAuthentication):
@@ -78,7 +78,7 @@ class CertificatePushPermissions(permissions.BasePermission):
     message = "Server does not allow certificate pushing."
 
     def has_permission(self, request, view):
-        if getattr(settings, "ALLOW_CERTIFICATE_PUSHING", False):
+        if SETTINGS.ALLOW_CERTIFICATE_PUSHING:
             return True
         return False
 

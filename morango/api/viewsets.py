@@ -3,7 +3,6 @@ import platform
 import uuid
 
 from django.core.exceptions import ValidationError
-from django.core.exceptions import
 from django.utils import timezone
 from ipware.ip import get_ip
 from rest_framework import mixins
@@ -24,9 +23,7 @@ from morango.constants.capabilities import GZIP_BUFFER_POST
 from morango.models import certificates
 from morango.models.core import Buffer
 from morango.models.core import Certificate
-from morango.models.core import DatabaseMaxCounter
 from morango.models.core import InstanceIDModel
-from morango.models.core import RecordMaxCounterBuffer
 from morango.models.core import SyncSession
 from morango.models.core import TransferSession
 from morango.models.fields.crypto import SharedKey

@@ -201,16 +201,17 @@ class SessionMiddlewareOperations(list):
         super(SessionMiddlewareOperations, self).__init__()
         self.related_stage = related_stage
 
-    def populate(self, operation_classes):
+    def populate(self, operation_cls_imports):
         """
         Middleware operations are executed in the same order that they're populated,
         through settings, so order is important!
 
-        :param operation_classes: A list of strings referencing `BaseOperation` classes
-        :type operation_classes: str[]
+        :param operation_cls_imports: A list of strings referencing `BaseOperation` classes
+        :type operation_cls_imports: str[]
         """
-        for op_cls in operation_classes:
-            TransferOperation = import_module(op_cls)
+        for operation_cls_import in operation_cls_imports:
+            operation_module, operation_cls = operation_cls_import.rsplit(":", 1)
+            TransferOperation = getattr(import_module(operation_module), operation_cls)
             self.append(TransferOperation())
 
     def __call__(self, context):

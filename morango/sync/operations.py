@@ -2,7 +2,6 @@ import functools
 import json
 import logging
 
-from django.conf import settings
 from django.core import exceptions
 from django.core.serializers.json import DjangoJSONEncoder
 from django.db import connection
@@ -27,9 +26,10 @@ from morango.models.core import RecordMaxCounterBuffer
 from morango.models.core import Store
 from morango.registry import syncable_models
 from morango.sync.backends.utils import load_backend
-from morango.sync.controller import LocalSessionContext
-from morango.sync.controller import NetworkSessionContext
+from morango.sync.context import LocalSessionContext
+from morango.sync.context import NetworkSessionContext
 from morango.sync.utils import mute_signals
+from morango.utils import SETTINGS
 
 
 logger = logging.getLogger(__name__)
@@ -503,14 +503,6 @@ def _dequeue_into_store(transfersession):
         DBBackend._dequeuing_insert_remaining_rmcb(cursor, transfersession.id)
         DBBackend._dequeuing_delete_remaining_rmcb(cursor, transfersession.id)
         DBBackend._dequeuing_delete_remaining_buffer(cursor, transfersession.id)
-    if getattr(settings, "MORANGO_DESERIALIZE_AFTER_DEQUEUING", True):
-        # we first serialize to avoid deserialization merge conflicts
-        filter = transfersession.get_filter()
-        _serialize_into_store(transfersession.sync_session.profile, filter=filter)
-        _deserialize_from_store(transfersession.sync_session.profile, filter=filter)
-
-
-MIDDLEWARE_SUPPORT_VERSION = "0.6.0"
 
 
 class BaseOperation(object):
@@ -571,7 +563,7 @@ class LocalSerializeOperation(LocalOperation):
         if context.transfer_session.push == context.is_server:
             return transfer_status.COMPLETED
 
-        if getattr(settings, "MORANGO_SERIALIZE_BEFORE_QUEUING", True):
+        if SETTINGS.MORANGO_SERIALIZE_BEFORE_QUEUING:
             _serialize_into_store(
                 context.sync_session.profile,
                 filter=context.filter,
@@ -665,7 +657,7 @@ class LocalDeserializeOperation(LocalOperation):
         if context.transfer_session.pull == context.is_server:
             return transfer_status.COMPLETED
 
-        if getattr(settings, "MORANGO_DESERIALIZE_AFTER_DEQUEUING", True):
+        if SETTINGS.MORANGO_DESERIALIZE_AFTER_DEQUEUING:
             # we first serialize to avoid deserialization merge conflicts
             _serialize_into_store(
                 context.sync_session.profile,
@@ -875,6 +867,10 @@ class RemoteDeserializeOperation(RemoteNetworkOperation):
 
         remote_status, _ = self.remote_proceed_to(context, transfer_stage.DESERIALIZING)
         return remote_status
+
+
+class RemoteSynchronousCleanupOperation(RemoteSynchronousNoOpMixin, RemoteNetworkOperation):
+    pass
 
 
 class RemoteCleanupOperation(RemoteNetworkOperation):
