@@ -515,10 +515,14 @@ class BaseOperation(object):
         """
         try:
             # verify context object matches what the operation expects
-            assert self.expects_context is None or isinstance(context, self.expects_context)
+            assert self.expects_context is None or isinstance(
+                context, self.expects_context
+            )
             result = self.handle(context)
             if result is None:
-                raise NotImplementedError("Transfer operation must return False, or a transfer status")
+                raise NotImplementedError(
+                    "Transfer operation must return False, or a transfer status"
+                )
             return result
         except AssertionError:
             # if the operation raises an AssertionError, we equate that to returning False, which
@@ -632,9 +636,11 @@ class LocalDequeueOperation(LocalOperation):
         _dequeue_into_store(context.transfer_session)
 
         # depends on whether it was a push or not
-        fsic = context.transfer_session.client_fsic \
-            if context.is_server \
+        fsic = (
+            context.transfer_session.client_fsic
+            if context.is_server
             else context.transfer_session.server_fsic
+        )
 
         # update database max counters but use latest fsics on client
         DatabaseMaxCounter.update_fsics(json.loads(fsic), context.filter)
@@ -682,7 +688,9 @@ class LocalCleanupOperation(LocalOperation):
 
         if context.transfer_session.push != context.is_server:
             Buffer.objects.filter(transfer_session=context.transfer_session).delete()
-            RecordMaxCounterBuffer.objects.filter(transfer_session=context.transfer_session).delete()
+            RecordMaxCounterBuffer.objects.filter(
+                transfer_session=context.transfer_session
+            ).delete()
 
         context.transfer_session.active = False
         context.transfer_session.save()
@@ -707,10 +715,14 @@ class RemoteNetworkOperation(BaseOperation):
         return context.connection._get_transfer_session(context.transfer_session).json()
 
     def update_transfer_session(self, context, **data):
-        return context.connection._update_transfer_session(data, context.transfer_session).json()
+        return context.connection._update_transfer_session(
+            data, context.transfer_session
+        ).json()
 
     def close_transfer_session(self, context):
-        return context.connection._close_transfer_session(context.transfer_session).json()
+        return context.connection._close_transfer_session(
+            context.transfer_session
+        ).json()
 
     def remote_proceed_to(self, context, stage):
         """
@@ -752,7 +764,9 @@ class RemoteSynchronousInitializeOperation(RemoteNetworkOperation):
 
         # if local stage is transferring or beyond, we definitely don't need to initialize
         local_stage = context.stage
-        if transfer_stage.stage(local_stage) >= transfer_stage.stage(transfer_stage.TRANSFERRING):
+        if transfer_stage.stage(local_stage) >= transfer_stage.stage(
+            transfer_stage.TRANSFERRING
+        ):
             return transfer_status.COMPLETED
 
         data = self.create_transfer_session(context)
@@ -765,7 +779,9 @@ class RemoteSynchronousInitializeOperation(RemoteNetworkOperation):
 
         # force update to COMPLETE QUEUED since obsolete handling serializes and queues during
         # the creation of the transfer session
-        context.update(stage=transfer_stage.QUEUING, stage_status=transfer_status.COMPLETED)
+        context.update(
+            stage=transfer_stage.QUEUING, stage_status=transfer_status.COMPLETED
+        )
         return transfer_status.COMPLETED
 
 
@@ -778,7 +794,9 @@ class RemoteInitializeOperation(RemoteNetworkOperation):
         assert ASYNC_OPERATIONS in context.capabilities
 
         # if local stage is transferring or beyond, we definitely don't need to initialize
-        if transfer_stage.stage(context.stage) < transfer_stage.stage(transfer_stage.TRANSFERRING):
+        if transfer_stage.stage(context.stage) < transfer_stage.stage(
+            transfer_stage.TRANSFERRING
+        ):
             self.create_transfer_session(context)
 
         return transfer_status.COMPLETED
@@ -793,7 +811,9 @@ class RemoteSynchronousNoOpMixin(object):
         return transfer_status.COMPLETED
 
 
-class RemoteSynchronousSerializeOperation(RemoteSynchronousNoOpMixin, RemoteNetworkOperation):
+class RemoteSynchronousSerializeOperation(
+    RemoteSynchronousNoOpMixin, RemoteNetworkOperation
+):
     pass
 
 
@@ -805,7 +825,9 @@ class RemoteSerializeOperation(RemoteNetworkOperation):
         assert context.transfer_session is not None
         assert ASYNC_OPERATIONS in context.capabilities
 
-        remote_status, data = self.remote_proceed_to(context, transfer_stage.SERIALIZING)
+        remote_status, data = self.remote_proceed_to(
+            context, transfer_stage.SERIALIZING
+        )
 
         if remote_status == transfer_status.COMPLETED:
             context.transfer_session.server_fsic = data.get("server_fsic") or "{}"
@@ -814,7 +836,9 @@ class RemoteSerializeOperation(RemoteNetworkOperation):
         return remote_status
 
 
-class RemoteSynchronousQueueOperation(RemoteSynchronousNoOpMixin, RemoteNetworkOperation):
+class RemoteSynchronousQueueOperation(
+    RemoteSynchronousNoOpMixin, RemoteNetworkOperation
+):
     pass
 
 
@@ -835,7 +859,9 @@ class RemoteQueueOperation(RemoteNetworkOperation):
         return remote_status
 
 
-class RemoteSynchronousDequeueOperation(RemoteSynchronousNoOpMixin, RemoteNetworkOperation):
+class RemoteSynchronousDequeueOperation(
+    RemoteSynchronousNoOpMixin, RemoteNetworkOperation
+):
     pass
 
 
@@ -850,7 +876,9 @@ class RemoteDequeueOperation(RemoteNetworkOperation):
         return remote_status
 
 
-class RemoteSynchronousDeserializeOperation(RemoteSynchronousNoOpMixin, RemoteNetworkOperation):
+class RemoteSynchronousDeserializeOperation(
+    RemoteSynchronousNoOpMixin, RemoteNetworkOperation
+):
     pass
 
 
@@ -872,4 +900,3 @@ class RemoteCleanupOperation(RemoteNetworkOperation):
         :type context: NetworkSessionContext
         """
         self.close_transfer_session(context)
-

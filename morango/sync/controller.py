@@ -47,10 +47,13 @@ class MorangoProfileController(object):
         with OperationLogger("Deserializing records", "Deserialization complete"):
             # we first serialize to avoid deserialization merge conflicts
             _serialize_into_store(self.profile, filter=filter)
-            _deserialize_from_store(self.profile, filter=filter, skip_erroring=skip_erroring)
+            _deserialize_from_store(
+                self.profile, filter=filter, skip_erroring=skip_erroring
+            )
 
     def create_network_connection(self, base_url):
         from morango.sync.syncsession import NetworkSyncConnection
+
         return NetworkSyncConnection(base_url=base_url)
 
     def create_disk_connection(path):
@@ -63,7 +66,8 @@ class SessionController(object):
     but does so through the middleware registry, through which allows customization of how
     those transfer stage operations are handled
     """
-    __slots__ = ('middleware', 'context', 'logging_enabled')
+
+    __slots__ = ("middleware", "context", "logging_enabled")
 
     def __init__(self, middleware, context, enable_logging):
         """
@@ -76,7 +80,13 @@ class SessionController(object):
         self.logging_enabled = enable_logging
 
     @classmethod
-    def build_local(cls, request=None, sync_session=None, transfer_session=None, enable_logging=False):
+    def build_local(
+        cls,
+        request=None,
+        sync_session=None,
+        transfer_session=None,
+        enable_logging=False,
+    ):
         """
         Factory method that instantiates the `SessionController` with a `LocalSessionContext`
         containing the arguments, and the global middleware registry `session_middleware`
@@ -91,7 +101,7 @@ class SessionController(object):
         context = LocalSessionContext(
             request=request,
             sync_session=sync_session,
-            transfer_session=transfer_session
+            transfer_session=transfer_session,
         )
         return SessionController(session_middleware, context, enable_logging)
 
@@ -145,7 +155,10 @@ class SessionController(object):
             return transfer_status.COMPLETED
 
         # See comments above, any of these statuses mean a no-op for proceeding
-        if self.context.stage_status in (transfer_status.STARTED, transfer_status.ERRORED):
+        if self.context.stage_status in (
+            transfer_status.STARTED,
+            transfer_status.ERRORED,
+        ):
             return self.context.stage_status
 
         result = False
@@ -228,4 +241,3 @@ class SessionController(object):
             self._log_invocation(stage, result=transfer_status.ERRORED)
             self.context.update(stage_status=transfer_status.ERRORED)
             return transfer_status.ERRORED
-

@@ -360,7 +360,9 @@ class NetworkSyncConnection(Connection):
         return self.session.post(self.urlresolve(api_urls.TRANSFERSESSION), json=data)
 
     def _get_transfer_session(self, transfer_session):
-        return self.session.get(self.urlresolve(api_urls.TRANSFERSESSION, lookup=transfer_session.id))
+        return self.session.get(
+            self.urlresolve(api_urls.TRANSFERSESSION, lookup=transfer_session.id)
+        )
 
     def _update_transfer_session(self, data, transfer_session):
         return self.session.patch(
@@ -421,10 +423,10 @@ class SyncClientSignals(SyncSignal):
 
 class SyncSessionClient(object):
     __slots__ = (
-        'sync_connection',
-        'sync_session',
-        'chunk_size',
-        'signals',
+        "sync_connection",
+        "sync_session",
+        "chunk_size",
+        "signals",
     )
 
     def __init__(self, sync_connection, sync_session, chunk_size=500):
@@ -489,13 +491,13 @@ class TransferClient(object):
     """
 
     __slots__ = (
-        'sync_connection',
-        'sync_session',
-        'chunk_size',
-        'current_transfer_session',
-        'signals',
-        'local_controller',
-        'remote_controller',
+        "sync_connection",
+        "sync_session",
+        "chunk_size",
+        "current_transfer_session",
+        "signals",
+        "local_controller",
+        "remote_controller",
     )
 
     def __init__(self, sync_connection, sync_session, chunk_size=500):
@@ -510,7 +512,9 @@ class TransferClient(object):
         self.current_transfer_session = None
         self.signals = SyncClientSignals()
         self.local_controller = SessionController.build_local(sync_session=sync_session)
-        self.remote_controller = SessionController.build_network(sync_connection, sync_session=sync_session)
+        self.remote_controller = SessionController.build_network(
+            sync_connection, sync_session=sync_session
+        )
 
     def initialize(self, sync_filter):
         """
@@ -552,8 +556,12 @@ class TransferClient(object):
         )
 
         self.current_transfer_session = TransferSession.objects.create(**data)
-        self.local_controller.context.update(transfer_session=self.current_transfer_session)
-        self.remote_controller.context.update(transfer_session=self.current_transfer_session)
+        self.local_controller.context.update(
+            transfer_session=self.current_transfer_session
+        )
+        self.remote_controller.context.update(
+            transfer_session=self.current_transfer_session
+        )
 
         self.signals.session.started.fire(
             transfer_session=self.current_transfer_session
@@ -587,13 +595,16 @@ class PushClient(TransferClient):
         self._create_transfer_session(sync_filter, push=True)
 
         with self.signals.queuing.send(transfer_session=self.current_transfer_session):
-            result = self.local_controller.proceed_to_and_wait_for(transfer_stage.QUEUING)
+            result = self.local_controller.proceed_to_and_wait_for(
+                transfer_stage.QUEUING
+            )
 
         if result != transfer_status.COMPLETED:
             raise RuntimeError("Queuing for push failed")
 
         self.sync_connection._update_transfer_session(
-            {"records_total": self.current_transfer_session.records_total}, self.current_transfer_session
+            {"records_total": self.current_transfer_session.records_total},
+            self.current_transfer_session,
         )
 
     def run(self):

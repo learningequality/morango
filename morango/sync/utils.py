@@ -70,7 +70,9 @@ class mute_signals(object):
         return wrapper
 
 
-def validate_and_create_buffer_data(data, transfer_session, connection=None):  # noqa: C901
+def validate_and_create_buffer_data(
+    data, transfer_session, connection=None
+):  # noqa: C901
     data = copy.deepcopy(data)
     rmcb_list = []
     buffer_list = []

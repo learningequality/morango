@@ -10,8 +10,13 @@ class SessionContext(object):
     """
     Class that holds the context of a transfer, for executing transfer ops through the middleware
     """
+
     __slots__ = (
-        'sync_session', 'transfer_session', 'stage', 'stage_status', 'capabilities'
+        "sync_session",
+        "transfer_session",
+        "stage",
+        "stage_status",
+        "capabilities",
     )
 
     def __init__(self, sync_session=None, transfer_session=None, capabilities=None):
@@ -30,9 +35,13 @@ class SessionContext(object):
         self.capabilities = set(capabilities or []) & CAPABILITIES
         if self.transfer_session:
             self.stage = transfer_session.transfer_stage or self.stage
-            self.stage_status = transfer_session.transfer_stage_status or self.stage_status
+            self.stage_status = (
+                transfer_session.transfer_stage_status or self.stage_status
+            )
 
-    def update(self, transfer_session=None, stage=None, stage_status=None, capabilities=None):
+    def update(
+        self, transfer_session=None, stage=None, stage_status=None, capabilities=None
+    ):
         """
         Updates the context
         :type transfer_session: TransferSession|None
@@ -49,7 +58,9 @@ class SessionContext(object):
         # we also `refresh_from_db` too so context has the up-to-date instance
         if self.transfer_session:
             self.transfer_session.refresh_from_db()
-            self.transfer_session.update_state(stage=self.stage, stage_status=self.stage_status)
+            self.transfer_session.update_state(
+                stage=self.stage, stage_status=self.stage_status
+            )
 
     @property
     def filter(self):
@@ -59,7 +70,9 @@ class SessionContext(object):
         """Return dict of simplified data for serialization"""
         return dict(
             sync_session_id=self.sync_session.id if self.sync_session else None,
-            transfer_session_id=self.transfer_session.id if self.transfer_session else None,
+            transfer_session_id=self.transfer_session.id
+            if self.transfer_session
+            else None,
             stage=self.stage,
             stage_status=self.stage_status,
             capabilities=self.capabilities,
@@ -86,9 +99,10 @@ class LocalSessionContext(SessionContext):
     """
     Class that holds the context for operating on a transfer locally
     """
+
     __slots__ = (
-        'request',
-        'is_server',
+        "request",
+        "is_server",
     )
 
     def __init__(self, request=None, **kwargs):
@@ -102,10 +116,7 @@ class LocalSessionContext(SessionContext):
         if request is not None:
             capabilities = parse_capabilities_from_server_request(request)
 
-        super(LocalSessionContext, self).__init__(
-            capabilities=capabilities,
-            **kwargs
-        )
+        super(LocalSessionContext, self).__init__(capabilities=capabilities, **kwargs)
         self.request = request
         self.is_server = request is not None
 
@@ -125,9 +136,10 @@ class NetworkSessionContext(SessionContext):
     """
     Class that holds the context for operating on a transfer remotely through network connection
     """
+
     __slots__ = (
-        'connection',
-        'transfer_session',
+        "connection",
+        "transfer_session",
     )
 
     def __init__(self, connection, **kwargs):

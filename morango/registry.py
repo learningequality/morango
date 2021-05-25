@@ -195,7 +195,8 @@ class SessionMiddlewareOperations(list):
     Iterable list class that holds and initializes a list of transfer operations as configured
     through Morango settings, and associate the group with a transfer stage by `related_stage`
     """
-    __slots__ = ('related_stage',)
+
+    __slots__ = ("related_stage",)
 
     def __init__(self, related_stage):
         super(SessionMiddlewareOperations, self).__init__()
@@ -245,7 +246,9 @@ class SessionMiddlewareRegistry(list):
     """Middleware registry is a list of middleware configurable through settings"""
 
     def populate(self):
-        sorted_stage_map = sorted(STAGE_TO_SETTINGS.items(), key=lambda s: transfer_stage.precedence(s[0]))
+        sorted_stage_map = sorted(
+            STAGE_TO_SETTINGS.items(), key=lambda s: transfer_stage.precedence(s[0])
+        )
         for stage, setting in sorted_stage_map:
             transfer_middleware = SessionMiddlewareOperations(stage)
             transfer_middleware.populate(getattr(SETTINGS, setting))

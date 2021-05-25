@@ -365,7 +365,9 @@ class TransferSessionViewSet(viewsets.ModelViewSet):
             response_status = status.HTTP_202_ACCEPTED
         else:
             # if not async, we wait until queuing is complete
-            controller = SessionController.build_local(request=request, transfer_session=transfersession, enable_logging=True)
+            controller = SessionController.build_local(
+                request=request, transfer_session=transfersession, enable_logging=True
+            )
             controller.proceed_to_and_wait_for(transfer_stage.QUEUING)
 
         return response.Response(
@@ -376,15 +378,16 @@ class TransferSessionViewSet(viewsets.ModelViewSet):
     def update(self, request, *args, **kwargs):
         if not kwargs.get("partial", False):
             return response.Response(
-                "Only PATCH updates allowed",
-                status=status.HTTP_405_METHOD_NOT_ALLOWED
+                "Only PATCH updates allowed", status=status.HTTP_405_METHOD_NOT_ALLOWED
             )
 
         update_stage = request.data.pop("transfer_stage", None)
         if update_stage is not None:
             # if client is trying to update `transfer_stage`, then we use the controller to proceed
             # to the stage, but wait for completion if both do not support async
-            controller = SessionController.build_local(request=request, transfer_session=self.get_object(), enable_logging=True)
+            controller = SessionController.build_local(
+                request=request, transfer_session=self.get_object(), enable_logging=True
+            )
             if self.async_allowed():
                 controller.proceed_to(update_stage)
             else:
@@ -393,7 +396,9 @@ class TransferSessionViewSet(viewsets.ModelViewSet):
         return super(TransferSessionViewSet, self).update(request, *args, **kwargs)
 
     def perform_destroy(self, transfer_session):
-        controller = SessionController.build_local(request=self.request, transfer_session=transfer_session, enable_logging=True)
+        controller = SessionController.build_local(
+            request=self.request, transfer_session=transfer_session, enable_logging=True
+        )
         if self.async_allowed():
             controller.proceed_to(transfer_stage.CLEANUP)
         else:
@@ -410,7 +415,9 @@ class TransferSessionViewSet(viewsets.ModelViewSet):
         :return: A boolean if async ops are allowed by client and self
         """
         client_capabilities = parse_capabilities_from_server_request(self.request)
-        return ASYNC_OPERATIONS in client_capabilities and ASYNC_OPERATIONS in CAPABILITIES
+        return (
+            ASYNC_OPERATIONS in client_capabilities and ASYNC_OPERATIONS in CAPABILITIES
+        )
 
 
 class BufferViewSet(mixins.ListModelMixin, viewsets.GenericViewSet):
@@ -422,9 +429,7 @@ class BufferViewSet(mixins.ListModelMixin, viewsets.GenericViewSet):
     def create(self, request):
         data = request.data if isinstance(request.data, list) else [request.data]
         # ensure the transfer session allows pushes, and is same across records
-        transfer_session = TransferSession.objects.get(
-            id=data[0]["transfer_session"]
-        )
+        transfer_session = TransferSession.objects.get(id=data[0]["transfer_session"])
         if not transfer_session.push:
             return response.Response(
                 "Specified TransferSession does not allow pushes.",

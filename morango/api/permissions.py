@@ -100,8 +100,8 @@ class SyncSessionPermissions(permissions.BasePermission):
 
         if request.method == "POST":
             return (
-                True
-            )  # we'll be doing some additional permission checks in the viewset
+                True  # we'll be doing some additional permission checks in the viewset
+            )
 
         return False
 
@@ -114,8 +114,8 @@ class TransferSessionPermissions(permissions.BasePermission):
 
         if request.method == "POST":
             return (
-                True
-            )  # we'll be doing some additional permission checks in the viewset
+                True  # we'll be doing some additional permission checks in the viewset
+            )
 
         if request.method == "PATCH":
             return True
