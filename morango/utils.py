@@ -13,9 +13,9 @@ class Settings(object):
     """
     __slots__ = [key for key in dir(default_settings) if not key.startswith('__')]
 
-    def __init__(self):
-        for key in self.__slots__:
-            setattr(self, key, getattr(settings, key, getattr(default_settings, key, None)))
+    def __getattribute__(self, key):
+        """Coalesces settings with the defaults"""
+        return getattr(settings, key, getattr(default_settings, key, None))
 
 
 SETTINGS = Settings()

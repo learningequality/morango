@@ -866,16 +866,10 @@ class RemoteDeserializeOperation(RemoteNetworkOperation):
         return remote_status
 
 
-class RemoteSynchronousCleanupOperation(RemoteSynchronousNoOpMixin, RemoteNetworkOperation):
-    pass
-
-
 class RemoteCleanupOperation(RemoteNetworkOperation):
     def handle(self, context):
         """
         :type context: NetworkSessionContext
         """
-
-        if ASYNC_OPERATIONS not in context.capabilities:
-            pass
+        self.close_transfer_session(context)
 

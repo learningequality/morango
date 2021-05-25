@@ -6,21 +6,16 @@ import logging
 import socket
 import uuid
 from io import BytesIO
-from time import sleep
 
-from django.conf import settings
 from django.core.paginator import Paginator
 from django.utils import timezone
 from django.utils.six import iteritems
 from requests.adapters import HTTPAdapter
-from requests.exceptions import Timeout
 from requests.packages.urllib3.util.retry import Retry
-from rest_framework import status
 from rest_framework.exceptions import ValidationError
 from django.utils.six.moves.urllib.parse import urljoin
 from django.utils.six.moves.urllib.parse import urlparse
 
-from .operations import _dequeue_into_store
 from .session import SessionWrapper
 from .utils import validate_and_create_buffer_data
 from morango.api.serializers import BufferSerializer
@@ -37,9 +32,7 @@ from morango.errors import MorangoServerDoesNotAllowNewCertPush
 from morango.models.certificates import Certificate
 from morango.models.certificates import Key
 from morango.models.core import Buffer
-from morango.models.core import DatabaseMaxCounter
 from morango.models.core import InstanceIDModel
-from morango.models.core import RecordMaxCounterBuffer
 from morango.models.core import SyncSession
 from morango.models.core import TransferSession
 from morango.sync.controller import SessionController
@@ -528,7 +521,7 @@ class TransferClient(object):
     def run(self):
         raise NotImplementedError("Abstract method")
 
-    def finalize(self, allow_server_timeout=False):
+    def finalize(self):
         raise NotImplementedError("Abstract method")
 
     def _has_records(self):
@@ -572,25 +565,9 @@ class TransferClient(object):
         # create transfer session on server side
         self._initialize_server_transfer_session()
 
-    def _close_transfer_session(self, allow_server_timeout=False):
-        """
-        :param allow_server_timeout: Ignores timeout errors during remote close of transfer session
-        """
-        try:
-            # "delete" transfer session on server side
-            self._close_server_transfer_session()
-        except Timeout as e:
-            # re-raise error if we weren't told to ignore it
-            if not allow_server_timeout:
-                raise e
-            else:
-                logger.warning(
-                    "Request to close server's transfer session has timed out"
-                )
-
-        # "delete" our own local transfer session
-        self.current_transfer_session.active = False
-        self.current_transfer_session.save()
+    def _close_transfer_session(self):
+        self.remote_controller.proceed_to_and_wait_for(transfer_stage.CLEANUP)
+        self.local_controller.proceed_to_and_wait_for(transfer_stage.CLEANUP)
         self.signals.session.completed.fire(
             transfer_session=self.current_transfer_session
         )
@@ -628,7 +605,7 @@ class PushClient(TransferClient):
         ) as status:
             self._push_records(callback=status.in_progress.fire)
 
-    def finalize(self, allow_server_timeout=False):
+    def finalize(self):
         # if not initialized, we don't need to finalize
         if not self.current_transfer_session:
             return
@@ -640,7 +617,7 @@ class PushClient(TransferClient):
         ):
             self.remote_controller.proceed_to_and_wait_for(transfer_stage.DESERIALIZING)
 
-        self._close_transfer_session(allow_server_timeout=allow_server_timeout)
+        self._close_transfer_session()
 
     def _push_records(self, callback=None):
         # paginate buffered records so we do not load them all into memory
@@ -693,7 +670,7 @@ class PullClient(TransferClient):
         ) as status:
             self._pull_records(callback=status.in_progress.fire)
 
-    def finalize(self, allow_server_timeout=False):
+    def finalize(self):
         # if not initialized, we don't need to finalize
         if not self.current_transfer_session:
             return
@@ -703,7 +680,7 @@ class PullClient(TransferClient):
         ):
             self.local_controller.proceed_to_and_wait_for(transfer_stage.DESERIALIZING)
 
-        self._close_transfer_session(allow_server_timeout=allow_server_timeout)
+        self._close_transfer_session()
 
     def _initialize_server_transfer_session(self):
         # this makes a remote call to the server, which triggers queuing for our pull session

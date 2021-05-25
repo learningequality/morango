@@ -29,6 +29,5 @@ MORANGO_DESERIALIZE_OPERATIONS = (
 )
 MORANGO_CLEANUP_OPERATIONS = (
     "morango.sync.operations:LocalCleanupOperation",
-    "morango.sync.operations:RemoteSynchronousCleanupOperation",
     "morango.sync.operations:RemoteCleanupOperation",
 )

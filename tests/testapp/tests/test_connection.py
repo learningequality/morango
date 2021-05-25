@@ -9,10 +9,11 @@ from django.utils import timezone
 from facility_profile.models import SummaryLog
 from requests.exceptions import HTTPError
 from requests.exceptions import RequestException
-from requests.exceptions import Timeout
 
 from morango.api.serializers import BufferSerializer
 from morango.api.serializers import CertificateSerializer
+from morango.constants import transfer_stage
+from morango.constants import transfer_status
 from morango.constants.capabilities import ALLOW_CERTIFICATE_PUSHING
 from morango.errors import CertificateSignatureInvalid
 from morango.errors import MorangoServerDoesNotAllowNewCertPush
@@ -255,7 +256,10 @@ class SyncClientTestCase(LiveServerTestCase):
 
     def build_client(self, client_class):
         client = client_class(self.conn, self.session, self.chunk_size)
-        client.current_transfer_session = self.transfer_session
+        if 'current_transfer_session' in dir(client):
+            client.current_transfer_session = self.transfer_session
+            client.local_controller.context.update(transfer_session=self.transfer_session)
+            client.remote_controller.context.update(transfer_session=self.transfer_session)
         self.transferring_mock = mock.Mock()
         client.signals.transferring.connect(self.transferring_mock)
         return client
@@ -367,31 +371,10 @@ class SyncClientTestCase(LiveServerTestCase):
     @mock_patch_decorator
     def test_close_transfer_session_push(self):
         self.assertEqual(TransferSession.objects.filter(active=True).count(), 1)
+        self.transfer_session.update_state(
+            stage=transfer_stage.DESERIALIZING, stage_status=transfer_status.COMPLETED
+        )
         self.syncclient._close_transfer_session()
-        self.assertEqual(TransferSession.objects.filter(active=True).count(), 0)
-
-    @mock.patch(
-        "morango.sync.syncsession.BaseSyncClient._close_server_transfer_session"
-    )
-    @mock_patch_decorator
-    def test_close_transfer_session_disallow_timeout(self, mocked_close):
-        mocked_close.side_effect = Timeout()
-
-        self.assertEqual(TransferSession.objects.filter(active=True).count(), 1)
-        with self.assertRaises(Timeout):
-            self.syncclient._close_transfer_session()
-
-        self.assertEqual(TransferSession.objects.filter(active=True).count(), 1)
-
-    @mock.patch(
-        "morango.sync.syncsession.BaseSyncClient._close_server_transfer_session"
-    )
-    @mock_patch_decorator
-    def test_close_transfer_session_allow_timeout(self, mocked_close):
-        mocked_close.side_effect = Timeout()
-
-        self.assertEqual(TransferSession.objects.filter(active=True).count(), 1)
-        self.syncclient._close_transfer_session(allow_server_timeout=True)
         self.assertEqual(TransferSession.objects.filter(active=True).count(), 0)
 
     @mock.patch("morango.sync.syncsession.PullClient")
@@ -448,28 +431,19 @@ class SyncClientTestCase(LiveServerTestCase):
     @mock.patch(
         "morango.sync.syncsession.NetworkSyncConnection._update_transfer_session"
     )
-    @mock.patch("morango.sync.syncsession._queue_into_buffer")
-    @mock.patch("morango.sync.syncsession.BaseSyncClient._create_transfer_session")
-    @mock.patch("morango.sync.syncsession._serialize_into_store")
-    @mock.patch("morango.sync.syncsession.settings")
+    @mock.patch("morango.sync.syncsession.TransferClient._create_transfer_session")
     def test_push_client__initialize(
         self,
-        mock_settings,
-        mock_serialize,
         mock_parent_create,
-        mock_queue,
         mock_transfer_update,
     ):
         mock_handler = mock.Mock()
         client = self.build_client(PushClient)
         client.signals.queuing.connect(mock_handler)
         sync_filter = Filter("abc123")
-        setattr(mock_settings, "MORANGO_SERIALIZE_BEFORE_QUEUING", True)
 
         client.initialize(sync_filter)
-        mock_serialize.assert_called_with(self.session.profile, filter=sync_filter)
         mock_parent_create.assert_called_with(sync_filter, push=True)
-        mock_queue.assert_called_with(client.current_transfer_session)
         mock_transfer_update.assert_called_once_with(
             {"records_total": client.current_transfer_session.records_total},
             client.current_transfer_session,
@@ -495,7 +469,7 @@ class SyncClientTestCase(LiveServerTestCase):
         client.run()
         mock_push.assert_not_called()
 
-    @mock.patch("morango.sync.syncsession.BaseSyncClient._close_transfer_session")
+    @mock.patch("morango.sync.syncsession.TransferClient._close_transfer_session")
     def test_push_client__finalize(self, mock_close):
         mock_handler = mock.Mock()
         client = self.build_client(PushClient)
@@ -505,7 +479,7 @@ class SyncClientTestCase(LiveServerTestCase):
         mock_handler.assert_any_call(transfer_session=client.current_transfer_session)
         mock_close.assert_called_once()
 
-    @mock.patch("morango.sync.syncsession.BaseSyncClient._create_transfer_session")
+    @mock.patch("morango.sync.syncsession.TransferClient._create_transfer_session")
     def test_pull_client__initialize(self, mock_parent_create):
         client = self.build_client(PullClient)
         sync_filter = Filter("abc123")
@@ -532,9 +506,9 @@ class SyncClientTestCase(LiveServerTestCase):
         client.run()
         mock_pull.assert_not_called()
 
-    @mock.patch("morango.sync.syncsession.BaseSyncClient._close_transfer_session")
-    @mock.patch("morango.sync.syncsession._dequeue_into_store")
-    def test_pull_client__finalize(self, mock_dequeue, mock_close):
+    @mock.patch("morango.sync.syncsession.TransferClient._close_transfer_session")
+    @mock.patch("morango.sync.syncsession.SessionController.proceed_to_and_wait_for")
+    def test_pull_client__finalize(self, mock_proceed, mock_close):
         mock_handler = mock.Mock()
         client = self.build_client(PullClient)
         client.signals.dequeuing.connect(mock_handler)
@@ -542,27 +516,22 @@ class SyncClientTestCase(LiveServerTestCase):
         client.current_transfer_session.server_fsic = "{}"
         client.finalize()
 
-        mock_dequeue.assert_called_with(client.current_transfer_session)
+        mock_proceed.assert_called_with(transfer_stage.DESERIALIZING)
         mock_handler.assert_any_call(transfer_session=client.current_transfer_session)
         mock_close.assert_called_once()
 
     @mock.patch(
-        "morango.sync.syncsession.BaseSyncClient._initialize_server_transfer_session"
+        "morango.sync.syncsession.TransferClient._initialize_server_transfer_session"
     )
     def test_pull_client__initialize_server_transfer_session(
         self, mock_parent_initialize
     ):
         mock_handler = mock.Mock()
-        mock_response = mock.Mock()
 
         client = self.build_client(PullClient)
         client.signals.queuing.connect(mock_handler)
 
-        mock_parent_initialize.return_value = mock_response
-        mock_response.json.return_value = dict(records_total=101)
-
-        self.assertEqual(mock_response, client._initialize_server_transfer_session())
-        self.assertEqual(client.current_transfer_session.records_total, 101)
+        client._initialize_server_transfer_session()
         mock_handler.assert_any_call(transfer_session=client.current_transfer_session)
 
 
@@ -631,7 +600,7 @@ class SessionWrapperTestCase(TestCase):
             headers=headers,
         )
 
-        request = mock.Mock(url="http://test_app/path/to/resource", method="GET")
+        request = mock.Mock(url="http://test_app/path/to/resource", method="GET", headers={})
         wrapper = SessionWrapper()
         actual = wrapper.prepare_request(request)
         mocked_super_prepare_request.assert_called_once_with(request)
