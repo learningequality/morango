@@ -2,9 +2,9 @@ import json
 import uuid
 
 import factory
-from django.conf import settings
 from django.db import connection
 from django.test import TestCase
+from django.test import override_settings
 from django.utils import timezone
 from facility_profile.models import Facility
 import mock
@@ -38,9 +38,10 @@ class FacilityModelFactory(factory.DjangoModelFactory):
     name = factory.Sequence(lambda n: "Fac %d" % n)
 
 
+@override_settings(MORANGO_SERIALIZE_BEFORE_QUEUING=False)
 class QueueStoreIntoBufferTestCase(TestCase):
     def setUp(self):
-        settings.MORANGO_SERIALIZE_BEFORE_QUEUING = False
+        super(QueueStoreIntoBufferTestCase, self).setUp()
         self.data = create_dummy_store_data()
 
     def assertRecordsBuffered(self, records):
@@ -144,16 +145,19 @@ class QueueStoreIntoBufferTestCase(TestCase):
         self.assertRecordsNotBuffered([self.data["user4"]])
 
 
+@override_settings(MORANGO_DESERIALIZE_AFTER_DEQUEUING=False)
 class BufferIntoStoreTestCase(TestCase):
     def setUp(self):
-        settings.MORANGO_DESERIALIZE_AFTER_DEQUEUING = False
+        super(BufferIntoStoreTestCase, self).setUp()
         self.data = {}
         DatabaseIDModel.objects.create()
         (self.current_id, _) = InstanceIDModel.get_or_create_current_instance()
 
         # create controllers for app/store/buffer operations
+        conn = mock.Mock(spec='morango.sync.syncsession.NetworkSyncConnection')
+        conn.server_info = dict(capabilities=[])
         self.data["mc"] = MorangoProfileController("facilitydata")
-        self.data["sc"] = TransferClient(None, "host")
+        self.data["sc"] = TransferClient(conn, "host")
         session = SyncSession.objects.create(
             id=uuid.uuid4().hex, profile="", last_activity_timestamp=timezone.now()
         )

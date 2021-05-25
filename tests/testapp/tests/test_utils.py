@@ -26,7 +26,7 @@ class SettingsTestCase(SimpleTestCase):
         self.assertLength(3, settings.MORANGO_QUEUE_OPERATIONS)
         self.assertLength(3, settings.MORANGO_DEQUEUE_OPERATIONS)
         self.assertLength(3, settings.MORANGO_DESERIALIZE_OPERATIONS)
-        self.assertLength(3, settings.MORANGO_CLEANUP_OPERATIONS)
+        self.assertLength(2, settings.MORANGO_CLEANUP_OPERATIONS)
 
     def test_overriding(self):
         with self.settings(ALLOW_CERTIFICATE_PUSHING=True):

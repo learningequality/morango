@@ -74,8 +74,10 @@ def create_dummy_store_data():
     ]  # counter is at 0
 
     # create controllers for app/store/buffer operations
+    conn = mock.Mock(spec='morango.sync.syncsession.NetworkSyncConnection')
+    conn.server_info = dict(capabilities=[])
     data["mc"] = MorangoProfileController("facilitydata")
-    data["sc"] = TransferClient(None, "host")
+    data["sc"] = TransferClient(conn, "host")
     session = SyncSession.objects.create(
         id=uuid.uuid4().hex,
         profile="facilitydata",
