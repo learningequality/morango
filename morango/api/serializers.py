@@ -110,6 +110,7 @@ class TransferSessionSerializer(serializers.ModelSerializer):
             "sync_session",
             "server_fsic",
             "client_fsic",
+            "transfer_stage",
             "transfer_stage_status",
         )
 

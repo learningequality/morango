@@ -11,6 +11,7 @@ from django.core.paginator import Paginator
 from django.utils import timezone
 from django.utils.six import iteritems
 from requests.adapters import HTTPAdapter
+from requests.exceptions import HTTPError
 from requests.packages.urllib3.util.retry import Retry
 from rest_framework.exceptions import ValidationError
 from django.utils.six.moves.urllib.parse import urljoin
@@ -28,6 +29,7 @@ from morango.constants.capabilities import ALLOW_CERTIFICATE_PUSHING
 from morango.constants.capabilities import GZIP_BUFFER_POST
 from morango.errors import CertificateSignatureInvalid
 from morango.errors import MorangoError
+from morango.errors import MorangoResumeSyncError
 from morango.errors import MorangoServerDoesNotAllowNewCertPush
 from morango.models.certificates import Certificate
 from morango.models.certificates import Key
@@ -96,6 +98,8 @@ class Connection(object):
 
 
 class NetworkSyncConnection(Connection):
+    default_chunk_size = 500
+
     def __init__(self, base_url="", compresslevel=9, retries=7, backoff_factor=0.3):
         """
         The underlying network connection with a syncing peer. Any network requests
@@ -132,7 +136,9 @@ class NetworkSyncConnection(Connection):
         url = urljoin(urljoin(self.base_url, endpoint), lookup)
         return url
 
-    def create_sync_session(self, client_cert, server_cert, chunk_size=500):
+    def create_sync_session(
+        self, client_cert, server_cert, chunk_size=default_chunk_size
+    ):
         # if server cert does not exist locally, retrieve it from server
         if not Certificate.objects.filter(id=server_cert.id).exists():
             cert_chain_response = self._get_certificate_chain(
@@ -208,6 +214,21 @@ class NetworkSyncConnection(Connection):
             "server_instance": session_resp.json().get("server_instance") or "{}",
         }
         sync_session = SyncSession.objects.create(**data)
+        return SyncSessionClient(self, sync_session, chunk_size=chunk_size)
+
+    def resume_sync_session(self, sync_session_id, chunk_size=default_chunk_size):
+        try:
+            sync_session = SyncSession.objects.get(pk=sync_session_id)
+        except SyncSession.DoesNotExist:
+            raise MorangoResumeSyncError(
+                "Session for ID '{}' not found".format(sync_session_id)
+            )
+
+        try:
+            self._get_sync_session(sync_session)
+        except HTTPError as e:
+            raise MorangoResumeSyncError("Unable to verify remote sync session") from e
+
         return SyncSessionClient(self, sync_session, chunk_size=chunk_size)
 
     def close_sync_session(self, sync_session):
@@ -355,6 +376,18 @@ class NetworkSyncConnection(Connection):
 
     def _create_sync_session(self, data):
         return self.session.post(self.urlresolve(api_urls.SYNCSESSION), json=data)
+
+    def _get_sync_session(self, sync_session):
+        nonce = self._get_nonce().json().get("id")
+        message = "{nonce}:{id}".format(nonce=nonce, id=sync_session.id)
+
+        return self.session.get(
+            self.urlresolve(api_urls.SYNCSESSION, lookup=sync_session.id),
+            params=dict(
+                nonce=nonce,
+                signature=sync_session.client_cert.sign(message),
+            ),
+        )
 
     def _create_transfer_session(self, data):
         return self.session.post(self.urlresolve(api_urls.TRANSFERSESSION), json=data)
@@ -546,16 +579,26 @@ class TransferClient(object):
         )
 
     def _create_transfer_session(self, sync_filter, **data):
-        # build data for creating transfer session on server side
-        data.update(
-            id=uuid.uuid4().hex,
+        # data that should be unique for the transfer session
+        base_data = dict(
+            push=data.get("push", False),
             filter=str(sync_filter),
             sync_session_id=self.sync_session.id,
-            last_activity_timestamp=timezone.now(),
-            transfer_stage=transfer_stage.INITIALIZING,
         )
 
-        self.current_transfer_session = TransferSession.objects.create(**data)
+        # first attempt to get an existing, otherwise create it
+        try:
+            self.current_transfer_session = TransferSession.objects.get(**base_data)
+        except TransferSession.DoesNotExist:
+            # build data for creating transfer session
+            data.update(
+                id=uuid.uuid4().hex,
+                last_activity_timestamp=timezone.now(),
+                transfer_stage=transfer_stage.INITIALIZING,
+                **base_data,
+            )
+            self.current_transfer_session = TransferSession.objects.create(**data)
+
         self.local_controller.context.update(
             transfer_session=self.current_transfer_session
         )

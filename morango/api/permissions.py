@@ -85,50 +85,23 @@ class CertificatePushPermissions(permissions.BasePermission):
 
 class NoncePermissions(permissions.BasePermission):
     def has_permission(self, request, view):
-
-        if request.method != "POST":
-            return False
-
-        return True
+        return request.method in ("POST",)
 
 
 class SyncSessionPermissions(permissions.BasePermission):
     def has_permission(self, request, view):
-
-        if request.method == "DELETE":
-            return True
-
-        if request.method == "POST":
-            return (
-                True  # we'll be doing some additional permission checks in the viewset
-            )
-
-        return False
+        # we'll be doing some additional permission checks in the viewset
+        return request.method in ("POST", "GET", "DELETE")
 
 
 class TransferSessionPermissions(permissions.BasePermission):
     def has_permission(self, request, view):
-
-        if request.method == "DELETE":
-            return True
-
-        if request.method == "POST":
-            return (
-                True  # we'll be doing some additional permission checks in the viewset
-            )
-
-        if request.method == "PATCH":
-            return True
-
-        return False
+        # we'll be doing some additional permission checks in the viewset
+        return request.method in ("POST", "PATCH", "GET", "DELETE")
 
 
 class BufferPermissions(permissions.BasePermission):
     def has_permission(self, request, view):
-
-        if request.method == "POST":
-            return True
-
         if request.method == "GET":
             sesh_id = request.query_params.get("transfer_session_id")
             if not sesh_id:
@@ -139,4 +112,4 @@ class BufferPermissions(permissions.BasePermission):
                 return False
             return True
 
-        return False
+        return request.method in ("POST",)

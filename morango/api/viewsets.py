@@ -292,6 +292,38 @@ class SyncSessionViewSet(viewsets.ModelViewSet):
 
         return response.Response(resp_data, status=status.HTTP_201_CREATED)
 
+    def retrieve(self, request, *args, **kwargs):
+        nonce = request.query_params.get("nonce", None)
+        signature = request.query_params.get("signature", None)
+
+        if not nonce or not signature:
+            return response.Response(
+                "Requests to get a sync session must have signature data",
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        sync_session = self.get_object()
+
+        message = "{nonce}:{id}".format(nonce=nonce, id=sync_session.id)
+        if not sync_session.client_certificate.verify(message, signature):
+            return response.Response(
+                "Client certificate failed to verify signature",
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
+        # check that the nonce is valid, and consume it so it can't be used again
+        try:
+            certificates.Nonce.use_nonce(nonce)
+        except errors.MorangoNonceError:
+            return response.Response(
+                "Nonce is not valid", status=status.HTTP_403_FORBIDDEN
+            )
+
+        return response.Response(self.get_serializer(sync_session).data)
+
+    def list(self, request, *args, **kwargs):
+        return response.Response("Forbidden", status=status.HTTP_403_FORBIDDEN)
+
     def perform_destroy(self, syncsession):
         syncsession.active = False
         syncsession.save()
@@ -394,6 +426,9 @@ class TransferSessionViewSet(viewsets.ModelViewSet):
                 controller.proceed_to_and_wait_for(update_stage)
 
         return super(TransferSessionViewSet, self).update(request, *args, **kwargs)
+
+    def list(self, request, *args, **kwargs):
+        return response.Response("Forbidden", status=status.HTTP_403_FORBIDDEN)
 
     def perform_destroy(self, transfer_session):
         controller = SessionController.build_local(

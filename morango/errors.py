@@ -52,3 +52,7 @@ class NonceExpired(MorangoNonceError):
 
 class MorangoServerDoesNotAllowNewCertPush(MorangoError):
     pass
+
+
+class MorangoResumeSyncError(MorangoError):
+    pass
