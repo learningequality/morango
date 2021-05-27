@@ -137,10 +137,7 @@ class NetworkSessionContext(SessionContext):
     Class that holds the context for operating on a transfer remotely through network connection
     """
 
-    __slots__ = (
-        "connection",
-        "transfer_session",
-    )
+    __slots__ = ("connection",)
 
     def __init__(self, connection, **kwargs):
         """

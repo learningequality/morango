@@ -246,9 +246,11 @@ class SessionMiddlewareRegistry(list):
     """Middleware registry is a list of middleware configurable through settings"""
 
     def populate(self):
+        # sort dict items according to stage precedence
         sorted_stage_map = sorted(
             STAGE_TO_SETTINGS.items(), key=lambda s: transfer_stage.precedence(s[0])
         )
+        # add middleware operations groups in order of stage precedence
         for stage, setting in sorted_stage_map:
             transfer_middleware = SessionMiddlewareOperations(stage)
             transfer_middleware.populate(getattr(SETTINGS, setting))

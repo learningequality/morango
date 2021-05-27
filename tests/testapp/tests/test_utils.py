@@ -4,7 +4,7 @@ from django.test.testcases import SimpleTestCase
 import mock
 
 from morango.constants import transfer_stage
-from morango.utils import Settings
+from morango.utils import SETTINGS
 from morango.utils import CAPABILITIES_CLIENT_HEADER
 from morango.utils import serialize_capabilities_to_client_request
 from morango.utils import parse_capabilities_from_server_request
@@ -16,26 +16,23 @@ class SettingsTestCase(SimpleTestCase):
         self.assertEqual(expected, len(iterable))
 
     def test_defaults(self):
-        settings = Settings()
-        self.assertEqual(settings.ALLOW_CERTIFICATE_PUSHING, False)
-        self.assertEqual(settings.MORANGO_SERIALIZE_BEFORE_QUEUING, True)
-        self.assertEqual(settings.MORANGO_DESERIALIZE_AFTER_DEQUEUING, True)
-        self.assertEqual(settings.MORANGO_DISALLOW_ASYNC_OPERATIONS, False)
-        self.assertLength(3, settings.MORANGO_INITIALIZE_OPERATIONS)
-        self.assertLength(3, settings.MORANGO_SERIALIZE_OPERATIONS)
-        self.assertLength(3, settings.MORANGO_QUEUE_OPERATIONS)
-        self.assertLength(3, settings.MORANGO_DEQUEUE_OPERATIONS)
-        self.assertLength(3, settings.MORANGO_DESERIALIZE_OPERATIONS)
-        self.assertLength(2, settings.MORANGO_CLEANUP_OPERATIONS)
+        self.assertEqual(SETTINGS.ALLOW_CERTIFICATE_PUSHING, False)
+        self.assertEqual(SETTINGS.MORANGO_SERIALIZE_BEFORE_QUEUING, True)
+        self.assertEqual(SETTINGS.MORANGO_DESERIALIZE_AFTER_DEQUEUING, True)
+        self.assertEqual(SETTINGS.MORANGO_DISALLOW_ASYNC_OPERATIONS, False)
+        self.assertLength(3, SETTINGS.MORANGO_INITIALIZE_OPERATIONS)
+        self.assertLength(3, SETTINGS.MORANGO_SERIALIZE_OPERATIONS)
+        self.assertLength(3, SETTINGS.MORANGO_QUEUE_OPERATIONS)
+        self.assertLength(3, SETTINGS.MORANGO_DEQUEUE_OPERATIONS)
+        self.assertLength(3, SETTINGS.MORANGO_DESERIALIZE_OPERATIONS)
+        self.assertLength(2, SETTINGS.MORANGO_CLEANUP_OPERATIONS)
 
     def test_overriding(self):
         with self.settings(ALLOW_CERTIFICATE_PUSHING=True):
-            settings = Settings()
-            self.assertEqual(settings.ALLOW_CERTIFICATE_PUSHING, True)
+            self.assertEqual(SETTINGS.ALLOW_CERTIFICATE_PUSHING, True)
 
         with self.settings(MORANGO_INITIALIZE_OPERATIONS=("test",)):
-            settings = Settings()
-            self.assertEqual(settings.MORANGO_INITIALIZE_OPERATIONS, ("test",))
+            self.assertEqual(SETTINGS.MORANGO_INITIALIZE_OPERATIONS, ("test",))
 
 
 class CapabilitiesTestCase(SimpleTestCase):

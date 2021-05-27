@@ -71,7 +71,7 @@ class SessionController(object):
 
     def __init__(self, middleware, context, enable_logging):
         """
-        :type middleware: TransferMiddlewareRegistry|list
+        :type middleware: morango.registry.SessionMiddlewareRegistry|list
         :type context: SessionContext|LocalSessionContext|NetworkSessionContext
         :type enable_logging: bool
         """

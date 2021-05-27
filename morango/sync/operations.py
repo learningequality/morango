@@ -506,8 +506,13 @@ def _dequeue_into_store(transfersession):
 
 
 class BaseOperation(object):
+    """
+    Base Operation class which defines operation specific behavior that occurs during a sync
+    """
+
     __slots__ = ()
     expects_context = None
+    """Operation will automatically filter contexts based on this type, before calling `handle`"""
 
     def __call__(self, context):
         """
@@ -532,18 +537,25 @@ class BaseOperation(object):
 
     def handle(self, context):
         """
-        :type context: TransferContext
+        :type context: morango.sync.context.SessionContext
         :return: transfer_status.* - See `SessionController` for how the return status is handled
         """
         raise NotImplementedError("Transfer operation handler not implemented")
 
 
 class LocalOperation(BaseOperation):
+    """
+    Base class for local operations that expect a local context object
+    """
+
     expects_context = LocalSessionContext
 
 
 class LocalInitializeOperation(LocalOperation):
-    __slots__ = ()
+    """
+    A local initialize operation, currently unused as transfer session is instantiated outside of
+    operations
+    """
 
     def handle(self, context):
         """
@@ -553,7 +565,10 @@ class LocalInitializeOperation(LocalOperation):
 
 
 class LocalSerializeOperation(LocalOperation):
-    __slots__ = ()
+    """
+    Performs serialization if enabled through configuration and if applicable for local transfer
+    session
+    """
 
     def handle(self, context):
         """
@@ -586,7 +601,9 @@ class LocalSerializeOperation(LocalOperation):
 
 
 class LocalQueueOperation(LocalOperation):
-    __slots__ = ()
+    """
+    Performs queuing of data for local transfer session if applicable
+    """
 
     def handle(self, context):
         """
@@ -612,7 +629,9 @@ class LocalQueueOperation(LocalOperation):
 
 
 class LocalDequeueOperation(LocalOperation):
-    __slots__ = ()
+    """
+    Performs dequeuing of transferred data if applicable for local transfer session
+    """
 
     def handle(self, context):
         """
@@ -648,7 +667,10 @@ class LocalDequeueOperation(LocalOperation):
 
 
 class LocalDeserializeOperation(LocalOperation):
-    __slots__ = ()
+    """
+    Performs deserialization if enabled through configuration and if applicable for local transfer
+    session
+    """
 
     def handle(self, context):
         """
@@ -678,7 +700,9 @@ class LocalDeserializeOperation(LocalOperation):
 
 
 class LocalCleanupOperation(LocalOperation):
-    __slots__ = ()
+    """
+    Marks the local transfer session as inactive, and deletes queued buffer data if applicable
+    """
 
     def handle(self, context):
         """
@@ -701,6 +725,10 @@ class RemoteNetworkOperation(BaseOperation):
     expects_context = NetworkSessionContext
 
     def create_transfer_session(self, context):
+        """
+        :type context: NetworkSessionContext
+        :return: A response dict
+        """
         return context.connection._create_transfer_session(
             dict(
                 id=context.transfer_session.id,
@@ -712,14 +740,33 @@ class RemoteNetworkOperation(BaseOperation):
         ).json()
 
     def get_transfer_session(self, context):
+        """
+        Retrieves remote transfer session
+
+        :type context: NetworkSessionContext
+        :return: A response dict
+        """
         return context.connection._get_transfer_session(context.transfer_session).json()
 
     def update_transfer_session(self, context, **data):
+        """
+        Updates remote transfer session
+
+        :type context: NetworkSessionContext
+        :param data: Data to update remote transfer session wiht
+        :return: A response dict
+        """
         return context.connection._update_transfer_session(
             data, context.transfer_session
         ).json()
 
     def close_transfer_session(self, context):
+        """
+        Closes remote transfer session
+
+        :type context: NetworkSessionContext
+        :return: A response dict
+        """
         return context.connection._close_transfer_session(
             context.transfer_session
         ).json()
@@ -755,6 +802,11 @@ class RemoteNetworkOperation(BaseOperation):
 
 
 class RemoteSynchronousInitializeOperation(RemoteNetworkOperation):
+    """
+    Initializes remote transfer session in backwards compatible way, by expecting that the server
+    will perform serialization and queuing during the create API call
+    """
+
     def handle(self, context):
         """
         :type context: NetworkSessionContext
@@ -786,6 +838,11 @@ class RemoteSynchronousInitializeOperation(RemoteNetworkOperation):
 
 
 class RemoteInitializeOperation(RemoteNetworkOperation):
+    """
+    Performs initialization (create) of transfer session on the remote, and does not expect the
+    server to advance the transfer session beyond initialization
+    """
+
     def handle(self, context):
         """
         :type context: NetworkSessionContext
@@ -803,6 +860,11 @@ class RemoteInitializeOperation(RemoteNetworkOperation):
 
 
 class RemoteSynchronousNoOpMixin(object):
+    """
+    Mixin that handles contexts without ASYNC_OPERATIONS capability, either because the remote
+    is on older version of Morango, or either the client or server has it disabled.
+    """
+
     def handle(self, context):
         """
         :type context: NetworkSessionContext
@@ -814,10 +876,18 @@ class RemoteSynchronousNoOpMixin(object):
 class RemoteSynchronousSerializeOperation(
     RemoteSynchronousNoOpMixin, RemoteNetworkOperation
 ):
+    """
+    Without ASYNC_OPERATIONS capability, the server will perform serialization during initialization
+    """
+
     pass
 
 
 class RemoteSerializeOperation(RemoteNetworkOperation):
+    """
+    Performs serialization on the remote by updating the remote's transfer stage
+    """
+
     def handle(self, context):
         """
         :type context: NetworkSessionContext
@@ -839,10 +909,18 @@ class RemoteSerializeOperation(RemoteNetworkOperation):
 class RemoteSynchronousQueueOperation(
     RemoteSynchronousNoOpMixin, RemoteNetworkOperation
 ):
+    """
+    Without ASYNC_OPERATIONS capability, the server will perform queuing during initialization
+    """
+
     pass
 
 
 class RemoteQueueOperation(RemoteNetworkOperation):
+    """
+    Performs queuing on the remote by updating the remote's transfer stage
+    """
+
     def handle(self, context):
         """
         :type context: NetworkSessionContext
@@ -862,10 +940,18 @@ class RemoteQueueOperation(RemoteNetworkOperation):
 class RemoteSynchronousDequeueOperation(
     RemoteSynchronousNoOpMixin, RemoteNetworkOperation
 ):
+    """
+    Without ASYNC_OPERATIONS capability, the server will perform dequeuing during cleanup
+    """
+
     pass
 
 
 class RemoteDequeueOperation(RemoteNetworkOperation):
+    """
+    Performs dequeuing on the remote by updating the remote's transfer stage
+    """
+
     def handle(self, context):
         """
         :type context: NetworkSessionContext
@@ -879,10 +965,18 @@ class RemoteDequeueOperation(RemoteNetworkOperation):
 class RemoteSynchronousDeserializeOperation(
     RemoteSynchronousNoOpMixin, RemoteNetworkOperation
 ):
+    """
+    Without ASYNC_OPERATIONS capability, the server will perform deserialization during cleanup
+    """
+
     pass
 
 
 class RemoteDeserializeOperation(RemoteNetworkOperation):
+    """
+    Performs deserialization on the remote by updating the remote's transfer stage
+    """
+
     def handle(self, context):
         """
         :type context: NetworkSessionContext
@@ -895,6 +989,11 @@ class RemoteDeserializeOperation(RemoteNetworkOperation):
 
 
 class RemoteCleanupOperation(RemoteNetworkOperation):
+    """
+    "Cleans up" the remote transfer session, which will trigger the LocalCleanupOperation on the
+    server
+    """
+
     def handle(self, context):
         """
         :type context: NetworkSessionContext
