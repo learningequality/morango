@@ -11,8 +11,10 @@ import mock
 
 from .helpers import create_buffer_and_store_dummy_data
 from .helpers import create_dummy_store_data
+from morango.constants import transfer_status
 from morango.models.core import Buffer
 from morango.models.core import DatabaseIDModel
+from morango.models.core import DatabaseMaxCounter
 from morango.models.core import InstanceIDModel
 from morango.models.core import RecordMaxCounter
 from morango.models.core import RecordMaxCounterBuffer
@@ -20,9 +22,12 @@ from morango.models.core import Store
 from morango.models.core import SyncSession
 from morango.models.core import TransferSession
 from morango.sync.backends.utils import load_backend
+from morango.sync.controller import LocalSessionContext
 from morango.sync.controller import MorangoProfileController
 from morango.sync.operations import _dequeue_into_store
 from morango.sync.operations import _queue_into_buffer
+from morango.sync.operations import LocalQueueOperation
+from morango.sync.operations import LocalDequeueOperation
 from morango.sync.syncsession import TransferClient
 from morango.sync.syncsession import SyncClientSignals
 from morango.sync.syncsession import SyncSignal
@@ -43,6 +48,13 @@ class QueueStoreIntoBufferTestCase(TestCase):
     def setUp(self):
         super(QueueStoreIntoBufferTestCase, self).setUp()
         self.data = create_dummy_store_data()
+        self.transfer_session = self.data["sc"].current_transfer_session
+        self.context = mock.Mock(
+            spec=LocalSessionContext,
+            transfer_session=self.transfer_session,
+            sync_session=self.transfer_session.sync_session,
+            is_server=False,
+        )
 
     def assertRecordsBuffered(self, records):
         buffer_ids = Buffer.objects.values_list("model_uuid", flat=True)
@@ -62,8 +74,8 @@ class QueueStoreIntoBufferTestCase(TestCase):
 
     def test_all_fsics(self):
         fsics = {self.data["group1_id"].id: 1, self.data["group2_id"].id: 1}
-        self.data["sc"].current_transfer_session.client_fsic = json.dumps(fsics)
-        _queue_into_buffer(self.data["sc"].current_transfer_session)
+        self.transfer_session.client_fsic = json.dumps(fsics)
+        _queue_into_buffer(self.transfer_session)
         # ensure all store and buffer records are buffered
         self.assertRecordsBuffered(self.data["group1_c1"])
         self.assertRecordsBuffered(self.data["group1_c2"])
@@ -71,8 +83,8 @@ class QueueStoreIntoBufferTestCase(TestCase):
 
     def test_fsic_specific_id(self):
         fsics = {self.data["group2_id"].id: 1}
-        self.data["sc"].current_transfer_session.client_fsic = json.dumps(fsics)
-        _queue_into_buffer(self.data["sc"].current_transfer_session)
+        self.transfer_session.client_fsic = json.dumps(fsics)
+        _queue_into_buffer(self.transfer_session)
         # ensure only records modified with 2nd instance id are buffered
         self.assertRecordsNotBuffered(self.data["group1_c1"])
         self.assertRecordsNotBuffered(self.data["group1_c2"])
@@ -81,10 +93,10 @@ class QueueStoreIntoBufferTestCase(TestCase):
     def test_fsic_counters(self):
         counter = InstanceIDModel.objects.get(id=self.data["group1_id"].id).counter
         fsics = {self.data["group1_id"].id: counter - 1}
-        self.data["sc"].current_transfer_session.client_fsic = json.dumps(fsics)
+        self.transfer_session.client_fsic = json.dumps(fsics)
         fsics[self.data["group1_id"].id] = 0
-        self.data["sc"].current_transfer_session.server_fsic = json.dumps(fsics)
-        _queue_into_buffer(self.data["sc"].current_transfer_session)
+        self.transfer_session.server_fsic = json.dumps(fsics)
+        _queue_into_buffer(self.transfer_session)
         # ensure only records with updated 1st instance id are buffered
         self.assertRecordsBuffered(self.data["group1_c1"])
         self.assertRecordsBuffered(self.data["group1_c2"])
@@ -92,9 +104,9 @@ class QueueStoreIntoBufferTestCase(TestCase):
 
     def test_fsic_counters_too_high(self):
         fsics = {self.data["group1_id"].id: 100, self.data["group2_id"].id: 100}
-        self.data["sc"].current_transfer_session.client_fsic = json.dumps(fsics)
-        self.data["sc"].current_transfer_session.server_fsic = json.dumps(fsics)
-        _queue_into_buffer(self.data["sc"].current_transfer_session)
+        self.transfer_session.client_fsic = json.dumps(fsics)
+        self.transfer_session.server_fsic = json.dumps(fsics)
+        _queue_into_buffer(self.transfer_session)
         # ensure no records are buffered
         self.assertFalse(Buffer.objects.all())
         self.assertFalse(RecordMaxCounterBuffer.objects.all())
@@ -104,9 +116,9 @@ class QueueStoreIntoBufferTestCase(TestCase):
         filter_prefixes = "{}:user:summary\n{}:user:interaction".format(
             self.data["user3"].id, self.data["user3"].id
         )
-        self.data["sc"].current_transfer_session.filter = filter_prefixes
-        self.data["sc"].current_transfer_session.client_fsic = json.dumps(fsics)
-        _queue_into_buffer(self.data["sc"].current_transfer_session)
+        self.transfer_session.filter = filter_prefixes
+        self.transfer_session.client_fsic = json.dumps(fsics)
+        _queue_into_buffer(self.transfer_session)
         # ensure records with different partition values are buffered
         self.assertRecordsNotBuffered([self.data["user2"]])
         self.assertRecordsBuffered(self.data["user3_sumlogs"])
@@ -115,9 +127,9 @@ class QueueStoreIntoBufferTestCase(TestCase):
     def test_partition_prefix_buffering(self):
         fsics = {self.data["group2_id"].id: 1}
         filter_prefixes = "{}".format(self.data["user2"].id)
-        self.data["sc"].current_transfer_session.filter = filter_prefixes
-        self.data["sc"].current_transfer_session.client_fsic = json.dumps(fsics)
-        _queue_into_buffer(self.data["sc"].current_transfer_session)
+        self.transfer_session.filter = filter_prefixes
+        self.transfer_session.client_fsic = json.dumps(fsics)
+        _queue_into_buffer(self.transfer_session)
         # ensure only records with user2 partition are buffered
         self.assertRecordsBuffered([self.data["user2"]])
         self.assertRecordsBuffered(self.data["user2_sumlogs"])
@@ -127,9 +139,9 @@ class QueueStoreIntoBufferTestCase(TestCase):
     def test_partition_and_fsic_buffering(self):
         filter_prefixes = "{}:user:summary".format(self.data["user1"].id)
         fsics = {self.data["group1_id"].id: 1}
-        self.data["sc"].current_transfer_session.filter = filter_prefixes
-        self.data["sc"].current_transfer_session.client_fsic = json.dumps(fsics)
-        _queue_into_buffer(self.data["sc"].current_transfer_session)
+        self.transfer_session.filter = filter_prefixes
+        self.transfer_session.client_fsic = json.dumps(fsics)
+        _queue_into_buffer(self.transfer_session)
         # ensure records updated with 1st instance id and summarylog partition are buffered
         self.assertRecordsBuffered(self.data["user1_sumlogs"])
         self.assertRecordsNotBuffered(self.data["user2_sumlogs"])
@@ -138,11 +150,37 @@ class QueueStoreIntoBufferTestCase(TestCase):
     def test_valid_fsic_but_invalid_partition(self):
         filter_prefixes = "{}:user:summary".format(self.data["user1"].id)
         fsics = {self.data["group2_id"].id: 1}
-        self.data["sc"].current_transfer_session.filter = filter_prefixes
-        self.data["sc"].current_transfer_session.client_fsic = json.dumps(fsics)
-        _queue_into_buffer(self.data["sc"].current_transfer_session)
+        self.transfer_session.filter = filter_prefixes
+        self.transfer_session.client_fsic = json.dumps(fsics)
+        _queue_into_buffer(self.transfer_session)
         # ensure that record with valid fsic but invalid partition is not buffered
         self.assertRecordsNotBuffered([self.data["user4"]])
+
+    def test_local_queue_operation(self):
+        fsics = {self.data["group1_id"].id: 1, self.data["group2_id"].id: 1}
+        self.transfer_session.client_fsic = json.dumps(fsics)
+
+        self.assertEqual(0, self.transfer_session.records_total or 0)
+        operation = LocalQueueOperation()
+        self.assertEqual(transfer_status.COMPLETED, operation.handle(self.context))
+        self.assertNotEqual(0, self.transfer_session.records_total)
+
+        # ensure all store and buffer records are buffered
+        self.assertRecordsBuffered(self.data["group1_c1"])
+        self.assertRecordsBuffered(self.data["group1_c2"])
+        self.assertRecordsBuffered(self.data["group2_c1"])
+
+    @mock.patch("morango.sync.operations._queue_into_buffer")
+    def test_local_queue_operation__noop(self, mock_queue):
+        fsics = {self.data["group1_id"].id: 1, self.data["group2_id"].id: 1}
+        self.transfer_session.client_fsic = json.dumps(fsics)
+
+        # as server, for push, operation should not queue into buffer
+        self.context.is_server = True
+
+        operation = LocalQueueOperation()
+        self.assertEqual(transfer_status.COMPLETED, operation.handle(self.context))
+        mock_queue.assert_not_called()
 
 
 @override_settings(MORANGO_DESERIALIZE_AFTER_DEQUEUING=False)
@@ -154,7 +192,7 @@ class BufferIntoStoreTestCase(TestCase):
         (self.current_id, _) = InstanceIDModel.get_or_create_current_instance()
 
         # create controllers for app/store/buffer operations
-        conn = mock.Mock(spec='morango.sync.syncsession.NetworkSyncConnection')
+        conn = mock.Mock(spec="morango.sync.syncsession.NetworkSyncConnection")
         conn.server_info = dict(capabilities=[])
         self.data["mc"] = MorangoProfileController("facilitydata")
         self.data["sc"] = TransferClient(conn, "host")
@@ -167,10 +205,17 @@ class BufferIntoStoreTestCase(TestCase):
             push=True,
             last_activity_timestamp=timezone.now(),
         )
+        self.transfer_session = self.data["sc"].current_transfer_session
         self.data.update(
             create_buffer_and_store_dummy_data(
                 self.data["sc"].current_transfer_session.id
             )
+        )
+        self.context = mock.Mock(
+            spec=LocalSessionContext,
+            transfer_session=self.transfer_session,
+            sync_session=self.transfer_session.sync_session,
+            is_server=True,
         )
 
     def test_dequeuing_delete_rmcb_records(self):
@@ -181,9 +226,7 @@ class BufferIntoStoreTestCase(TestCase):
                 ).exists()
             )
         with connection.cursor() as cursor:
-            DBBackend._dequeuing_delete_rmcb_records(
-                cursor, self.data["sc"].current_transfer_session.id
-            )
+            DBBackend._dequeuing_delete_rmcb_records(cursor, self.transfer_session.id)
         for i in self.data["model1_rmcb_ids"]:
             self.assertFalse(
                 RecordMaxCounterBuffer.objects.filter(
@@ -202,7 +245,7 @@ class BufferIntoStoreTestCase(TestCase):
         self.assertTrue(Buffer.objects.filter(model_uuid=self.data["model1"]).exists())
         with connection.cursor() as cursor:
             DBBackend._dequeuing_delete_buffered_records(
-                cursor, self.data["sc"].current_transfer_session.id
+                cursor, self.transfer_session.id
             )
         self.assertFalse(Buffer.objects.filter(model_uuid=self.data["model1"]).exists())
         # ensure other records were not deleted
@@ -219,9 +262,7 @@ class BufferIntoStoreTestCase(TestCase):
         self.assertNotEqual(rmc.counter, rmcb.counter)
         self.assertGreaterEqual(rmcb.counter, rmc.counter)
         with connection.cursor() as cursor:
-            DBBackend._dequeuing_merge_conflict_rmcb(
-                cursor, self.data["sc"].current_transfer_session.id
-            )
+            DBBackend._dequeuing_merge_conflict_rmcb(cursor, self.transfer_session.id)
         rmc = RecordMaxCounter.objects.get(
             instance_id=self.data["model2_rmc_ids"][0],
             store_model_id=self.data["model2"],
@@ -242,9 +283,7 @@ class BufferIntoStoreTestCase(TestCase):
         self.assertNotEqual(rmc.counter, rmcb.counter)
         self.assertGreaterEqual(rmc.counter, rmcb.counter)
         with connection.cursor() as cursor:
-            DBBackend._dequeuing_merge_conflict_rmcb(
-                cursor, self.data["sc"].current_transfer_session.id
-            )
+            DBBackend._dequeuing_merge_conflict_rmcb(cursor, self.transfer_session.id)
         rmc = RecordMaxCounter.objects.get(
             instance_id=self.data["model5_rmc_ids"][0],
             store_model_id=self.data["model5"],
@@ -263,7 +302,7 @@ class BufferIntoStoreTestCase(TestCase):
         with connection.cursor() as cursor:
             current_id = InstanceIDModel.get_current_instance_and_increment_counter()
             DBBackend._dequeuing_merge_conflict_buffer(
-                cursor, current_id, self.data["sc"].current_transfer_session.id
+                cursor, current_id, self.transfer_session.id
             )
         store = Store.objects.get(id=self.data["model2"])
         self.assertEqual(store.last_saved_instance, current_id.id)
@@ -278,7 +317,7 @@ class BufferIntoStoreTestCase(TestCase):
         with connection.cursor() as cursor:
             current_id = InstanceIDModel.get_current_instance_and_increment_counter()
             DBBackend._dequeuing_merge_conflict_buffer(
-                cursor, current_id, self.data["sc"].current_transfer_session.id
+                cursor, current_id, self.transfer_session.id
             )
         store = Store.objects.get(id=self.data["model5"])
         self.assertEqual(store.last_saved_instance, current_id.id)
@@ -292,7 +331,7 @@ class BufferIntoStoreTestCase(TestCase):
         with connection.cursor() as cursor:
             current_id = InstanceIDModel.get_current_instance_and_increment_counter()
             DBBackend._dequeuing_merge_conflict_buffer(
-                cursor, current_id, self.data["sc"].current_transfer_session.id
+                cursor, current_id, self.transfer_session.id
             )
         store.refresh_from_db()
         self.assertEqual(store.serialized, "")
@@ -305,7 +344,7 @@ class BufferIntoStoreTestCase(TestCase):
         with connection.cursor() as cursor:
             current_id = InstanceIDModel.get_current_instance_and_increment_counter()
             DBBackend._dequeuing_update_rmcs_last_saved_by(
-                cursor, current_id, self.data["sc"].current_transfer_session.id
+                cursor, current_id, self.transfer_session.id
             )
         self.assertTrue(
             RecordMaxCounter.objects.filter(instance_id=current_id.id).exists()
@@ -314,9 +353,7 @@ class BufferIntoStoreTestCase(TestCase):
     def test_dequeuing_delete_mc_buffer(self):
         self.assertTrue(Buffer.objects.filter(model_uuid=self.data["model2"]).exists())
         with connection.cursor() as cursor:
-            DBBackend._dequeuing_delete_mc_buffer(
-                cursor, self.data["sc"].current_transfer_session.id
-            )
+            DBBackend._dequeuing_delete_mc_buffer(cursor, self.transfer_session.id)
         self.assertFalse(Buffer.objects.filter(model_uuid=self.data["model2"]).exists())
         # ensure other records were not deleted
         self.assertTrue(Buffer.objects.filter(model_uuid=self.data["model3"]).exists())
@@ -329,9 +366,7 @@ class BufferIntoStoreTestCase(TestCase):
             ).exists()
         )
         with connection.cursor() as cursor:
-            DBBackend._dequeuing_delete_mc_rmcb(
-                cursor, self.data["sc"].current_transfer_session.id
-            )
+            DBBackend._dequeuing_delete_mc_rmcb(cursor, self.transfer_session.id)
         self.assertFalse(
             RecordMaxCounterBuffer.objects.filter(
                 model_uuid=self.data["model2"],
@@ -359,7 +394,7 @@ class BufferIntoStoreTestCase(TestCase):
         self.assertFalse(Store.objects.filter(id=self.data["model4"]).exists())
         with connection.cursor() as cursor:
             DBBackend._dequeuing_insert_remaining_buffer(
-                cursor, self.data["sc"].current_transfer_session.id
+                cursor, self.transfer_session.id
             )
         self.assertEqual(Store.objects.get(id=self.data["model3"]).serialized, "buffer")
         self.assertTrue(Store.objects.filter(id=self.data["model4"]).exists())
@@ -373,11 +408,9 @@ class BufferIntoStoreTestCase(TestCase):
             )
         with connection.cursor() as cursor:
             DBBackend._dequeuing_insert_remaining_buffer(
-                cursor, self.data["sc"].current_transfer_session.id
+                cursor, self.transfer_session.id
             )
-            DBBackend._dequeuing_insert_remaining_rmcb(
-                cursor, self.data["sc"].current_transfer_session.id
-            )
+            DBBackend._dequeuing_insert_remaining_rmcb(cursor, self.transfer_session.id)
         for i in self.data["model4_rmcb_ids"]:
             self.assertTrue(
                 RecordMaxCounter.objects.filter(
@@ -388,37 +421,31 @@ class BufferIntoStoreTestCase(TestCase):
     def test_dequeuing_delete_remaining_rmcb(self):
         self.assertTrue(
             RecordMaxCounterBuffer.objects.filter(
-                transfer_session_id=self.data["sc"].current_transfer_session.id
+                transfer_session_id=self.transfer_session.id
             ).exists()
         )
         with connection.cursor() as cursor:
-            DBBackend._dequeuing_delete_remaining_rmcb(
-                cursor, self.data["sc"].current_transfer_session.id
-            )
+            DBBackend._dequeuing_delete_remaining_rmcb(cursor, self.transfer_session.id)
         self.assertFalse(
             RecordMaxCounterBuffer.objects.filter(
-                transfer_session_id=self.data["sc"].current_transfer_session.id
+                transfer_session_id=self.transfer_session.id
             ).exists()
         )
 
     def test_dequeuing_delete_remaining_buffer(self):
         self.assertTrue(
-            Buffer.objects.filter(
-                transfer_session_id=self.data["sc"].current_transfer_session.id
-            ).exists()
+            Buffer.objects.filter(transfer_session_id=self.transfer_session.id).exists()
         )
         with connection.cursor() as cursor:
             DBBackend._dequeuing_delete_remaining_buffer(
-                cursor, self.data["sc"].current_transfer_session.id
+                cursor, self.transfer_session.id
             )
         self.assertFalse(
-            Buffer.objects.filter(
-                transfer_session_id=self.data["sc"].current_transfer_session.id
-            ).exists()
+            Buffer.objects.filter(transfer_session_id=self.transfer_session.id).exists()
         )
 
     def test_dequeue_into_store(self):
-        _dequeue_into_store(self.data["sc"].current_transfer_session)
+        _dequeue_into_store(self.transfer_session)
         # ensure a record with different transfer session id is not affected
         self.assertTrue(
             Buffer.objects.filter(transfer_session_id=self.data["tfs_id"]).exists()
@@ -492,15 +519,38 @@ class BufferIntoStoreTestCase(TestCase):
 
         # ensure all buffer and rmcb records were deleted for this transfer session id
         self.assertFalse(
-            Buffer.objects.filter(
-                transfer_session_id=self.data["sc"].current_transfer_session.id
-            ).exists()
+            Buffer.objects.filter(transfer_session_id=self.transfer_session.id).exists()
         )
         self.assertFalse(
             RecordMaxCounterBuffer.objects.filter(
-                transfer_session_id=self.data["sc"].current_transfer_session.id
+                transfer_session_id=self.transfer_session.id
             ).exists()
         )
+
+    @mock.patch("morango.sync.operations.DatabaseMaxCounter.update_fsics")
+    def test_local_dequeue_operation(self, mock_update_fsics):
+        self.transfer_session.records_transferred = 1
+        self.context.filter = [self.transfer_session.filter]
+        operation = LocalDequeueOperation()
+        self.assertEqual(transfer_status.COMPLETED, operation.handle(self.context))
+        mock_update_fsics.assert_called()
+        self.assertFalse(
+            Buffer.objects.filter(transfer_session_id=self.transfer_session.id).exists()
+        )
+
+    @mock.patch("morango.sync.operations._dequeue_into_store")
+    def test_local_dequeue_operation__noop(self, mock_dequeue):
+        self.context.is_server = False
+        operation = LocalDequeueOperation()
+        self.assertEqual(transfer_status.COMPLETED, operation.handle(self.context))
+        mock_dequeue.assert_not_called()
+
+    @mock.patch("morango.sync.operations._dequeue_into_store")
+    def test_local_dequeue_operation__noop__nothing_transferred(self, mock_dequeue):
+        self.transfer_session.records_transferred = 0
+        operation = LocalDequeueOperation()
+        self.assertEqual(transfer_status.COMPLETED, operation.handle(self.context))
+        mock_dequeue.assert_not_called()
 
 
 class SyncSignalTestCase(TestCase):
