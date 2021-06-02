@@ -370,40 +370,31 @@ class TransferSessionViewSet(viewsets.ModelViewSet):
         if scope_error_msg:
             return response.Response(scope_error_msg, status=status.HTTP_403_FORBIDDEN)
 
-        # build the data to be used for creating the transfersession
-        data = {
-            "id": request.data.get("id"),
-            "start_timestamp": timezone.now(),
-            "last_activity_timestamp": timezone.now(),
-            "active": True,
-            "filter": requested_filter,
-            "push": is_a_push,
-            "records_total": request.data.get("records_total") if is_a_push else None,
-            "sync_session": syncsession,
-            "client_fsic": request.data.get("client_fsic") or "{}",
-            "transfer_stage": transfer_stage.INITIALIZING,
-            "server_fsic": "{}",
-        }
-
-        transfersession = TransferSession(**data)
-        transfersession.full_clean()
-        transfersession.save()
-
-        response_status = status.HTTP_201_CREATED
+        controller = SessionController.build_local(
+            request=request,
+            sync_session=syncsession,
+            sync_filter=requested_filter,
+            is_push=is_a_push,
+            enable_logging=True
+        )
 
         # If both client and ourselves allow async, we just return accepted status, and the client
-        # should PATCH the transfer_session to the appropriate stage
-        if self.async_allowed():
-            response_status = status.HTTP_202_ACCEPTED
-        else:
-            # if not async, we wait until queuing is complete
-            controller = SessionController.build_local(
-                request=request, transfer_session=transfersession, enable_logging=True
+        # should PATCH the transfer_session to the appropriate stage. If not async, we wait until
+        # queuing is complete
+        to_stage = transfer_stage.INITIALIZING if self.async_allowed() else transfer_stage.QUEUING
+        result = controller.proceed_to_and_wait_for(to_stage)
+
+        if result == transfer_status.ERRORED:
+            return response.Response(
+                "Failed to initialize session", status=status.HTTP_500_INTERNAL_SERVER_ERROR
             )
-            controller.proceed_to_and_wait_for(transfer_stage.QUEUING)
+
+        response_status = status.HTTP_201_CREATED
+        if result != transfer_status.COMPLETED:
+            response_status = status.HTTP_202_ACCEPTED
 
         return response.Response(
-            self.get_serializer(transfersession).data,
+            self.get_serializer(controller.context.transfer_session).data,
             status=response_status,
         )
 

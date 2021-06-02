@@ -56,3 +56,7 @@ class MorangoServerDoesNotAllowNewCertPush(MorangoError):
 
 class MorangoResumeSyncError(MorangoError):
     pass
+
+
+class MorangoContextUpdateError(MorangoError):
+    pass

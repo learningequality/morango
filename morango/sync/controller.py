@@ -85,6 +85,8 @@ class SessionController(object):
         request=None,
         sync_session=None,
         transfer_session=None,
+        sync_filter=None,
+        is_push=None,
         enable_logging=False,
     ):
         """
@@ -94,6 +96,8 @@ class SessionController(object):
         :type request: django.http.request.HttpRequest
         :type sync_session: SyncSession|None
         :type transfer_session: TransferSession|None
+        :type sync_filter: Filter|None
+        :type is_push: bool
         :type enable_logging: bool
         :return: A new transfer controller
         :rtype: SessionController
@@ -102,6 +106,8 @@ class SessionController(object):
             request=request,
             sync_session=sync_session,
             transfer_session=transfer_session,
+            sync_filter=sync_filter,
+            is_push=is_push,
         )
         return SessionController(session_middleware, context, enable_logging)
 

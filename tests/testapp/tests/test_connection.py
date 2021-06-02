@@ -254,12 +254,16 @@ class SyncClientTestCase(LiveServerTestCase):
         self.syncclient = self.build_client(TransferClient)
         InstanceIDModel.get_or_create_current_instance()
 
-    def build_client(self, client_class):
+    def build_client(self, client_class, update_context=False):
         client = client_class(self.conn, self.session, self.chunk_size)
         if 'current_transfer_session' in dir(client):
             client.current_transfer_session = self.transfer_session
-            client.local_controller.context.update(transfer_session=self.transfer_session)
-            client.remote_controller.context.update(transfer_session=self.transfer_session)
+            if client.local_controller.context.is_push is None:
+                client.local_controller.context.update(is_push=self.transfer_session.push)
+                client.remote_controller.context.update(is_push=self.transfer_session.push)
+            if update_context:
+                client.local_controller.context.update(transfer_session=self.transfer_session)
+                client.remote_controller.context.update(transfer_session=self.transfer_session)
         self.transferring_mock = mock.Mock()
         client.signals.transferring.connect(self.transferring_mock)
         return client
@@ -311,7 +315,7 @@ class SyncClientTestCase(LiveServerTestCase):
 
     @mock_patch_decorator
     def test_push_records(self):
-        client = self.build_client(PushClient)
+        client = self.build_client(PushClient, update_context=True)
         self.build_buffer_items(client.current_transfer_session)
         self.assertEqual(client.current_transfer_session.records_transferred, 0)
         with client.signals.transferring.send(
@@ -330,7 +334,7 @@ class SyncClientTestCase(LiveServerTestCase):
     def test_pull_records(self):
         self.transfer_session.push = False
         self.transfer_session.save()
-        client = self.build_client(PullClient)
+        client = self.build_client(PullClient, update_context=True)
 
         resp = self.build_buffer_items(client.current_transfer_session)
         SessionWrapper.request.return_value.json.return_value = json.loads(resp)
@@ -365,15 +369,17 @@ class SyncClientTestCase(LiveServerTestCase):
         self.syncclient.current_transfer_session.active = False
         self.syncclient.current_transfer_session.save()
         self.assertEqual(TransferSession.objects.filter(active=True).count(), 0)
-        self.syncclient._create_transfer_session("filter", push=True)
+        self.syncclient._create_transfer_session("filter")
         self.assertEqual(TransferSession.objects.filter(active=True).count(), 1)
 
     @mock_patch_decorator
     def test_close_transfer_session_push(self):
-        self.assertEqual(TransferSession.objects.filter(active=True).count(), 1)
         self.transfer_session.update_state(
             stage=transfer_stage.DESERIALIZING, stage_status=transfer_status.COMPLETED
         )
+        self.syncclient = self.build_client(TransferClient, update_context=True)
+        self.assertEqual(TransferSession.objects.filter(active=True).count(), 1)
+
         self.syncclient._close_transfer_session()
         self.assertEqual(TransferSession.objects.filter(active=True).count(), 0)
 
@@ -443,7 +449,7 @@ class SyncClientTestCase(LiveServerTestCase):
         sync_filter = Filter("abc123")
 
         client.initialize(sync_filter)
-        mock_parent_create.assert_called_with(sync_filter, push=True)
+        mock_parent_create.assert_called_with(sync_filter)
         mock_transfer_update.assert_called_once_with(
             {"records_total": client.current_transfer_session.records_total},
             client.current_transfer_session,
@@ -453,7 +459,7 @@ class SyncClientTestCase(LiveServerTestCase):
 
     @mock.patch("morango.sync.syncsession.PushClient._push_records")
     def test_push_client__run(self, mock_push):
-        client = self.build_client(PushClient)
+        client = self.build_client(PushClient, update_context=True)
         client.current_transfer_session.records_total = 1
         client.run()
 
@@ -464,7 +470,7 @@ class SyncClientTestCase(LiveServerTestCase):
 
     @mock.patch("morango.sync.syncsession.PushClient._push_records")
     def test_push_client__run__no_records(self, mock_push):
-        client = self.build_client(PushClient)
+        client = self.build_client(PushClient, update_context=True)
         client.current_transfer_session.records_total = 0
         client.run()
         mock_push.assert_not_called()
@@ -472,7 +478,7 @@ class SyncClientTestCase(LiveServerTestCase):
     @mock.patch("morango.sync.syncsession.TransferClient._close_transfer_session")
     def test_push_client__finalize(self, mock_close):
         mock_handler = mock.Mock()
-        client = self.build_client(PushClient)
+        client = self.build_client(PushClient, update_context=True)
         client.signals.dequeuing.connect(mock_handler)
         client.finalize()
 
@@ -485,12 +491,11 @@ class SyncClientTestCase(LiveServerTestCase):
         sync_filter = Filter("abc123")
 
         client.initialize(sync_filter)
-        self.assertEqual(sync_filter, client.sync_filter)
-        mock_parent_create.assert_called_with(sync_filter, push=False)
+        mock_parent_create.assert_called_with(sync_filter)
 
     @mock.patch("morango.sync.syncsession.PullClient._pull_records")
     def test_pull_client__run(self, mock_pull):
-        client = self.build_client(PullClient)
+        client = self.build_client(PullClient, update_context=True)
         client.current_transfer_session.records_total = 1
         client.run()
 
@@ -501,7 +506,7 @@ class SyncClientTestCase(LiveServerTestCase):
 
     @mock.patch("morango.sync.syncsession.PullClient._pull_records")
     def test_pull_client__run__no_records(self, mock_pull):
-        client = self.build_client(PullClient)
+        client = self.build_client(PullClient, update_context=True)
         client.current_transfer_session.records_total = 0
         client.run()
         mock_pull.assert_not_called()
@@ -510,7 +515,7 @@ class SyncClientTestCase(LiveServerTestCase):
     @mock.patch("morango.sync.syncsession.SessionController.proceed_to_and_wait_for")
     def test_pull_client__finalize(self, mock_proceed, mock_close):
         mock_handler = mock.Mock()
-        client = self.build_client(PullClient)
+        client = self.build_client(PullClient, update_context=True)
         client.signals.dequeuing.connect(mock_handler)
         client.sync_filter = Filter("abc123")
         client.current_transfer_session.server_fsic = "{}"
@@ -528,7 +533,7 @@ class SyncClientTestCase(LiveServerTestCase):
     ):
         mock_handler = mock.Mock()
 
-        client = self.build_client(PullClient)
+        client = self.build_client(PullClient, update_context=True)
         client.signals.queuing.connect(mock_handler)
 
         client._initialize_server_transfer_session()

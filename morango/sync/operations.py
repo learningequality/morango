@@ -1,6 +1,7 @@
 import functools
 import json
 import logging
+import uuid
 
 from django.core import exceptions
 from django.core.serializers.json import DjangoJSONEncoder
@@ -11,10 +12,12 @@ from django.db import transaction
 from django.db.models import Q
 from django.db.models import signals
 from django.utils import six
+from django.utils import timezone
 
 from morango.constants.capabilities import ASYNC_OPERATIONS
 from morango.constants import transfer_stage
 from morango.constants import transfer_status
+from morango.errors import MorangoResumeSyncError
 from morango.models.certificates import Filter
 from morango.models.core import Buffer
 from morango.models.core import DatabaseMaxCounter
@@ -24,6 +27,7 @@ from morango.models.core import InstanceIDModel
 from morango.models.core import RecordMaxCounter
 from morango.models.core import RecordMaxCounterBuffer
 from morango.models.core import Store
+from morango.models.core import TransferSession
 from morango.registry import syncable_models
 from morango.sync.backends.utils import load_backend
 from morango.sync.context import LocalSessionContext
@@ -561,6 +565,48 @@ class LocalInitializeOperation(LocalOperation):
         """
         :type context: LocalSessionContext
         """
+        assert context.sync_session is not None
+        assert context.transfer_session is None
+
+        # data that should be unique for the transfer session
+        data = dict(
+            push=context.is_push,
+            filter=str(context.filter),
+            sync_session_id=context.sync_session.id,
+        )
+
+        # first attempt to get an existing for resumption, otherwise create it
+        try:
+            transfer_session = TransferSession.objects.get(**data)
+            # If not active, we refuse to resume
+            if not transfer_session.active:
+                raise MorangoResumeSyncError("Existing transfer session is inactive")
+        except TransferSession.DoesNotExist:
+            # build data for creating transfer session
+            data.update(
+                id=uuid.uuid4().hex,
+                start_timestamp=timezone.now(),
+                last_activity_timestamp=timezone.now(),
+                active=True,
+            )
+            # if in request context,
+            if context.request:
+                data.update(
+                    id=context.request.data.get("id"),
+                    records_total=context.request.data.get("records_total") if context.is_push else None,
+                    client_fsic=context.request.data.get("client_fsic") or "{}",
+                )
+            elif context.is_server:
+                raise MorangoResumeSyncError("Cannot create transfer session without request as server")
+
+            # create, validate, and save!
+            transfer_session = TransferSession(**data)
+            transfer_session.full_clean()
+            transfer_session.save()
+
+        # if resuming, this should also update the context such that the next attempted stage
+        # is the next stage to invoke
+        context.update(transfer_session=transfer_session)
         return transfer_status.COMPLETED
 
 
@@ -597,6 +643,7 @@ class LocalSerializeOperation(LocalOperation):
         else:
             context.transfer_session.client_fsic = fsic
 
+        context.transfer_session.save()
         return transfer_status.COMPLETED
 
 
@@ -828,12 +875,6 @@ class RemoteSynchronousInitializeOperation(RemoteNetworkOperation):
             context.transfer_session.records_total = data.get("records_total", 0)
 
         context.transfer_session.save()
-
-        # force update to COMPLETE QUEUED since obsolete handling serializes and queues during
-        # the creation of the transfer session
-        context.update(
-            stage=transfer_stage.QUEUING, stage_status=transfer_status.COMPLETED
-        )
         return transfer_status.COMPLETED
 
 

@@ -139,6 +139,19 @@ class NetworkSyncConnection(Connection):
     def create_sync_session(
         self, client_cert, server_cert, chunk_size=default_chunk_size
     ):
+        """
+        Starts a sync session by creating it on the server side and returning a client to use
+        for initiating transfer operations
+
+        :param client_cert: The local certificate to use, already registered with the server
+        :type client_cert: Certificate
+        :param server_cert: The server's certificate that relates to the same profile as local
+        :type server_cert: Certificate
+        :param chunk_size: An optional parameter specifying the size for each transferred chunk
+        :type chunk_size: int
+        :return: A SyncSessionClient instance
+        :rtype: SyncSessionClient
+        """
         # if server cert does not exist locally, retrieve it from server
         if not Certificate.objects.filter(id=server_cert.id).exists():
             cert_chain_response = self._get_certificate_chain(
@@ -217,8 +230,16 @@ class NetworkSyncConnection(Connection):
         return SyncSessionClient(self, sync_session, chunk_size=chunk_size)
 
     def resume_sync_session(self, sync_session_id, chunk_size=default_chunk_size):
+        """
+        Resumes an existing sync session given an ID
+
+        :param sync_session_id: The UUID of the `SyncSession` to resume
+        :param chunk_size: An optional parameter specifying the size for each transferred chunk
+        :return: A SyncSessionClient instance
+        :rtype: SyncSessionClient
+        """
         try:
-            sync_session = SyncSession.objects.get(pk=sync_session_id)
+            sync_session = SyncSession.objects.get(pk=sync_session_id, active=True)
         except SyncSession.DoesNotExist:
             raise MorangoResumeSyncError(
                 "Session for ID '{}' not found".format(sync_session_id)
@@ -578,40 +599,20 @@ class TransferClient(object):
             self.current_transfer_session
         )
 
-    def _create_transfer_session(self, sync_filter, **data):
-        # data that should be unique for the transfer session
-        base_data = dict(
-            push=data.get("push", False),
-            filter=str(sync_filter),
-            sync_session_id=self.sync_session.id,
-        )
+    def _create_transfer_session(self, sync_filter):
+        # set filter on controller
+        self.local_controller.context.update(sync_filter=sync_filter)
 
-        # first attempt to get an existing, otherwise create it
-        try:
-            self.current_transfer_session = TransferSession.objects.get(**base_data)
-        except TransferSession.DoesNotExist:
-            # build data for creating transfer session
-            data.update(
-                id=uuid.uuid4().hex,
-                last_activity_timestamp=timezone.now(),
-                transfer_stage=transfer_stage.INITIALIZING,
-                **base_data,
-            )
-            self.current_transfer_session = TransferSession.objects.create(**data)
+        status = self.local_controller.proceed_to_and_wait_for(transfer_stage.INITIALIZING)
+        if status == transfer_status.ERRORED:
+            raise MorangoError("Failed to initialize transfer session")
 
-        self.local_controller.context.update(
-            transfer_session=self.current_transfer_session
-        )
-        self.remote_controller.context.update(
-            transfer_session=self.current_transfer_session
-        )
+        self.current_transfer_session = self.local_controller.context.transfer_session
+        self.remote_controller.context.update(transfer_session=self.current_transfer_session)
 
         self.signals.session.started.fire(
             transfer_session=self.current_transfer_session
         )
-
-        # save transfersession locally before creating transfersession server side
-        self.current_transfer_session.save()
 
         # create transfer session on server side
         self._initialize_server_transfer_session()
@@ -629,21 +630,25 @@ class PushClient(TransferClient):
     """
     Sync client for pushing to a server
     """
+    def __init__(self, *args, **kwargs):
+        super(PushClient, self).__init__(*args, **kwargs)
+        self.local_controller.context.update(is_push=True)
+        self.remote_controller.context.update(is_push=True)
 
     def initialize(self, sync_filter):
         """
         :param sync_filter: Filter
         """
         # we want to serialize the most recent data and update database max counters
-        self._create_transfer_session(sync_filter, push=True)
+        self._create_transfer_session(sync_filter)
 
         with self.signals.queuing.send(transfer_session=self.current_transfer_session):
             result = self.local_controller.proceed_to_and_wait_for(
                 transfer_stage.QUEUING
             )
 
-        if result != transfer_status.COMPLETED:
-            raise RuntimeError("Queuing for push failed")
+        if result == transfer_status.ERRORED:
+            raise MorangoError("Queuing for push failed")
 
         self.sync_connection._update_transfer_session(
             {"records_total": self.current_transfer_session.records_total},
@@ -706,14 +711,16 @@ class PullClient(TransferClient):
     Sync class to pull from server
     """
 
-    sync_filter = None
+    def __init__(self, *args, **kwargs):
+        super(PullClient, self).__init__(*args, **kwargs)
+        self.local_controller.context.update(is_push=False)
+        self.remote_controller.context.update(is_push=False)
 
     def initialize(self, sync_filter):
         """
         :param sync_filter: Filter
         """
-        self.sync_filter = sync_filter
-        self._create_transfer_session(sync_filter, push=False)
+        self._create_transfer_session(sync_filter)
 
     def run(self):
         if not self._has_records():
