@@ -25,7 +25,7 @@ setup(
                  'morango'},
     include_package_data=True,
     install_requires=[
-        "django<1.12",
+        "django<2.3",
         "django-mptt<0.10.0",
         "rsa>=3.4.2,<3.5",
         "djangorestframework==3.9.1",
