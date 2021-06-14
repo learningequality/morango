@@ -283,7 +283,7 @@ class TransferSession(models.Model):
         """
         if stage is not None:
             if self.transfer_stage and transfer_stage.stage(self.transfer_stage) > transfer_stage.stage(stage):
-                raise ValueError("Update stage is behind current stage")
+                raise ValueError("Update stage is behind current stage | current={}, new={}".format(self.transfer_stage, stage))
             self.transfer_stage = stage
         if stage_status is not None:
             self.transfer_stage_status = stage_status

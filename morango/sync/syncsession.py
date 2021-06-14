@@ -245,6 +245,8 @@ class NetworkSyncConnection(Connection):
                 "Session for ID '{}' not found".format(sync_session_id)
             )
 
+        # In order to resume, we need sync sessions on both server and client, otherwise resuming
+        # wouldn't have any benefit
         try:
             self._get_sync_session(sync_session)
         except HTTPError as e:
@@ -603,10 +605,12 @@ class TransferClient(object):
         # set filter on controller
         self.local_controller.context.update(sync_filter=sync_filter)
 
+        # initialize the transfer session locally
         status = self.local_controller.proceed_to_and_wait_for(transfer_stage.INITIALIZING)
         if status == transfer_status.ERRORED:
             raise MorangoError("Failed to initialize transfer session")
 
+        # copy the transfer session to local state and update remote controller context
         self.current_transfer_session = self.local_controller.context.transfer_session
         self.remote_controller.context.update(transfer_session=self.current_transfer_session)
 
@@ -656,13 +660,19 @@ class PushClient(TransferClient):
         )
 
     def run(self):
-        if not self._has_records():
-            return
+        self.local_controller.context.update(
+            stage=transfer_stage.TRANSFERRING,
+            stage_status=transfer_status.STARTED
+        )
+        if self._has_records():
+            with self.signals.transferring.send(
+                transfer_session=self.current_transfer_session
+            ) as status:
+                self._push_records(callback=status.in_progress.fire)
 
-        with self.signals.transferring.send(
-            transfer_session=self.current_transfer_session
-        ) as status:
-            self._push_records(callback=status.in_progress.fire)
+        self.local_controller.context.update(
+            stage_status=transfer_status.COMPLETED
+        )
 
     def finalize(self):
         # if not initialized, we don't need to finalize
@@ -723,13 +733,19 @@ class PullClient(TransferClient):
         self._create_transfer_session(sync_filter)
 
     def run(self):
-        if not self._has_records():
-            return
+        self.local_controller.context.update(
+            stage=transfer_stage.TRANSFERRING,
+            stage_status=transfer_status.STARTED
+        )
+        if self._has_records():
+            with self.signals.transferring.send(
+                transfer_session=self.current_transfer_session
+            ) as status:
+                self._pull_records(callback=status.in_progress.fire)
 
-        with self.signals.transferring.send(
-            transfer_session=self.current_transfer_session
-        ) as status:
-            self._pull_records(callback=status.in_progress.fire)
+        self.local_controller.context.update(
+            stage_status=transfer_status.COMPLETED
+        )
 
     def finalize(self):
         # if not initialized, we don't need to finalize

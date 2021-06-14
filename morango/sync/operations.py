@@ -13,6 +13,7 @@ from django.db.models import Q
 from django.db.models import signals
 from django.utils import six
 from django.utils import timezone
+from rest_framework import status
 
 from morango.constants.capabilities import ASYNC_OPERATIONS
 from morango.constants import transfer_stage
@@ -567,6 +568,7 @@ class LocalInitializeOperation(LocalOperation):
         """
         assert context.sync_session is not None
         assert context.transfer_session is None
+        assert context.filter is not None
 
         # data that should be unique for the transfer session
         data = dict(
@@ -589,14 +591,25 @@ class LocalInitializeOperation(LocalOperation):
                 last_activity_timestamp=timezone.now(),
                 active=True,
             )
+            fsic = json.dumps(
+                DatabaseMaxCounter.calculate_filter_max_counters(context.filter)
+            )
             # if in request context,
             if context.request:
                 data.update(
                     id=context.request.data.get("id"),
                     records_total=context.request.data.get("records_total") if context.is_push else None,
                     client_fsic=context.request.data.get("client_fsic") or "{}",
+                    server_fsic=fsic,
                 )
-            elif context.is_server:
+            elif not context.is_server:
+                data.update(
+                    client_fsic=fsic,
+                    # server_fsic is set after remote initialization, as that should hit the
+                    # previous if-block, and this `client_fsic` should end up in the request
+                    # above too
+                )
+            else:
                 raise MorangoResumeSyncError("Cannot create transfer session without request as server")
 
             # create, validate, and save!
@@ -625,7 +638,7 @@ class LocalSerializeOperation(LocalOperation):
         assert context.filter is not None
 
         # we only trigger serialize if we're going to be pulled from as a server, or push as client
-        if context.transfer_session.push == context.is_server:
+        if context.is_push == context.is_server:
             return transfer_status.COMPLETED
 
         if SETTINGS.MORANGO_SERIALIZE_BEFORE_QUEUING:
@@ -634,16 +647,6 @@ class LocalSerializeOperation(LocalOperation):
                 filter=context.filter,
             )
 
-        # before queuing, update fsic and set on transfer session
-        fsic = json.dumps(
-            DatabaseMaxCounter.calculate_filter_max_counters(context.filter)
-        )
-        if context.is_server:
-            context.transfer_session.server_fsic = fsic
-        else:
-            context.transfer_session.client_fsic = fsic
-
-        context.transfer_session.save()
         return transfer_status.COMPLETED
 
 
@@ -660,7 +663,7 @@ class LocalQueueOperation(LocalOperation):
         assert context.transfer_session is not None
 
         # we only trigger queue if we're going to be pulled from as a server, or push as client
-        if context.transfer_session.push == context.is_server:
+        if context.is_push == context.is_server:
             return transfer_status.COMPLETED
 
         _queue_into_buffer(context.transfer_session)
@@ -689,7 +692,7 @@ class LocalDequeueOperation(LocalOperation):
 
         # we only trigger dequeue if we're going to be pulled from as a client,
         # or pushed to as server
-        if context.transfer_session.pull == context.is_server:
+        if context.is_pull == context.is_server:
             return transfer_status.COMPLETED
 
         # if no records were transferred, we can safely skip
@@ -701,15 +704,6 @@ class LocalDequeueOperation(LocalOperation):
 
         _dequeue_into_store(context.transfer_session)
 
-        # depends on whether it was a push or not
-        fsic = (
-            context.transfer_session.client_fsic
-            if context.is_server
-            else context.transfer_session.server_fsic
-        )
-
-        # update database max counters but use latest fsics on client
-        DatabaseMaxCounter.update_fsics(json.loads(fsic), context.filter)
         return transfer_status.COMPLETED
 
 
@@ -729,7 +723,7 @@ class LocalDeserializeOperation(LocalOperation):
 
         # we only trigger deserialize if we're going to be pulled from as a client,
         # or pushed to as server
-        if context.transfer_session.pull == context.is_server:
+        if context.is_pull == context.is_server:
             return transfer_status.COMPLETED
 
         if SETTINGS.MORANGO_DESERIALIZE_AFTER_DEQUEUING:
@@ -742,6 +736,16 @@ class LocalDeserializeOperation(LocalOperation):
                 context.sync_session.profile,
                 filter=context.filter,
             )
+
+        # update database max counters but use latest fsics on client
+        fsic = (
+            context.transfer_session.client_fsic
+            if context.is_server
+            else context.transfer_session.server_fsic
+        )
+
+        # update database max counters but use latest fsics on client
+        DatabaseMaxCounter.update_fsics(json.loads(fsic), context.filter)
 
         return transfer_status.COMPLETED
 
@@ -757,7 +761,7 @@ class LocalCleanupOperation(LocalOperation):
         """
         assert context.transfer_session
 
-        if context.transfer_session.push != context.is_server:
+        if context.is_push != context.is_server:
             Buffer.objects.filter(transfer_session=context.transfer_session).delete()
             RecordMaxCounterBuffer.objects.filter(
                 transfer_session=context.transfer_session
@@ -812,11 +816,11 @@ class RemoteNetworkOperation(BaseOperation):
         Closes remote transfer session
 
         :type context: NetworkSessionContext
-        :return: A response dict
+        :return: The Response
         """
         return context.connection._close_transfer_session(
             context.transfer_session
-        ).json()
+        )
 
     def remote_proceed_to(self, context, stage):
         """
@@ -1039,4 +1043,8 @@ class RemoteCleanupOperation(RemoteNetworkOperation):
         """
         :type context: NetworkSessionContext
         """
-        self.close_transfer_session(context)
+        response = self.close_transfer_session(context)
+        remote_status = transfer_status.COMPLETED
+        if response.status_code < 200 or response.status_code >= 300:
+            remote_status = transfer_status.ERRORED
+        return remote_status

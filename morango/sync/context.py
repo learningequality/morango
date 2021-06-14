@@ -85,16 +85,6 @@ class SessionContext(object):
         if transfer_session:
             self.filter = transfer_session.get_filter() or self.filter
             self.is_push = transfer_session.push or self.is_push
-            self.stage = transfer_session.transfer_stage or self.stage
-            self.stage_status = transfer_session.transfer_stage_status or self.stage_status
-
-        # when updating, we go ahead and update the transfer session state too and ensure that
-        # we also `refresh_from_db` too so context has the up-to-date instance
-        if self.transfer_session:
-            self.transfer_session.refresh_from_db()
-            self.transfer_session.update_state(
-                stage=self.stage, stage_status=self.stage_status
-            )
 
     @property
     def is_pull(self):
@@ -165,6 +155,21 @@ class LocalSessionContext(SessionContext):
         super(LocalSessionContext, self).__init__(capabilities=capabilities, **kwargs)
         self.request = request
         self.is_server = request is not None
+
+    def update(self, **kwargs):
+        super(LocalSessionContext, self).update(**kwargs)
+        # stage takes precedence locally
+        if "transfer_session" in kwargs:
+            self.stage = self.transfer_session.transfer_stage or self.stage
+            self.stage_status = self.transfer_session.transfer_stage_status or self.stage_status
+
+        # when updating, we go ahead and update the transfer session state too and ensure that
+        # we also `refresh_from_db` too so context has the up-to-date instance
+        if self.transfer_session:
+            self.transfer_session.refresh_from_db()
+            self.transfer_session.update_state(
+                stage=self.stage, stage_status=self.stage_status
+            )
 
     def __getstate__(self):
         """Return dict of simplified data for serialization"""
