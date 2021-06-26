@@ -261,6 +261,12 @@ class TransferSession(models.Model):
     def get_filter(self):
         return Filter(self.filter)
 
+    def get_touched_record_ids_for_model(self, model):
+        if isinstance(model, SyncableModel):
+            model = model.morango_model_name
+        assert isinstance(model, six.string_types)
+        return Store.objects.filter(model_name=model, last_transfer_session_id=self.id).values_list("id", flat=True)
+
 
 class DeletedModels(models.Model):
     """
@@ -342,6 +348,8 @@ class Store(AbstractStore):
     # used to know which store records need to be deserialized into the app layer models
     dirty_bit = models.BooleanField(default=False)
     deserialization_error = models.TextField(blank=True)
+
+    last_transfer_session_id = UUIDField(blank=True, null=True, default=None, db_index=True)
 
     objects = StoreManager()
 

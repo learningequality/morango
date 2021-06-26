@@ -169,6 +169,30 @@ class BufferIntoStoreTestCase(TestCase):
             )
         )
 
+    def assert_store_records_tagged_with_last_session(self, store_ids):
+        session_id = self.data["sc"].current_transfer_session.id
+        for store_id in store_ids:
+            assert Store.objects.get(id=store_id).last_transfer_session_id == session_id
+
+    def assert_store_records_not_tagged_with_last_session(self, store_ids):
+        session_id = self.data["sc"].current_transfer_session.id
+        for store_id in store_ids:
+            try:
+                assert Store.objects.get(id=store_id).last_transfer_session_id != session_id
+            except Store.DoesNotExist:
+                pass
+
+    def test_dequeuing_sets_last_session(self):
+        store_ids = [self.data[key] for key in ["model2", "model3", "model4", "model5", "model7"]]
+        self.assert_store_records_not_tagged_with_last_session(store_ids)
+        _dequeue_into_store(self.data["sc"].current_transfer_session)
+        # this one is a reverse fast forward, so it doesn't modify the store record and shouldn't be tagged
+        self.assert_store_records_not_tagged_with_last_session([self.data["model1"]])
+        self.assert_store_records_tagged_with_last_session(store_ids)
+        tagged_actual = set(self.data["sc"].current_transfer_session.get_touched_record_ids_for_model("facility"))
+        tagged_expected = set(store_ids)
+        assert tagged_actual == tagged_expected
+
     def test_dequeuing_delete_rmcb_records(self):
         for i in self.data["model1_rmcb_ids"]:
             self.assertTrue(
