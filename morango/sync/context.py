@@ -67,6 +67,8 @@ class SessionContext(object):
         """
         if transfer_session and self.transfer_session:
             raise MorangoContextUpdateError("Transfer session already exists")
+        elif transfer_session and self.sync_session and transfer_session.sync_session_id != self.sync_session.id:
+            raise MorangoContextUpdateError("Sync session mismatch")
 
         if sync_filter and self.filter:
             raise MorangoContextUpdateError("Filter already exists")
@@ -83,8 +85,9 @@ class SessionContext(object):
 
         # if transfer session was passed in, that takes precedence
         if transfer_session:
+            self.sync_session = transfer_session.sync_session
             self.filter = transfer_session.get_filter() or self.filter
-            self.is_push = transfer_session.push or self.is_push
+            self.is_push = transfer_session.push
 
     @property
     def is_pull(self):
@@ -158,13 +161,15 @@ class LocalSessionContext(SessionContext):
 
     def update(self, **kwargs):
         super(LocalSessionContext, self).update(**kwargs)
-        # stage takes precedence locally
+        # this is a "local" session context, so the stage and status should be in sync with the
+        # local transfer session object
         if "transfer_session" in kwargs:
             self.stage = self.transfer_session.transfer_stage or self.stage
             self.stage_status = self.transfer_session.transfer_stage_status or self.stage_status
 
-        # when updating, we go ahead and update the transfer session state too and ensure that
-        # we also `refresh_from_db` too so context has the up-to-date instance
+        # finally, since stage and status should be in sync with local transfer session object
+        # we be sure to pass along updates to stage and status. we also `refresh_from_db` too so
+        # context has the up-to-date instance
         if self.transfer_session:
             self.transfer_session.refresh_from_db()
             self.transfer_session.update_state(

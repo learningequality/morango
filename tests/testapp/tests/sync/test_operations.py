@@ -9,12 +9,11 @@ from django.utils import timezone
 from facility_profile.models import Facility
 import mock
 
-from .helpers import create_buffer_and_store_dummy_data
-from .helpers import create_dummy_store_data
+from ..helpers import create_buffer_and_store_dummy_data
+from ..helpers import create_dummy_store_data
 from morango.constants import transfer_status
 from morango.models.core import Buffer
 from morango.models.core import DatabaseIDModel
-from morango.models.core import DatabaseMaxCounter
 from morango.models.core import InstanceIDModel
 from morango.models.core import RecordMaxCounter
 from morango.models.core import RecordMaxCounterBuffer
@@ -22,16 +21,17 @@ from morango.models.core import Store
 from morango.models.core import SyncSession
 from morango.models.core import TransferSession
 from morango.sync.backends.utils import load_backend
-from morango.sync.controller import LocalSessionContext
+from morango.sync.context import LocalSessionContext
 from morango.sync.controller import MorangoProfileController
+from morango.sync.controller import SessionController
 from morango.sync.operations import _dequeue_into_store
 from morango.sync.operations import _queue_into_buffer
-from morango.sync.operations import LocalQueueOperation
+from morango.sync.operations import LocalCleanupOperation
 from morango.sync.operations import LocalDequeueOperation
+from morango.sync.operations import LocalDeserializeOperation
+from morango.sync.operations import LocalInitializeOperation
+from morango.sync.operations import LocalQueueOperation
 from morango.sync.syncsession import TransferClient
-from morango.sync.syncsession import SyncClientSignals
-from morango.sync.syncsession import SyncSignal
-from morango.sync.syncsession import SyncSignalGroup
 
 DBBackend = load_backend(connection).SQLWrapper()
 
@@ -49,10 +49,13 @@ class QueueStoreIntoBufferTestCase(TestCase):
         super(QueueStoreIntoBufferTestCase, self).setUp()
         self.data = create_dummy_store_data()
         self.transfer_session = self.data["sc"].current_transfer_session
+        # self.transfer_session.filter = "abc123"
         self.context = mock.Mock(
             spec=LocalSessionContext,
             transfer_session=self.transfer_session,
             sync_session=self.transfer_session.sync_session,
+            filter=self.transfer_session.get_filter(),
+            is_push=self.transfer_session.push,
             is_server=False,
         )
 
@@ -156,6 +159,40 @@ class QueueStoreIntoBufferTestCase(TestCase):
         # ensure that record with valid fsic but invalid partition is not buffered
         self.assertRecordsNotBuffered([self.data["user4"]])
 
+    def test_local_initialize_operation__server(self):
+        self.context.transfer_session = None
+        id = uuid.uuid4().hex
+        client_fsic = '{"abc123": 456}'
+        records_total = 10
+        self.context.request.data.get.side_effect = [
+            id,
+            records_total,
+            client_fsic,
+        ]
+        self.context.filter = [self.transfer_session.get_filter()]
+        operation = LocalInitializeOperation()
+        self.assertEqual(transfer_status.COMPLETED, operation.handle(self.context))
+        self.context.update.assert_called_once()
+        transfer_session = self.context.update.call_args_list[0][1].get("transfer_session")
+        self.assertEqual(id, transfer_session.id)
+        self.assertEqual(records_total, transfer_session.records_total)
+        self.assertEqual(client_fsic, transfer_session.client_fsic)
+
+    def test_local_initialize_operation__not_server(self):
+        self.context.transfer_session = None
+        self.context.request = None
+        self.context.is_server = False
+        self.context.filter = [self.transfer_session.get_filter()]
+        operation = LocalInitializeOperation()
+        self.assertEqual(transfer_status.COMPLETED, operation.handle(self.context))
+        self.context.update.assert_called_once()
+
+    def test_local_initialize_operation__resume(self):
+        self.context.transfer_session = None
+        operation = LocalInitializeOperation()
+        self.assertEqual(transfer_status.COMPLETED, operation.handle(self.context))
+        self.context.update.assert_called_once_with(transfer_session=self.transfer_session)
+
     def test_local_queue_operation(self):
         fsics = {self.data["group1_id"].id: 1, self.data["group2_id"].id: 1}
         self.transfer_session.client_fsic = json.dumps(fsics)
@@ -176,6 +213,7 @@ class QueueStoreIntoBufferTestCase(TestCase):
         self.transfer_session.client_fsic = json.dumps(fsics)
 
         # as server, for push, operation should not queue into buffer
+        self.context.is_push = True
         self.context.is_server = True
 
         operation = LocalQueueOperation()
@@ -184,9 +222,9 @@ class QueueStoreIntoBufferTestCase(TestCase):
 
 
 @override_settings(MORANGO_DESERIALIZE_AFTER_DEQUEUING=False)
-class BufferIntoStoreTestCase(TestCase):
+class DequeueBufferIntoStoreTestCase(TestCase):
     def setUp(self):
-        super(BufferIntoStoreTestCase, self).setUp()
+        super(DequeueBufferIntoStoreTestCase, self).setUp()
         self.data = {}
         DatabaseIDModel.objects.create()
         (self.current_id, _) = InstanceIDModel.get_or_create_current_instance()
@@ -195,7 +233,7 @@ class BufferIntoStoreTestCase(TestCase):
         conn = mock.Mock(spec="morango.sync.syncsession.NetworkSyncConnection")
         conn.server_info = dict(capabilities=[])
         self.data["mc"] = MorangoProfileController("facilitydata")
-        self.data["sc"] = TransferClient(conn, "host")
+        self.data["sc"] = TransferClient(conn, "host", SessionController.build())
         session = SyncSession.objects.create(
             id=uuid.uuid4().hex, profile="", last_activity_timestamp=timezone.now()
         )
@@ -527,13 +565,11 @@ class BufferIntoStoreTestCase(TestCase):
             ).exists()
         )
 
-    @mock.patch("morango.sync.operations.DatabaseMaxCounter.update_fsics")
-    def test_local_dequeue_operation(self, mock_update_fsics):
+    def test_local_dequeue_operation(self):
         self.transfer_session.records_transferred = 1
         self.context.filter = [self.transfer_session.filter]
         operation = LocalDequeueOperation()
         self.assertEqual(transfer_status.COMPLETED, operation.handle(self.context))
-        mock_update_fsics.assert_called()
         self.assertFalse(
             Buffer.objects.filter(transfer_session_id=self.transfer_session.id).exists()
         )
@@ -552,90 +588,30 @@ class BufferIntoStoreTestCase(TestCase):
         self.assertEqual(transfer_status.COMPLETED, operation.handle(self.context))
         mock_dequeue.assert_not_called()
 
+    @mock.patch("morango.sync.operations.DatabaseMaxCounter.update_fsics")
+    def test_local_deserialize_operation(self, mock_update_fsics):
+        self.transfer_session.records_transferred = 1
+        self.context.filter = [self.transfer_session.filter]
+        operation = LocalDeserializeOperation()
+        self.assertEqual(transfer_status.COMPLETED, operation.handle(self.context))
+        mock_update_fsics.assert_called()
 
-class SyncSignalTestCase(TestCase):
-    def test_defaults(self):
-        signaler = SyncSignal(this_is_a_default=True)
-        handler = mock.Mock()
-        signaler.connect(handler)
-        signaler.fire()
-
-        handler.assert_called_once_with(this_is_a_default=True)
-
-    def test_fire_with_kwargs(self):
-        signaler = SyncSignal(my_key="abc")
-        handler = mock.Mock()
-        signaler.connect(handler)
-        signaler.fire(my_key="123", not_default=True)
-
-        handler.assert_called_once_with(my_key="123", not_default=True)
-
-
-class SyncSignalGroupTestCase(TestCase):
-    def test_started_defaults(self):
-        signaler = SyncSignalGroup(this_is_a_default=True)
-        handler = mock.Mock()
-        signaler.connect(handler)
-
-        signaler.fire()
-        handler.assert_called_with(this_is_a_default=True)
-
-        signaler.started.fire(this_is_a_default=False)
-        handler.assert_called_with(this_is_a_default=False)
-
-    def test_in_progress_defaults(self):
-        signaler = SyncSignalGroup(this_is_a_default=True)
-        handler = mock.Mock()
-        signaler.connect(handler)
-
-        signaler.fire()
-        handler.assert_called_with(this_is_a_default=True)
-
-        signaler.in_progress.fire(this_is_a_default=False)
-        handler.assert_called_with(this_is_a_default=False)
-
-    def test_completed_defaults(self):
-        signaler = SyncSignalGroup(this_is_a_default=True)
-        handler = mock.Mock()
-        signaler.connect(handler)
-
-        signaler.fire()
-        handler.assert_called_with(this_is_a_default=True)
-
-        signaler.completed.fire(this_is_a_default=False)
-        handler.assert_called_with(this_is_a_default=False)
-
-    def test_send(self):
-        signaler = SyncSignalGroup(this_is_a_default=True)
-
-        start_handler = mock.Mock()
-        signaler.started.connect(start_handler)
-        in_progress_handler = mock.Mock()
-        signaler.in_progress.connect(in_progress_handler)
-        completed_handler = mock.Mock()
-        signaler.completed.connect(completed_handler)
-
-        with signaler.send(other="A") as status:
-            start_handler.assert_called_once_with(this_is_a_default=True, other="A")
-            status.in_progress.fire(this_is_a_default=False, other="B")
-            in_progress_handler.assert_called_once_with(
-                this_is_a_default=False, other="B"
-            )
-            completed_handler.assert_not_called()
-
-        completed_handler.assert_called_once_with(this_is_a_default=True, other="A")
-
-
-class SyncClientSignalsTestCase(TestCase):
-    def test_separation(self):
-        handler1 = mock.Mock()
-        signals1 = SyncClientSignals()
-        signals1.session.connect(handler1)
-
-        handler2 = mock.Mock()
-        signals2 = SyncClientSignals()
-        signals2.session.connect(handler2)
-
-        signals1.session.fire()
-        handler1.assert_called_once_with(transfer_session=None)
-        handler2.assert_not_called()
+    def test_local_cleanup(self):
+        self.context.is_server = False
+        self.context.is_push = True
+        operation = LocalCleanupOperation()
+        self.assertTrue(self.transfer_session.active)
+        self.assertTrue(
+            Buffer.objects.filter(transfer_session_id=self.transfer_session.id).exists()
+        )
+        self.assertTrue(
+            RecordMaxCounterBuffer.objects.filter(transfer_session_id=self.transfer_session.id).exists()
+        )
+        self.assertEqual(transfer_status.COMPLETED, operation.handle(self.context))
+        self.assertFalse(self.transfer_session.active)
+        self.assertFalse(
+            Buffer.objects.filter(transfer_session_id=self.transfer_session.id).exists()
+        )
+        self.assertFalse(
+            RecordMaxCounterBuffer.objects.filter(transfer_session_id=self.transfer_session.id).exists()
+        )

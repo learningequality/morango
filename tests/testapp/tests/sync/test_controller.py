@@ -11,7 +11,7 @@ from facility_profile.models import MyUser
 from facility_profile.models import SummaryLog
 from test.support import EnvironmentVarGuard
 
-from .helpers import serialized_facility_factory
+from ..helpers import serialized_facility_factory
 from morango.constants import transfer_stage
 from morango.constants import transfer_status
 from morango.models.certificates import Filter
@@ -673,7 +673,8 @@ class SessionControllerTestCase(SimpleTestCase):
             self.assertEqual(transfer_status.STARTED, result)
             self.assertEqual(1, len(invoke.call_args_list))
             call = invoke.call_args[0]
-            self.assertEqual(transfer_stage.QUEUING, call[0].related_stage)
+            self.assertEqual(self.context, call[0])
+            self.assertEqual(transfer_stage.QUEUING, call[1].related_stage)
 
     def test_proceed_to__executes_middleware__all(self):
         self.context.update(stage=transfer_stage.SERIALIZING, stage_status=transfer_status.COMPLETED)
@@ -703,11 +704,12 @@ class SessionControllerTestCase(SimpleTestCase):
             self.assertEqual(result, transfer_status.ERRORED)
 
     def test_invoke_middleware(self):
-        self.controller.context = mock.Mock(spec=SessionContext)
+        context = mock.Mock(spec=SessionContext)
+        self.controller.context = context
         with self._mock_method('_log_invocation') as log:
             middleware = self.middleware[0]
             middleware.return_value = transfer_status.STARTED
-            result = self.controller._invoke_middleware(middleware)
+            result = self.controller._invoke_middleware(context, middleware)
             self.assertEqual(result, transfer_status.STARTED)
 
             context_update_calls = self.controller.context.update.call_args_list

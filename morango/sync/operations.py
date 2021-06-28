@@ -14,7 +14,9 @@ from django.db.models import signals
 from django.utils import six
 from django.utils import timezone
 from rest_framework import status
+from rest_framework.exceptions import ValidationError
 
+from morango.api.serializers import BufferSerializer
 from morango.constants.capabilities import ASYNC_OPERATIONS
 from morango.constants import transfer_stage
 from morango.constants import transfer_status
@@ -34,6 +36,7 @@ from morango.sync.backends.utils import load_backend
 from morango.sync.context import LocalSessionContext
 from morango.sync.context import NetworkSessionContext
 from morango.sync.utils import mute_signals
+from morango.sync.utils import validate_and_create_buffer_data
 from morango.utils import SETTINGS
 
 
@@ -570,20 +573,29 @@ class LocalInitializeOperation(LocalOperation):
         assert context.transfer_session is None
         assert context.filter is not None
 
-        # data that should be unique for the transfer session
+        # attributes that we'll use to identify existing sessions. we really only want there to
+        # be one of these at a time
         data = dict(
             push=context.is_push,
             filter=str(context.filter),
             sync_session_id=context.sync_session.id,
+            active=True,
         )
+        transfer_sessions = TransferSession.objects.filter(**data)
+        transfer_session = None
 
-        # first attempt to get an existing for resumption, otherwise create it
-        try:
-            transfer_session = TransferSession.objects.get(**data)
-            # If not active, we refuse to resume
-            if not transfer_session.active:
-                raise MorangoResumeSyncError("Existing transfer session is inactive")
-        except TransferSession.DoesNotExist:
+        # order by the last activity to pull the first, and deactivate other matching sessions
+        for existing_session in transfer_sessions.order_by("-last_activity_timestamp"):
+            if transfer_session is None:
+                transfer_session = existing_session
+            else:
+                # since there was more than one, let's ensure that we don't resume an older one
+                # after completing this one
+                # TODO: do cleanup
+                existing_session.active = False
+                existing_session.save()
+
+        if transfer_session is None:
             # build data for creating transfer session
             data.update(
                 id=uuid.uuid4().hex,
@@ -676,6 +688,28 @@ class LocalQueueOperation(LocalOperation):
         context.transfer_session.records_total = records_total
         context.transfer_session.save()
         return transfer_status.COMPLETED
+
+
+class LocalPushTransferOperation(LocalOperation):
+    """
+    Handles push of buffer data for the transfer session
+    """
+    def handle(self, context):
+        """
+        :type context: LocalSessionContext
+        """
+        assert context.request is not None
+        assert context.is_push
+
+        data = context.request.data
+        if not isinstance(context.request.data, list):
+            data = [context.request.data]
+
+        validate_and_create_buffer_data(data, context.transfer_session)
+
+        if context.transfer_session.records_transferred == context.transfer_session.records_total:
+            return transfer_status.COMPLETED
+        return transfer_status.PENDING
 
 
 class LocalDequeueOperation(LocalOperation):
@@ -822,6 +856,51 @@ class RemoteNetworkOperation(BaseOperation):
             context.transfer_session
         )
 
+    def put_buffers(self, context, buffers):
+        """
+        :type context: NetworkSessionContext
+        :param buffers: List of serialized Buffer dicts
+        :return: The response
+        """
+        return context.connection._push_record_chunk(buffers)
+
+    def get_buffers(self, context):
+        """
+        Pulls a single chunk of buffers from the remote server and does some validation
+
+        :type context: NetworkSessionContext
+        :return: A list of dicts, serialized Buffers
+        """
+        response = context.connection._pull_record_chunk(
+            context.transfer_session
+        )
+
+        data = response.json()
+
+        # parse out the results from a paginated set, if needed
+        if isinstance(data, dict) and "results" in data:
+            data = data["results"]
+
+            # ensure the transfer session allows pulls, and is same across records
+        transfer_session = TransferSession.objects.get(
+            id=data[0]["transfer_session"]
+        )
+        if transfer_session.push:
+            raise ValidationError(
+                "Specified TransferSession does not allow pulling."
+            )
+
+        if len(set(rec["transfer_session"] for rec in data)) > 1:
+            raise ValidationError(
+                "All pulled records must be associated with the same TransferSession."
+            )
+
+        if context.transfer_session.id != transfer_session.id:
+            raise ValidationError(
+                "Specified TransferSession does not match this SyncClient's current TransferSession."
+            )
+        return data
+
     def remote_proceed_to(self, context, stage):
         """
         Uses server API's to push updates to a remote `TransferSession`, which triggers the
@@ -843,6 +922,9 @@ class RemoteNetworkOperation(BaseOperation):
         elif remote_stage > stage:
             # if past this stage, then we just make sure returned status is completed
             remote_status = transfer_status.COMPLETED
+
+        if not remote_status:
+            raise MorangoResumeSyncError("Error")
 
         # if still in progress, then we return PENDING which will cause controller
         # to again call the middleware that contains this operation, and check the server status
@@ -980,6 +1062,73 @@ class RemoteQueueOperation(RemoteNetworkOperation):
             context.transfer_session.save()
 
         return remote_status
+
+
+class RemotePushTransferOperation(RemoteNetworkOperation):
+    def handle(self, context):
+        """
+        :type context: NetworkSessionContext
+        """
+        assert context.transfer_session is not None
+        assert context.is_push
+
+        offset = context.transfer_session.records_transferred
+        chunk_size = context.connection.chunk_size
+
+        buffered_records = Buffer.objects.filter(
+            transfer_session=context.transfer_session
+        ).order_by("pk")
+
+        data = BufferSerializer(buffered_records[offset : offset + chunk_size], many=True).data
+
+        # push buffers chunk to server
+        self.put_buffers(context, data)
+
+        context.transfer_session.records_transferred = min(
+            offset + chunk_size,
+            context.transfer_session.records_total
+        )
+        context.transfer_session.bytes_sent = context.connection.bytes_sent
+        context.transfer_session.bytes_received = context.connection.bytes_received
+        context.transfer_session.save()
+
+        # if we've transferred all records, return a completed status
+        op_status = transfer_status.PENDING
+        if context.transfer_session.records_transferred >= context.transfer_session.records_total:
+            op_status = transfer_status.COMPLETED
+
+        return op_status
+
+
+class RemotePullTransferOperation(RemoteNetworkOperation):
+    def handle(self, context):
+        """
+        :type context: NetworkSessionContext
+        """
+        assert context.transfer_session is not None
+        assert context.is_pull
+
+        # grab buffers chunk
+        data = self.get_buffers(context)
+        transfer_session = context.transfer_session
+
+        validate_and_create_buffer_data(data, transfer_session, connection=context.connection)
+
+        # update the records transferred so client and server are in agreement
+        self.update_transfer_session(
+            context,
+            records_transferred=transfer_session.records_transferred,
+            # flip each of these since we're talking about the remote instance
+            bytes_received=transfer_session.bytes_sent,
+            bytes_sent=transfer_session.bytes_received,
+        )
+
+        # if we've transferred all records, return a completed status
+        op_status = transfer_status.PENDING
+        if context.transfer_session.records_transferred >= context.transfer_session.records_total:
+            op_status = transfer_status.COMPLETED
+
+        return op_status
 
 
 class RemoteSynchronousDequeueOperation(

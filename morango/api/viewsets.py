@@ -27,6 +27,7 @@ from morango.models.core import InstanceIDModel
 from morango.models.core import SyncSession
 from morango.models.core import TransferSession
 from morango.models.fields.crypto import SharedKey
+from morango.sync.context import LocalSessionContext
 from morango.sync.controller import SessionController
 from morango.sync.utils import validate_and_create_buffer_data
 from morango.utils import CAPABILITIES
@@ -39,6 +40,9 @@ if GZIP_BUFFER_POST in CAPABILITIES:
     parsers = (GzipParser, JSONParser)
 else:
     parsers = (JSONParser,)
+
+
+session_controller = SessionController.build(enable_logging=True)
 
 
 class CertificateChainViewSet(viewsets.ViewSet):
@@ -370,19 +374,18 @@ class TransferSessionViewSet(viewsets.ModelViewSet):
         if scope_error_msg:
             return response.Response(scope_error_msg, status=status.HTTP_403_FORBIDDEN)
 
-        controller = SessionController.build_local(
+        context = LocalSessionContext(
             request=request,
             sync_session=syncsession,
             sync_filter=requested_filter,
             is_push=is_a_push,
-            enable_logging=True
         )
 
         # If both client and ourselves allow async, we just return accepted status, and the client
         # should PATCH the transfer_session to the appropriate stage. If not async, we wait until
         # queuing is complete
         to_stage = transfer_stage.INITIALIZING if self.async_allowed() else transfer_stage.QUEUING
-        result = controller.proceed_to_and_wait_for(to_stage)
+        result = session_controller.proceed_to_and_wait_for(to_stage, context=context)
 
         if result == transfer_status.ERRORED:
             return response.Response(
@@ -394,7 +397,7 @@ class TransferSessionViewSet(viewsets.ModelViewSet):
             response_status = status.HTTP_202_ACCEPTED
 
         return response.Response(
-            self.get_serializer(controller.context.transfer_session).data,
+            self.get_serializer(context.transfer_session).data,
             status=response_status,
         )
 
@@ -408,13 +411,14 @@ class TransferSessionViewSet(viewsets.ModelViewSet):
         if update_stage is not None:
             # if client is trying to update `transfer_stage`, then we use the controller to proceed
             # to the stage, but wait for completion if both do not support async
-            controller = SessionController.build_local(
-                request=request, transfer_session=self.get_object(), enable_logging=True
+            context = LocalSessionContext(
+                request=request,
+                transfer_session=self.get_object(),
             )
             if self.async_allowed():
-                controller.proceed_to(update_stage)
+                session_controller.proceed_to(update_stage, context=context)
             else:
-                controller.proceed_to_and_wait_for(update_stage)
+                session_controller.proceed_to_and_wait_for(update_stage, context=context)
 
         return super(TransferSessionViewSet, self).update(request, *args, **kwargs)
 
@@ -422,13 +426,14 @@ class TransferSessionViewSet(viewsets.ModelViewSet):
         return response.Response("Forbidden", status=status.HTTP_403_FORBIDDEN)
 
     def perform_destroy(self, transfer_session):
-        controller = SessionController.build_local(
-            request=self.request, transfer_session=transfer_session, enable_logging=True
+        context = LocalSessionContext(
+            request=self.request,
+            transfer_session=transfer_session,
         )
         if self.async_allowed():
-            controller.proceed_to(transfer_stage.CLEANUP)
+            session_controller.proceed_to(transfer_stage.CLEANUP, context=context)
         else:
-            result = controller.proceed_to_and_wait_for(transfer_stage.CLEANUP)
+            result = session_controller.proceed_to_and_wait_for(transfer_stage.CLEANUP, context=context)
             # raise an error for synchronous, if status is false
             if result == transfer_status.ERRORED:
                 raise RuntimeError("Cleanup failed")
@@ -466,7 +471,12 @@ class BufferViewSet(mixins.ListModelMixin, viewsets.GenericViewSet):
                 "All pushed records must be associated with the same TransferSession.",
                 status=status.HTTP_403_FORBIDDEN,
             )
-        validate_and_create_buffer_data(data, transfer_session)
+
+        context = LocalSessionContext(request=request, transfer_session=transfer_session)
+        result = session_controller.proceed_to(transfer_stage.TRANSFERRING, context=context)
+
+        if result == transfer_status.ERRORED:
+            return response.Response(status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
         return response.Response(status=status.HTTP_201_CREATED)
 

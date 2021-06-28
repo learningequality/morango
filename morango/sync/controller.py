@@ -3,12 +3,8 @@ from time import sleep
 
 from morango.constants import transfer_stage
 from morango.constants import transfer_status
-from morango.models.core import SyncSession
-from morango.models.core import TransferSession
 from morango.registry import session_middleware
 
-from morango.sync.context import LocalSessionContext
-from morango.sync.context import NetworkSessionContext
 from morango.sync.operations import _deserialize_from_store
 from morango.sync.operations import _serialize_into_store
 from morango.sync.operations import OperationLogger
@@ -69,10 +65,10 @@ class SessionController(object):
 
     __slots__ = ("middleware", "context", "logging_enabled")
 
-    def __init__(self, middleware, context, enable_logging):
+    def __init__(self, middleware, context=None, enable_logging=False):
         """
         :type middleware: morango.registry.SessionMiddlewareRegistry|list
-        :type context: SessionContext|LocalSessionContext|NetworkSessionContext
+        :type context: morango.sync.context.SessionContext|None
         :type enable_logging: bool
         """
         self.middleware = middleware
@@ -80,57 +76,19 @@ class SessionController(object):
         self.logging_enabled = enable_logging
 
     @classmethod
-    def build_local(
-        cls,
-        request=None,
-        sync_session=None,
-        transfer_session=None,
-        sync_filter=None,
-        is_push=None,
-        enable_logging=False,
-    ):
+    def build(cls, context=None, enable_logging=False):
         """
-        Factory method that instantiates the `SessionController` with a `LocalSessionContext`
-        containing the arguments, and the global middleware registry `session_middleware`
+        Factory method that instantiates the `SessionController` with the specified context and
+        the global middleware registry `session_middleware`
 
-        :type request: django.http.request.HttpRequest
-        :type sync_session: SyncSession|None
-        :type transfer_session: TransferSession|None
-        :type sync_filter: Filter|None
-        :type is_push: bool
+        :type context: morango.sync.context.SessionContext|None
         :type enable_logging: bool
         :return: A new transfer controller
         :rtype: SessionController
         """
-        context = LocalSessionContext(
-            request=request,
-            sync_session=sync_session,
-            transfer_session=transfer_session,
-            sync_filter=sync_filter,
-            is_push=is_push,
-        )
-        return SessionController(session_middleware, context, enable_logging)
+        return SessionController(session_middleware, context=context, enable_logging=enable_logging)
 
-    @classmethod
-    def build_network(cls, connection, sync_session=None, transfer_session=None):
-        """
-        Factory method that instantiates the `SessionController` with a `NetworkSessionContext`
-        containing the arguments, and the global middleware registry `session_middleware`
-
-        :type connection: morango.sync.syncsession.NetworkSyncConnection
-        :type sync_session: SyncSession|None
-        :type transfer_session: TransferSession|None
-        :return: A new transfer controller
-        :rtype: SessionController
-        """
-        context = NetworkSessionContext(
-            connection,
-            sync_session=sync_session,
-            transfer_session=transfer_session,
-        )
-        return SessionController(session_middleware, context, False)
-
-    def proceed_to(self, stage):
+    def proceed_to(self, stage, context=None):
         """
         Calls middleware that operates on stages between the current stage and the `to_stage`. The
         middleware are called incrementally, but in order to proceed to the next stage, the
@@ -150,22 +108,29 @@ class SessionController(object):
 
         :param stage: transfer_stage.* - The transfer stage to proceed to
         :type stage: str
+        :param context: Override controller context, or provide it if missing
+        :type context: morango.sync.context.SessionContext|None
         :return: transfer_status.* - The status of proceeding to that stage
         :rtype: str
         """
+        if context is None:
+            context = self.context
+            if context is None:
+                raise ValueError("Controller is missing required context object")
+
         stage = transfer_stage.stage(stage)
 
         # we can't 'proceed' to a stage we've already passed
-        current_stage = transfer_stage.stage(self.context.stage)
+        current_stage = transfer_stage.stage(context.stage)
         if current_stage > stage:
             return transfer_status.COMPLETED
 
         # See comments above, any of these statuses mean a no-op for proceeding
-        if self.context.stage_status in (
+        if context.stage_status in (
             transfer_status.STARTED,
             transfer_status.ERRORED,
         ):
-            return self.context.stage_status
+            return context.stage_status
 
         result = False
         # inside "session_middleware"
@@ -176,11 +141,11 @@ class SessionController(object):
             # execute middleware, up to and including the requested stage
             elif (
                 transfer_stage.stage(middleware.related_stage) > current_stage
-                or self.context.stage_status == transfer_status.PENDING
+                or context.stage_status == transfer_status.PENDING
             ):
                 # if the result is not completed status, then break because that means we can't
                 # proceed to the next stage (yet)
-                result = self._invoke_middleware(middleware)
+                result = self._invoke_middleware(context, middleware)
                 if result != transfer_status.COMPLETED:
                     break
 
@@ -188,23 +153,25 @@ class SessionController(object):
         # should always be a non-False status
         return result
 
-    def proceed_to_and_wait_for(self, stage, interval=5):
+    def proceed_to_and_wait_for(self, stage, context=None, interval=5):
         """
         Same as `proceed_to` but waits for a finished status to be returned by sleeping between
         calls to `proceed_to` if status is not complete
 
         :param stage: transfer_stage.* - The transfer stage to proceed to
         :type stage: str
+        :param context: Override controller context, or provide it if missing
+        :type context: morango.sync.context.SessionContext|None
         :param interval: The time, in seconds, between repeat calls to `.proceed_to`
         :type stage: str
         :return: transfer_status.* - The status of proceeding to that stage,
             which should be `ERRORED` or `COMPLETE`
         :rtype: str
         """
-        result = self.proceed_to(stage)
+        result = transfer_status.PENDING
         while result not in transfer_status.FINISHED_STATES:
+            result = self.proceed_to(stage, context=context)
             sleep(interval)
-            result = self.proceed_to(stage)
         return result
 
     def _log_invocation(self, stage, result=None):
@@ -224,10 +191,12 @@ class SessionController(object):
         elif result == transfer_status.ERRORED:
             logging.info("Encountered error during stage '{}'".format(stage))
 
-    def _invoke_middleware(self, middleware):
+    def _invoke_middleware(self, context, middleware):
         """
         Invokes middleware, with logging if enabled, and handles updating the transfer session state
 
+        :param context: The context to invoke the middleware with
+        :type context: morango.sync.context.SessionContext
         :type middleware: morango.registry.SessionMiddlewareOperations
         :return: transfer_status.* - The result of invoking the middleware
         :rtype: str
@@ -236,14 +205,15 @@ class SessionController(object):
         self._log_invocation(stage)
 
         try:
-            self.context.update(stage=stage, stage_status=transfer_status.PENDING)
-            result = middleware(self.context)
+            context.update(stage=stage, stage_status=transfer_status.PENDING)
+            result = middleware(context)
             self._log_invocation(stage, result=result)
-            self.context.update(stage_status=result)
+            context.update(stage_status=result)
             return result
         except Exception as e:
             # always log the error itself
+            raise e
             logging.error(e)
             self._log_invocation(stage, result=transfer_status.ERRORED)
-            self.context.update(stage_status=transfer_status.ERRORED)
+            context.update(stage_status=transfer_status.ERRORED)
             return transfer_status.ERRORED

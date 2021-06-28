@@ -1,5 +1,6 @@
 from __future__ import unicode_literals
 
+import os
 import json
 import logging
 import uuid
@@ -122,6 +123,7 @@ class InstanceIDModel(models.Model):
         """Get the instance model corresponding to the current system, or create a new
         one if the system is new or its properties have changed (e.g. new MAC address)."""
 
+        system_id = os.environ.get("MORANGO_SYSTEM_ID")
         if clear_cache:
             cls._cached_instance = None
 

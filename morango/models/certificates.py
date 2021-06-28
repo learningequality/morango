@@ -350,6 +350,8 @@ class Filter(object):
         return self.is_subset_of(other)
 
     def __eq__(self, other):
+        if other is None:
+            return False
         for partition in self._filter_tuple:
             if partition not in other._filter_tuple:
                 return False

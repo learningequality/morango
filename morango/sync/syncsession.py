@@ -38,6 +38,8 @@ from morango.models.core import InstanceIDModel
 from morango.models.core import SyncSession
 from morango.models.core import TransferSession
 from morango.sync.controller import SessionController
+from morango.sync.context import LocalSessionContext
+from morango.sync.context import NetworkSessionContext
 from morango.sync.utils import SyncSignal
 from morango.sync.utils import SyncSignalGroup
 from morango.utils import CAPABILITIES
@@ -98,9 +100,19 @@ class Connection(object):
 
 
 class NetworkSyncConnection(Connection):
+    __slots__ = (
+        'base_url',
+        'compresslevel',
+        'session',
+        'server_info',
+        'capabilities',
+        'chunk_size',
+    )
+
     default_chunk_size = 500
 
-    def __init__(self, base_url="", compresslevel=9, retries=7, backoff_factor=0.3):
+    def __init__(self, base_url="", compresslevel=9, retries=7, backoff_factor=0.3,
+                 chunk_size=default_chunk_size):
         """
         The underlying network connection with a syncing peer. Any network requests
         (such as certificate querying or syncing related) will be done through this class.
@@ -121,6 +133,7 @@ class NetworkSyncConnection(Connection):
             urljoin(self.base_url, api_urls.INFO)
         ).json()
         self.capabilities = self.server_info.get("capabilities", [])
+        self.chunk_size = chunk_size
 
     @property
     def bytes_sent(self):
@@ -137,7 +150,7 @@ class NetworkSyncConnection(Connection):
         return url
 
     def create_sync_session(
-        self, client_cert, server_cert, chunk_size=default_chunk_size
+        self, client_cert, server_cert, chunk_size=None
     ):
         """
         Starts a sync session by creating it on the server side and returning a client to use
@@ -152,6 +165,9 @@ class NetworkSyncConnection(Connection):
         :return: A SyncSessionClient instance
         :rtype: SyncSessionClient
         """
+        if chunk_size is not None:
+            self.chunk_size = chunk_size
+
         # if server cert does not exist locally, retrieve it from server
         if not Certificate.objects.filter(id=server_cert.id).exists():
             cert_chain_response = self._get_certificate_chain(
@@ -227,7 +243,7 @@ class NetworkSyncConnection(Connection):
             "server_instance": session_resp.json().get("server_instance") or "{}",
         }
         sync_session = SyncSession.objects.create(**data)
-        return SyncSessionClient(self, sync_session, chunk_size=chunk_size)
+        return SyncSessionClient(self, sync_session)
 
     def resume_sync_session(self, sync_session_id, chunk_size=default_chunk_size):
         """
@@ -252,7 +268,7 @@ class NetworkSyncConnection(Connection):
         except HTTPError as e:
             raise MorangoResumeSyncError("Unable to verify remote sync session") from e
 
-        return SyncSessionClient(self, sync_session, chunk_size=chunk_size)
+        return SyncSessionClient(self, sync_session)
 
     def close_sync_session(self, sync_session):
         # "delete" sync session on server side
@@ -451,10 +467,10 @@ class NetworkSyncConnection(Connection):
         else:
             return self.session.post(self.urlresolve(api_urls.BUFFER), json=data)
 
-    def _pull_record_chunk(self, chunk_size, transfer_session):
+    def _pull_record_chunk(self, transfer_session):
         # pull records from server for given transfer session
         params = {
-            "limit": chunk_size,
+            "limit": self.chunk_size,
             "offset": transfer_session.records_transferred,
             "transfer_session_id": transfer_session.id,
         }
@@ -481,36 +497,32 @@ class SyncSessionClient(object):
     __slots__ = (
         "sync_connection",
         "sync_session",
-        "chunk_size",
         "signals",
+        "controller",
     )
 
-    def __init__(self, sync_connection, sync_session, chunk_size=500):
+    def __init__(self, sync_connection, sync_session, controller=None):
         """
         :param sync_connection: NetworkSyncConnection
         :param sync_session: SyncSession
-        :param chunk_size: int
+        :param controller: SessionController
         """
         self.sync_connection = sync_connection
         self.sync_session = sync_session
-        self.chunk_size = chunk_size
         self.signals = SyncClientSignals()
+        self.controller = controller or SessionController.build()
 
     def get_pull_client(self):
         """
         returns ``PullClient``
         """
-        return PullClient(
-            self.sync_connection, self.sync_session, chunk_size=self.chunk_size
-        )
+        return PullClient(self.sync_connection, self.sync_session, self.controller)
 
     def get_push_client(self):
         """
         returns ``PushClient``
         """
-        return PushClient(
-            self.sync_connection, self.sync_session, chunk_size=self.chunk_size
-        )
+        return PushClient(self.sync_connection, self.sync_session, self.controller)
 
     def initiate_pull(self, sync_filter):
         """
@@ -549,85 +561,96 @@ class TransferClient(object):
     __slots__ = (
         "sync_connection",
         "sync_session",
-        "chunk_size",
+        "controller",
         "current_transfer_session",
         "signals",
-        "local_controller",
-        "remote_controller",
+        "local_context",
+        "remote_context",
     )
 
-    def __init__(self, sync_connection, sync_session, chunk_size=500):
+    def __init__(self, sync_connection, sync_session, controller):
         """
         :param sync_connection: NetworkSyncConnection
         :param sync_session: SyncSession
-        :param chunk_size: int
+        :param controller: SessionController
         """
         self.sync_connection = sync_connection
         self.sync_session = sync_session
-        self.chunk_size = chunk_size
+        self.controller = controller
         self.current_transfer_session = None
         self.signals = SyncClientSignals()
-        self.local_controller = SessionController.build_local(sync_session=sync_session)
-        self.remote_controller = SessionController.build_network(
-            sync_connection, sync_session=sync_session
-        )
+
+        # TODO: come up with strategy to use only one context here
+        self.local_context = LocalSessionContext(sync_session=sync_session)
+        self.remote_context = NetworkSessionContext(sync_connection, sync_session=sync_session)
+
+    def proceed_to_and_wait_for(self, stage):
+        for context in (self.remote_context, self.local_context):
+            result = self.controller.proceed_to_and_wait_for(stage, context=context)
+            if result == transfer_status.ERRORED:
+                raise MorangoError("Stage `{}` failed".format(stage))
 
     def initialize(self, sync_filter):
         """
         :param sync_filter: Filter
         """
-        raise NotImplementedError("Abstract method")
-
-    def run(self):
-        raise NotImplementedError("Abstract method")
-
-    def finalize(self):
-        raise NotImplementedError("Abstract method")
-
-    def _has_records(self):
-        # not initialized
-        if not self.current_transfer_session:
-            raise MorangoError("Client has not been initialized")
-
-        records_total = self.current_transfer_session.records_total
-        return records_total is not None and records_total > 0
-
-    def _initialize_server_transfer_session(self):
-        # create transfer session on server side, and push it to QUEUING stage
-        self.remote_controller.proceed_to_and_wait_for(transfer_stage.QUEUING)
-
-    def _close_server_transfer_session(self):
-        return self.sync_connection._close_transfer_session(
-            self.current_transfer_session
-        )
-
-    def _create_transfer_session(self, sync_filter):
         # set filter on controller
-        self.local_controller.context.update(sync_filter=sync_filter)
+        self.local_context.update(sync_filter=sync_filter)
+        self.remote_context.update(sync_filter=sync_filter)
 
         # initialize the transfer session locally
-        status = self.local_controller.proceed_to_and_wait_for(transfer_stage.INITIALIZING)
+        status = self.controller.proceed_to_and_wait_for(
+            transfer_stage.INITIALIZING, context=self.local_context
+        )
         if status == transfer_status.ERRORED:
             raise MorangoError("Failed to initialize transfer session")
 
         # copy the transfer session to local state and update remote controller context
-        self.current_transfer_session = self.local_controller.context.transfer_session
-        self.remote_controller.context.update(transfer_session=self.current_transfer_session)
+        self.current_transfer_session = self.local_context.transfer_session
+        self.remote_context.update(transfer_session=self.current_transfer_session)
 
         self.signals.session.started.fire(
             transfer_session=self.current_transfer_session
         )
 
-        # create transfer session on server side
-        self._initialize_server_transfer_session()
+        # create transfer session on server side and proceed to queuing
+        with self.signals.queuing.send(
+            transfer_session=self.current_transfer_session
+        ):
+            self.proceed_to_and_wait_for(transfer_stage.QUEUING)
 
-    def _close_transfer_session(self):
-        self.remote_controller.proceed_to_and_wait_for(transfer_stage.CLEANUP)
-        self.local_controller.proceed_to_and_wait_for(transfer_stage.CLEANUP)
+    def run(self):
+        with self.signals.transferring.send(
+            transfer_session=self.current_transfer_session
+        ) as status:
+            self._transfer(callback=status.in_progress.fire)
+
+    def finalize(self):
+        # if not initialized, we don't need to finalize
+        if not self.current_transfer_session:
+            return
+
+        with self.signals.dequeuing.send(
+            transfer_session=self.current_transfer_session
+        ):
+            self.proceed_to_and_wait_for(transfer_stage.DESERIALIZING)
+
+        self.proceed_to_and_wait_for(transfer_stage.CLEANUP)
         self.signals.session.completed.fire(
             transfer_session=self.current_transfer_session
         )
         self.current_transfer_session = None
+
+    def _transfer(self, callback=None):
+        result = transfer_status.PENDING
+
+        while result not in transfer_status.FINISHED_STATES:
+            result = self.controller.proceed_to(transfer_stage.TRANSFERRING, context=self.remote_context)
+            if callback is not None:
+                callback()
+
+        if result == transfer_status.ERRORED:
+            raise MorangoError("Failure occurred during transfer")
 
 
 class PushClient(TransferClient):
@@ -636,84 +659,19 @@ class PushClient(TransferClient):
     """
     def __init__(self, *args, **kwargs):
         super(PushClient, self).__init__(*args, **kwargs)
-        self.local_controller.context.update(is_push=True)
-        self.remote_controller.context.update(is_push=True)
+        self.local_context.update(is_push=True)
+        self.remote_context.update(is_push=True)
 
     def initialize(self, sync_filter):
         """
         :param sync_filter: Filter
         """
-        # we want to serialize the most recent data and update database max counters
-        self._create_transfer_session(sync_filter)
-
-        with self.signals.queuing.send(transfer_session=self.current_transfer_session):
-            result = self.local_controller.proceed_to_and_wait_for(
-                transfer_stage.QUEUING
-            )
-
-        if result == transfer_status.ERRORED:
-            raise MorangoError("Queuing for push failed")
+        super(PushClient, self).initialize(sync_filter)
 
         self.sync_connection._update_transfer_session(
             {"records_total": self.current_transfer_session.records_total},
             self.current_transfer_session,
         )
-
-    def run(self):
-        self.local_controller.context.update(
-            stage=transfer_stage.TRANSFERRING,
-            stage_status=transfer_status.STARTED
-        )
-        if self._has_records():
-            with self.signals.transferring.send(
-                transfer_session=self.current_transfer_session
-            ) as status:
-                self._push_records(callback=status.in_progress.fire)
-
-        self.local_controller.context.update(
-            stage_status=transfer_status.COMPLETED
-        )
-
-    def finalize(self):
-        # if not initialized, we don't need to finalize
-        if not self.current_transfer_session:
-            return
-
-        # makes a remote call to the server to close the transfer session, which dequeues the
-        # data remotely
-        with self.signals.dequeuing.send(
-            transfer_session=self.current_transfer_session
-        ):
-            self.remote_controller.proceed_to_and_wait_for(transfer_stage.DESERIALIZING)
-
-        self._close_transfer_session()
-
-    def _push_records(self, callback=None):
-        # paginate buffered records so we do not load them all into memory
-        buffered_records = Buffer.objects.filter(
-            transfer_session=self.current_transfer_session
-        ).order_by("pk")
-        buffered_pages = Paginator(buffered_records, self.chunk_size)
-
-        for count in buffered_pages.page_range:
-            # serialize and send records to server
-            serialized_recs = BufferSerializer(
-                buffered_pages.page(count).object_list, many=True
-            )
-            self.sync_connection._push_record_chunk(serialized_recs.data)
-            # update records_transferred upon successful request
-            self.current_transfer_session.records_transferred = min(
-                self.current_transfer_session.records_transferred + self.chunk_size,
-                self.current_transfer_session.records_total,
-            )
-            self.current_transfer_session.bytes_sent = self.sync_connection.bytes_sent
-            self.current_transfer_session.bytes_received = (
-                self.sync_connection.bytes_received
-            )
-            self.current_transfer_session.save()
-
-            if callback is not None:
-                callback()
 
 
 class PullClient(TransferClient):
@@ -723,95 +681,5 @@ class PullClient(TransferClient):
 
     def __init__(self, *args, **kwargs):
         super(PullClient, self).__init__(*args, **kwargs)
-        self.local_controller.context.update(is_push=False)
-        self.remote_controller.context.update(is_push=False)
-
-    def initialize(self, sync_filter):
-        """
-        :param sync_filter: Filter
-        """
-        self._create_transfer_session(sync_filter)
-
-    def run(self):
-        self.local_controller.context.update(
-            stage=transfer_stage.TRANSFERRING,
-            stage_status=transfer_status.STARTED
-        )
-        if self._has_records():
-            with self.signals.transferring.send(
-                transfer_session=self.current_transfer_session
-            ) as status:
-                self._pull_records(callback=status.in_progress.fire)
-
-        self.local_controller.context.update(
-            stage_status=transfer_status.COMPLETED
-        )
-
-    def finalize(self):
-        # if not initialized, we don't need to finalize
-        if not self.current_transfer_session:
-            return
-
-        with self.signals.dequeuing.send(
-            transfer_session=self.current_transfer_session
-        ):
-            self.local_controller.proceed_to_and_wait_for(transfer_stage.DESERIALIZING)
-
-        self._close_transfer_session()
-
-    def _initialize_server_transfer_session(self):
-        # this makes a remote call to the server, which triggers queuing for our pull session
-        with self.signals.queuing.send(transfer_session=self.current_transfer_session):
-            super(PullClient, self)._initialize_server_transfer_session()
-
-    def _pull_records(self, callback=None):
-        while (
-            self.current_transfer_session.records_transferred
-            < self.current_transfer_session.records_total
-        ):
-            buffers_resp = self.sync_connection._pull_record_chunk(
-                self.chunk_size, self.current_transfer_session
-            )
-
-            # load the returned data from JSON
-            data = buffers_resp.json()
-
-            # parse out the results from a paginated set, if needed
-            if isinstance(data, dict) and "results" in data:
-                data = data["results"]
-
-            # ensure the transfer session allows pulls, and is same across records
-            transfer_session = TransferSession.objects.get(
-                id=data[0]["transfer_session"]
-            )
-            if transfer_session.push:
-                raise ValidationError(
-                    "Specified TransferSession does not allow pulling."
-                )
-
-            if len(set(rec["transfer_session"] for rec in data)) > 1:
-                raise ValidationError(
-                    "All pulled records must be associated with the same TransferSession."
-                )
-
-            if self.current_transfer_session.id != transfer_session.id:
-                raise ValidationError(
-                    "Specified TransferSession does not match this SyncClient's current TransferSession."
-                )
-
-            validate_and_create_buffer_data(
-                data, self.current_transfer_session, connection=self.sync_connection
-            )
-            # update the records transferred so client and server are in agreement
-            self.sync_connection._update_transfer_session(
-                {
-                    "records_transferred": self.current_transfer_session.records_transferred,
-                    # flip each of these since we're talking about the remote instance
-                    "bytes_received": self.current_transfer_session.bytes_sent,
-                    "bytes_sent": self.current_transfer_session.bytes_received,
-                },
-                self.current_transfer_session,
-            )
-
-            if callback is not None:
-                callback()
+        self.local_context.update(is_push=False)
+        self.remote_context.update(is_push=False)

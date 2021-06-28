@@ -6,9 +6,9 @@ from django.utils.translation import ugettext_lazy as _
 INITIALIZING = "initializing"
 SERIALIZING = "serializing"
 QUEUING = "queuing"
+TRANSFERRING = "transferring"
 DEQUEUING = "dequeuing"
 DESERIALIZING = "deserializing"
-TRANSFERRING = "transferring"
 CLEANUP = "cleanup"
 
 CHOICES = (
@@ -22,13 +22,13 @@ CHOICES = (
 )
 
 PRECEDENCE = {
-    INITIALIZING: 1,
-    SERIALIZING: 2,
-    QUEUING: 3,
-    TRANSFERRING: 4,
-    DEQUEUING: 5,
-    DESERIALIZING: 6,
-    CLEANUP: 7,
+    INITIALIZING: 10,
+    SERIALIZING: 20,
+    QUEUING: 30,
+    TRANSFERRING: 40,
+    DEQUEUING: 50,
+    DESERIALIZING: 60,
+    CLEANUP: 70,
 }
 
 

@@ -254,7 +254,6 @@ class CertificateTestCaseMixin(object):
 
         if expected_status == 201:
             # check that the syncsession was created
-            print("XXX", response.content.decode())
             transfersession = TransferSession.objects.get(
                 id=json.loads(response.content.decode())["id"]
             )
