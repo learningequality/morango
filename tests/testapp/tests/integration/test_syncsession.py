@@ -18,12 +18,14 @@ from morango.models.core import TransferSession
 from morango.sync.controller import MorangoProfileController
 
 
+SECOND_TEST_DATABASE = "default2"
 SECOND_SYSTEM_ID = "default2"
 
 
 @contextlib.contextmanager
 def second_environment():
     with EnvironmentVarGuard() as env:
+        env["MORANGO_TEST_DATABASE"] = SECOND_TEST_DATABASE
         env["MORANGO_SYSTEM_ID"] = SECOND_SYSTEM_ID
         instance2, _ = InstanceIDModel.get_or_create_current_instance(clear_cache=True)
         yield
