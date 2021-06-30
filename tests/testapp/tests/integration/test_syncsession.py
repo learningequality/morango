@@ -1,6 +1,8 @@
 import json
 import contextlib
+import pytest
 
+from django.conf import settings
 from django.db import connections
 from django.test.testcases import LiveServerTestCase
 from facility_profile.models import SummaryLog
@@ -33,6 +35,7 @@ def second_environment():
     assert instance1.id != instance2.id
 
 
+@pytest.mark.skipif(getattr(settings, "MORANGO_TEST_POSTGRESQL", False), reason="Not supported")
 class PushPullClientTestCase(LiveServerTestCase):
     multi_db = True
     profile = "facilitydata"

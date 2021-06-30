@@ -29,7 +29,6 @@ from morango.models.core import TransferSession
 from morango.models.fields.crypto import SharedKey
 from morango.sync.context import LocalSessionContext
 from morango.sync.controller import SessionController
-from morango.sync.utils import validate_and_create_buffer_data
 from morango.utils import CAPABILITIES
 from morango.utils import parse_capabilities_from_server_request
 
