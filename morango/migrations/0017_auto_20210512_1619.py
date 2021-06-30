@@ -18,12 +18,13 @@ class Migration(migrations.Migration):
             field=models.CharField(
                 blank=True,
                 choices=[
+                    ("initializing", "Initializing"),
                     ("serializing", "Serializing"),
                     ("queuing", "Queuing"),
+                    ("transferring", "Transferring"),
                     ("dequeuing", "Dequeuing"),
                     ("deserializing", "Deserializing"),
-                    ("pushing", "Pushing"),
-                    ("pulling", "Pulling"),
+                    ("cleanup", "Cleanup"),
                 ],
                 max_length=20,
             ),

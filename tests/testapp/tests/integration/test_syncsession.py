@@ -1,14 +1,13 @@
 import json
-import pytest
+import contextlib
 
 from django.db import connections
+from django.test.testcases import LiveServerTestCase
 from facility_profile.models import SummaryLog
 from facility_profile.models import InteractionLog
 from facility_profile.models import MyUser
 from test.support import EnvironmentVarGuard
 
-from ..helpers import FacilityFactory
-from ..helpers import BaseTransferClientTestCase
 from morango.models.certificates import Certificate
 from morango.models.certificates import Filter
 from morango.models.certificates import Key
@@ -17,43 +16,41 @@ from morango.models.core import Buffer
 from morango.models.core import InstanceIDModel
 from morango.models.core import TransferSession
 from morango.sync.controller import MorangoProfileController
-from morango.sync.controller import SessionController
-from morango.sync.syncsession import TransferClient
-from morango.sync.syncsession import PullClient
-from morango.sync.syncsession import PushClient
 
 
-SECOND_SYSTEM_ID = "new_sys_id_2"
+SECOND_SYSTEM_ID = "default2"
 
 
-# def env_decorator(callable):
-#     def wrapper(*args, **kwargs):
-#         with EnvironmentVarGuard() as env:
-#             env["MORANGO_SYSTEM_ID"] = SECOND_SYSTEM_ID
-#             instance2, _ = InstanceIDModel.get_or_create_current_instance(clear_cache=True)
-#             result = callable(*args, **kwargs)
-#         instance1, _ = InstanceIDModel.get_or_create_current_instance(clear_cache=True)
-#         assert instance1.id != instance2.id
-#         return result
-#
-#     return wrapper
+@contextlib.contextmanager
+def second_environment():
+    with EnvironmentVarGuard() as env:
+        env["MORANGO_SYSTEM_ID"] = SECOND_SYSTEM_ID
+        instance2, _ = InstanceIDModel.get_or_create_current_instance(clear_cache=True)
+        yield
+    instance1, _ = InstanceIDModel.get_or_create_current_instance(clear_cache=True)
+    assert instance1.id != instance2.id
 
 
-@pytest.mark.skip("Needs two separate databases")
-class PushPullClientTestCase(BaseTransferClientTestCase):
-    @classmethod
-    def setUpClass(cls):
-        with EnvironmentVarGuard() as env:
-            connections.close_all()
-            env["MORANGO_SYSTEM_ID"] = SECOND_SYSTEM_ID
-            env["DATABASE_NAME"] = "testapp2"
-            super(PushPullClientTestCase, cls).setUpClass()
+class PushPullClientTestCase(LiveServerTestCase):
+    multi_db = True
+    profile = "facilitydata"
 
     def setUp(self):
         super(PushPullClientTestCase, self).setUp()
         self.profile_controller = MorangoProfileController(self.profile)
-        self.root_scope_def = ScopeDefinition.objects.create(
-            id="rootcert",
+        self.conn = self.profile_controller.create_network_connection(self.live_server_url)
+        self.conn.chunk_size = 3
+
+        self.remote_user = self._setUpServer()
+        self.filter = Filter("{}:user".format(self.remote_user.id))
+        self.client = self._setUpClient(self.remote_user.id)
+        self.session = self.client.sync_session
+
+        self.local_user = MyUser.objects.create(id=self.remote_user.id, username="bob", is_superuser=True)
+
+    def _setUpCertScopes(self):
+        root_scope = ScopeDefinition.objects.create(
+            id="root_scope",
             profile=self.profile,
             version=1,
             primary_scope_param_key="user",
@@ -63,8 +60,8 @@ class PushPullClientTestCase(BaseTransferClientTestCase):
             read_write_filter_template="${user}",
         )
 
-        self.subset_scope_def = ScopeDefinition.objects.create(
-            id="subcert",
+        subset_scope = ScopeDefinition.objects.create(
+            id="subset_scope",
             profile=self.profile,
             version=1,
             primary_scope_param_key="",
@@ -73,65 +70,59 @@ class PushPullClientTestCase(BaseTransferClientTestCase):
             write_filter_template="${user}:${sub}",
             read_write_filter_template="",
         )
+        return root_scope, subset_scope
 
-        self.root_cert = Certificate.generate_root_certificate(self.root_scope_def.id)
+    def _setUpServer(self):
+        with second_environment():
+            root_scope, subset_scope = self._setUpCertScopes()
+            root_cert = Certificate.generate_root_certificate(root_scope.id)
 
-        self.my_user = MyUser.objects.create(id=self.root_cert.id, username="bob")
-        self.subset_cert = Certificate(
-            parent=self.root_cert,
-            profile=self.profile,
-            scope_definition=self.subset_scope_def,
-            scope_version=self.subset_scope_def.version,
-            scope_params=json.dumps(
-                {"user": self.my_user.id, "sub": "user"}
-            ),
-            private_key=Key(),
+            remote_user = MyUser.objects.create(id=root_cert.id, username="bob", is_superuser=True)
+            remote_user.set_password("password")
+            remote_user.save()
+
+            subset_cert = Certificate(
+                parent=root_cert,
+                profile=self.profile,
+                scope_definition=subset_scope,
+                scope_version=subset_scope.version,
+                scope_params=json.dumps(
+                    {"user": remote_user.id, "sub": "user"}
+                ),
+                private_key=Key(),
+            )
+            root_cert.sign_certificate(subset_cert)
+            subset_cert.save()
+        return remote_user
+
+    def _setUpClient(self, primary_partition):
+        root_scope, subset_scope = self._setUpCertScopes()
+
+        server_certs = self.conn.get_remote_certificates(primary_partition, root_scope.id)
+        server_cert = server_certs[0]
+        client_cert = self.conn.certificate_signing_request(
+            server_cert, subset_scope.id, {"user": primary_partition, "sub": "user"},
+            userargs="bob", password="password"
         )
-        self.root_cert.sign_certificate(self.subset_cert)
-        self.subset_cert.save()
-        self.filter = Filter("{}:user".format(self.my_user.id))
-
-        self.session.client_certificate = self.subset_cert
-        self.session.server_certificate = self.root_cert
-        self.session.save()
-
-        self.transfer_session.active = False
-        self.transfer_session.save()
-
-        self.facility = FacilityFactory()
-        for _ in range(5):
-            SummaryLog.objects.create(user=self.my_user)
-            InteractionLog.objects.create(user=self.my_user)
-
-        self.profile_controller.serialize_into_store(self.filter)
-
-        # with EnvironmentVarGuard() as env:
-        #     env["MORANGO_SYSTEM_ID"] = SECOND_SYSTEM_ID
-        #     InstanceIDModel.get_or_create_current_instance(clear_cache=True)
-        #     FacilityFactory()
-        #     bob2 = MyUser.objects.create(username="bob2")
-        #     bob3 = MyUser.objects.create(username="bob3")
-        #
-        #     for i in range(5):
-        #         SummaryLog.objects.create(user=bob2)
-        #         InteractionLog.objects.create(user=bob2)
-        #         SummaryLog.objects.create(user=bob3)
-        #         InteractionLog.objects.create(user=bob3)
-        #
-        #     self.profile_controller.serialize_into_store(self.filter)
+        return self.conn.create_sync_session(client_cert, server_cert)
 
     @classmethod
     def _create_server_thread(cls, connections_override):
-        # connections_override[DEFAULT_DB_ALIAS] = connections["second_instance"]
+        # override default to point to second environment database
+        connections_override["default"] = connections["default2"]
         return super(PushPullClientTestCase, cls)._create_server_thread(connections_override)
 
-    def build_client(self, client_class=TransferClient, controller=None, update_context=False):
-        controller = controller or SessionController.build()
-        client = super(PushPullClientTestCase, self).build_client(client_class=client_class, controller=controller, update_context=update_context)
-        return client
-
     def test_push(self):
-        client = self.build_client(client_class=PushClient)
+        for _ in range(5):
+            SummaryLog.objects.create(user=self.local_user)
+            InteractionLog.objects.create(user=self.local_user)
+        self.profile_controller.serialize_into_store(self.filter)
+
+        with second_environment():
+            self.assertEqual(0, SummaryLog.objects.filter(user=self.remote_user).count())
+            self.assertEqual(0, InteractionLog.objects.filter(user=self.remote_user).count())
+
+        client = self.client.get_push_client()
         self.assertEqual(0, TransferSession.objects.filter(active=True).count())
         client.initialize(self.filter)
         self.assertEqual(1, TransferSession.objects.filter(active=True).count())
@@ -144,18 +135,34 @@ class PushPullClientTestCase(BaseTransferClientTestCase):
         client.finalize()
         self.assertEqual(0, Buffer.objects.filter(transfer_session=transfer_session).count())
         self.assertEqual(0, TransferSession.objects.filter(active=True).count())
+
+        with second_environment():
+            self.assertEqual(5, SummaryLog.objects.filter(user=self.remote_user).count())
+            self.assertEqual(5, InteractionLog.objects.filter(user=self.remote_user).count())
 
     def test_pull(self):
-        client = self.build_client(client_class=PullClient)
+        with second_environment():
+            for _ in range(5):
+                SummaryLog.objects.create(user=self.remote_user)
+                InteractionLog.objects.create(user=self.remote_user)
+            self.profile_controller.serialize_into_store(self.filter)
+
+        self.assertEqual(0, SummaryLog.objects.filter(user=self.local_user).count())
+        self.assertEqual(0, InteractionLog.objects.filter(user=self.local_user).count())
+
+        client = self.client.get_pull_client()
         self.assertEqual(0, TransferSession.objects.filter(active=True).count())
         client.initialize(self.filter)
         self.assertEqual(1, TransferSession.objects.filter(active=True).count())
         transfer_session = client.local_context.transfer_session
         self.assertNotEqual(0, transfer_session.records_total)
         self.assertEqual(0, transfer_session.records_transferred)
-        self.assertLessEqual(1, Buffer.objects.filter(transfer_session=transfer_session).count())
         client.run()
         self.assertNotEqual(0, transfer_session.records_transferred)
+        self.assertLessEqual(1, Buffer.objects.filter(transfer_session=transfer_session).count())
         client.finalize()
         self.assertEqual(0, Buffer.objects.filter(transfer_session=transfer_session).count())
-        self.assertEqual(1, TransferSession.objects.filter(active=True).count())
+        self.assertEqual(0, TransferSession.objects.filter(active=True).count())
+
+        self.assertEqual(5, SummaryLog.objects.filter(user=self.local_user).count())
+        self.assertEqual(5, InteractionLog.objects.filter(user=self.local_user).count())

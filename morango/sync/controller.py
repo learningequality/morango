@@ -135,13 +135,15 @@ class SessionController(object):
         result = False
         # inside "session_middleware"
         for middleware in self.middleware:
+            middleware_stage = transfer_stage.stage(middleware.related_stage)
+
             # break when we find middleware beyond proceed-to stage
-            if transfer_stage.stage(middleware.related_stage) > stage:
+            if middleware_stage > stage:
                 break
             # execute middleware, up to and including the requested stage
             elif (
-                transfer_stage.stage(middleware.related_stage) > current_stage
-                or context.stage_status == transfer_status.PENDING
+                middleware_stage > current_stage
+                or (context.stage_status == transfer_status.PENDING and middleware_stage == current_stage)
             ):
                 # if the result is not completed status, then break because that means we can't
                 # proceed to the next stage (yet)
@@ -212,7 +214,6 @@ class SessionController(object):
             return result
         except Exception as e:
             # always log the error itself
-            raise e
             logging.error(e)
             self._log_invocation(stage, result=transfer_status.ERRORED)
             context.update(stage_status=transfer_status.ERRORED)

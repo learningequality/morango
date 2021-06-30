@@ -80,9 +80,18 @@ WSGI_APPLICATION = 'testapp.wsgi.application'
 DATABASES = {
     'default': {
         'ENGINE': 'django.db.backends.sqlite3',
-        'NAME': os.path.join(BASE_DIR, "{}.db".format(os.environ.get("DATABASE_NAME", "testapp"))),
+        'NAME': os.path.join(BASE_DIR, "testapp.db"),
+    },
+    'default2': {
+        'ENGINE': 'django.db.backends.sqlite3',
+        'NAME': os.path.join(BASE_DIR, "testapp2.db"),
     }
 }
+
+
+DATABASE_ROUTERS = [
+    "testapp.db.TestingRouter",
+]
 
 
 # Password validation

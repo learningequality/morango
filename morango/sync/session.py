@@ -36,6 +36,7 @@ class SessionWrapper(Session):
     bytes_received = 0
 
     def request(self, method, url, **kwargs):
+        response = None
         try:
             response = super(SessionWrapper, self).request(method, url, **kwargs)
 
@@ -55,8 +56,11 @@ class SessionWrapper(Session):
             return response
         except exceptions.RequestException as req_err:
             # we want to log all request errors for debugging purposes
+            if response is None:
+                response = req_err.response
+
             response_content = (
-                req_err.response.content if req_err.response else "(no response)"
+                response.content if response else "(no response)"
             )
             logger.error(
                 "{} Reason: {}".format(req_err.__class__.__name__, response_content)

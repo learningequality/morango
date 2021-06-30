@@ -646,6 +646,7 @@ class TransferClient(object):
 
         while result not in transfer_status.FINISHED_STATES:
             result = self.controller.proceed_to(transfer_stage.TRANSFERRING, context=self.remote_context)
+            self.local_context.update(stage=transfer_stage.TRANSFERRING, stage_status=result)
             if callback is not None:
                 callback()
 

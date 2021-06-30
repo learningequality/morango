@@ -589,11 +589,8 @@ class LocalInitializeOperation(LocalOperation):
             if transfer_session is None:
                 transfer_session = existing_session
             else:
-                # since there was more than one, let's ensure that we don't resume an older one
-                # after completing this one
-                # TODO: do cleanup
-                existing_session.active = False
-                existing_session.save()
+                # TODO: cleanup other lingering sessions
+                pass
 
         if transfer_session is None:
             # build data for creating transfer session
@@ -708,6 +705,24 @@ class LocalPushTransferOperation(LocalOperation):
         validate_and_create_buffer_data(data, context.transfer_session)
 
         if context.transfer_session.records_transferred == context.transfer_session.records_total:
+            return transfer_status.COMPLETED
+        return transfer_status.PENDING
+
+
+class LocalPullTransferOperation(LocalOperation):
+    """
+    Handles push of buffer data for the transfer session
+    """
+    def handle(self, context):
+        """
+        :type context: LocalSessionContext
+        """
+        assert context.request is not None
+        assert context.is_pull
+
+        records_transferred = context.request.data.get("records_transferred", context.transfer_session.records_transferred)
+
+        if records_transferred == context.transfer_session.records_total:
             return transfer_status.COMPLETED
         return transfer_status.PENDING
 
@@ -1114,19 +1129,20 @@ class RemotePullTransferOperation(RemoteNetworkOperation):
 
         validate_and_create_buffer_data(data, transfer_session, connection=context.connection)
 
+        # if we've transferred all records, return a completed status
+        op_status = transfer_status.PENDING
+        if context.transfer_session.records_transferred >= context.transfer_session.records_total:
+            op_status = transfer_status.COMPLETED
+
         # update the records transferred so client and server are in agreement
         self.update_transfer_session(
             context,
+            transfer_stage=transfer_stage.TRANSFERRING,
             records_transferred=transfer_session.records_transferred,
             # flip each of these since we're talking about the remote instance
             bytes_received=transfer_session.bytes_sent,
             bytes_sent=transfer_session.bytes_received,
         )
-
-        # if we've transferred all records, return a completed status
-        op_status = transfer_status.PENDING
-        if context.transfer_session.records_transferred >= context.transfer_session.records_total:
-            op_status = transfer_status.COMPLETED
 
         return op_status
 

@@ -19,6 +19,7 @@ MORANGO_QUEUE_OPERATIONS = (
 )
 MORANGO_TRANSFERRING_OPERATIONS = (
     "morango.sync.operations:LocalPushTransferOperation",
+    "morango.sync.operations:LocalPullTransferOperation",
     "morango.sync.operations:RemotePushTransferOperation",
     "morango.sync.operations:RemotePullTransferOperation",
 )

@@ -415,7 +415,8 @@ class TransferSessionViewSet(viewsets.ModelViewSet):
                 request=request,
                 transfer_session=self.get_object(),
             )
-            if self.async_allowed():
+            # special case for transferring, not to wait since it's a chunked process
+            if self.async_allowed() or update_stage == transfer_stage.TRANSFERRING:
                 session_controller.proceed_to(update_stage, context=context)
             else:
                 session_controller.proceed_to_and_wait_for(update_stage, context=context)

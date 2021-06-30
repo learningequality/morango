@@ -352,10 +352,11 @@ def create_buffer_and_store_dummy_data(transfer_session_id):
 
 
 class BaseClientTestCase(LiveServerTestCase):
+    profile = "facilitydata"
+
     def setUp(self):
         super(BaseClientTestCase, self).setUp()
         DatabaseIDModel.objects.create()
-        self.profile = "facilitydata"
         self.session = SyncSession.objects.create(
             id=uuid.uuid4().hex,
             profile=self.profile,
