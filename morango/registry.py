@@ -3,6 +3,7 @@
 This class is registered at app load time for morango in `apps.py`.
 """
 import sys
+import inspect
 from collections import OrderedDict
 from importlib import import_module
 
@@ -190,30 +191,52 @@ class SyncableModelRegistry(object):
 syncable_models = SyncableModelRegistry()
 
 
-class SessionMiddlewareOperations(list):
+class SessionMiddleware(list):
+    """
+    Iterable list class that holds and initializes a list of transfer middleware as configured
+    through Morango settings
+    """
+
+    def populate(self, callable_imports):
+        """
+        Middleware are executed in the same order that they're populated, through settings,
+        so order is important!
+
+        :param callable_imports: A list of strings referencing `BaseOperation` classes
+        :type callable_imports: str[]
+        """
+        for callable_import in callable_imports:
+            callable_module, callable_name = callable_import.rsplit(":", 1)
+            middleware_callable = getattr(import_module(callable_module), callable_name)
+            if inspect.isclass(middleware_callable):
+                self.append(middleware_callable())
+            else:
+                self.append(middleware_callable)
+
+
+class SessionMiddlewareHooks(SessionMiddleware):
+    """
+    Iterable list class that holds and initializes a list of callback hooks
+    """
+
+    def __call__(self, context):
+        # As a list of hooks, all of them should be called
+        for hook in self:
+            hook(context)
+
+
+class SessionMiddlewareOperations(SessionMiddleware):
     """
     Iterable list class that holds and initializes a list of transfer operations as configured
     through Morango settings, and associate the group with a transfer stage by `related_stage`
     """
-
     __slots__ = ("related_stage",)
 
     def __init__(self, related_stage):
         super(SessionMiddlewareOperations, self).__init__()
         self.related_stage = related_stage
-
-    def populate(self, operation_cls_imports):
-        """
-        Middleware operations are executed in the same order that they're populated,
-        through settings, so order is important!
-
-        :param operation_cls_imports: A list of strings referencing `BaseOperation` classes
-        :type operation_cls_imports: str[]
-        """
-        for operation_cls_import in operation_cls_imports:
-            operation_module, operation_cls = operation_cls_import.rsplit(":", 1)
-            TransferOperation = getattr(import_module(operation_module), operation_cls)
-            self.append(TransferOperation())
+        self.pre_hooks = SessionMiddlewareHooks()
+        self.post_hooks = SessionMiddlewareHooks()
 
     def __call__(self, context):
         # As middleware list, we expect that one of the operations should handle the request context
@@ -222,7 +245,9 @@ class SessionMiddlewareOperations(list):
         # returning the non-false value, otherwise the middleware has failed to handle the operation
         # for the related transfer stage
         for operation in self:
+            self.pre_hooks(context)
             result = operation(context)
+            self.post_hooks(context)
             # operation tells us it has "handled" the context by returning result that is not False
             if result is not False:
                 return result
@@ -233,13 +258,13 @@ class SessionMiddlewareOperations(list):
 
 
 STAGE_TO_SETTINGS = {
-    transfer_stage.INITIALIZING: "MORANGO_INITIALIZE_OPERATIONS",
-    transfer_stage.SERIALIZING: "MORANGO_SERIALIZE_OPERATIONS",
-    transfer_stage.QUEUING: "MORANGO_QUEUE_OPERATIONS",
-    transfer_stage.TRANSFERRING: "MORANGO_TRANSFERRING_OPERATIONS",
-    transfer_stage.DEQUEUING: "MORANGO_DEQUEUE_OPERATIONS",
-    transfer_stage.DESERIALIZING: "MORANGO_DESERIALIZE_OPERATIONS",
-    transfer_stage.CLEANUP: "MORANGO_CLEANUP_OPERATIONS",
+    transfer_stage.INITIALIZING: "INITIALIZE_OPERATIONS",
+    transfer_stage.SERIALIZING: "SERIALIZE_OPERATIONS",
+    transfer_stage.QUEUING: "QUEUE_OPERATIONS",
+    transfer_stage.TRANSFERRING: "TRANSFERRING_OPERATIONS",
+    transfer_stage.DEQUEUING: "DEQUEUE_OPERATIONS",
+    transfer_stage.DESERIALIZING: "DESERIALIZE_OPERATIONS",
+    transfer_stage.CLEANUP: "CLEANUP_OPERATIONS",
 }
 
 
@@ -254,7 +279,13 @@ class SessionMiddlewareRegistry(list):
         # add middleware operations groups in order of stage precedence
         for stage, setting in sorted_stage_map:
             transfer_middleware = SessionMiddlewareOperations(stage)
-            transfer_middleware.populate(getattr(SETTINGS, setting))
+            transfer_middleware.pre_hooks.populate(
+                getattr(SETTINGS, "MORANGO_PRE_{}".format(setting)) or []
+            )
+            transfer_middleware.populate(getattr(SETTINGS, "MORANGO_{}".format(setting)))
+            transfer_middleware.post_hooks.populate(
+                getattr(SETTINGS, "MORANGO_POST_{}".format(setting)) or []
+            )
             self.append(transfer_middleware)
 
 

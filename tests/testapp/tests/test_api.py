@@ -6,6 +6,7 @@ import uuid
 import mock
 from django.core.urlresolvers import reverse
 from django.test.utils import override_settings
+from django.urls.exceptions import NoReverseMatch
 from django.utils import timezone
 from facility_profile.models import MyUser
 from rest_framework.test import APITestCase as BaseTestCase
@@ -516,10 +517,11 @@ class NonceCreationTestCase(APITestCase):
         response = self.client.post(reverse("nonces-list"), {}, format="json")
         data = json.loads(response.content.decode())
         # try to read the nonce
-        response = self.client.get(
-            reverse("nonces-detail", kwargs={"pk": data["id"]}), {}, format="json"
-        )
-        self.assertEqual(response.status_code, 403)
+        with self.assertRaises(NoReverseMatch):
+            response = self.client.get(
+                reverse("nonces-detail", kwargs={"pk": data["id"]}), {}, format="json"
+            )
+            self.assertEqual(response.status_code, 403)
 
 
 class SyncSessionEndpointTestCase(CertificateTestCaseMixin, APITestCase):

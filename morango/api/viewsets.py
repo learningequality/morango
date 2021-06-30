@@ -108,7 +108,12 @@ class CertificateChainViewSet(viewsets.ViewSet):
         )
 
 
-class CertificateViewSet(viewsets.ModelViewSet):
+class CertificateViewSet(
+    viewsets.mixins.CreateModelMixin,
+    viewsets.mixins.RetrieveModelMixin,
+    viewsets.mixins.ListModelMixin,
+    viewsets.GenericViewSet
+):
     permission_classes = (permissions.CertificatePermissions,)
     serializer_class = serializers.CertificateSerializer
     authentication_classes = (permissions.BasicMultiArgumentAuthentication,)
@@ -195,7 +200,7 @@ class CertificateViewSet(viewsets.ModelViewSet):
         return base_queryset.exclude(_private_key=None)
 
 
-class NonceViewSet(viewsets.ModelViewSet):
+class NonceViewSet(viewsets.mixins.CreateModelMixin, viewsets.GenericViewSet):
     permission_classes = (permissions.NoncePermissions,)
     serializer_class = serializers.NonceSerializer
 
@@ -207,7 +212,10 @@ class NonceViewSet(viewsets.ModelViewSet):
         )
 
 
-class SyncSessionViewSet(viewsets.ModelViewSet):
+class SyncSessionViewSet(
+    viewsets.mixins.DestroyModelMixin,
+    viewsets.GenericViewSet
+):
     permission_classes = (permissions.SyncSessionPermissions,)
     serializer_class = serializers.SyncSessionSerializer
 
@@ -324,9 +332,6 @@ class SyncSessionViewSet(viewsets.ModelViewSet):
 
         return response.Response(self.get_serializer(sync_session).data)
 
-    def list(self, request, *args, **kwargs):
-        return response.Response("Forbidden", status=status.HTTP_403_FORBIDDEN)
-
     def perform_destroy(self, syncsession):
         syncsession.active = False
         syncsession.save()
@@ -335,7 +340,12 @@ class SyncSessionViewSet(viewsets.ModelViewSet):
         return SyncSession.objects.filter(active=True)
 
 
-class TransferSessionViewSet(viewsets.ModelViewSet):
+class TransferSessionViewSet(
+    viewsets.mixins.RetrieveModelMixin,
+    viewsets.mixins.UpdateModelMixin,
+    viewsets.mixins.DestroyModelMixin,
+    viewsets.GenericViewSet
+):
     permission_classes = (permissions.TransferSessionPermissions,)
     serializer_class = serializers.TransferSessionSerializer
 
@@ -428,9 +438,6 @@ class TransferSessionViewSet(viewsets.ModelViewSet):
                 )
 
         return super(TransferSessionViewSet, self).update(request, *args, **kwargs)
-
-    def list(self, request, *args, **kwargs):
-        return response.Response("Forbidden", status=status.HTTP_403_FORBIDDEN)
 
     def perform_destroy(self, transfer_session):
         context = LocalSessionContext(
