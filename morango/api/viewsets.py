@@ -489,10 +489,14 @@ class BufferViewSet(mixins.ListModelMixin, viewsets.GenericViewSet):
             transfer_stage.TRANSFERRING, context=context
         )
 
+        response_status = status.HTTP_201_CREATED
         if result == transfer_status.ERRORED:
-            return response.Response(status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+            if session_controller.last_error:
+                raise session_controller.last_error
+            else:
+                response_status = status.HTTP_500_INTERNAL_SERVER_ERROR
 
-        return response.Response(status=status.HTTP_201_CREATED)
+        return response.Response(status=response_status)
 
     def get_queryset(self):
         session_id = self.request.query_params["transfer_session_id"]

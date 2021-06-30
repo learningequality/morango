@@ -63,7 +63,7 @@ class SessionController(object):
     those transfer stage operations are handled
     """
 
-    __slots__ = ("middleware", "context", "logging_enabled")
+    __slots__ = ("middleware", "context", "logging_enabled", "last_error")
 
     def __init__(self, middleware, context=None, enable_logging=False):
         """
@@ -74,6 +74,7 @@ class SessionController(object):
         self.middleware = middleware
         self.context = context
         self.logging_enabled = enable_logging
+        self.last_error = None
 
     @classmethod
     def build(cls, context=None, enable_logging=False):
@@ -216,6 +217,7 @@ class SessionController(object):
             return result
         except Exception as e:
             # always log the error itself
+            self.last_error = e
             logging.error(e)
             self._log_invocation(stage, result=transfer_status.ERRORED)
             context.update(stage_status=transfer_status.ERRORED)

@@ -7,19 +7,16 @@ import socket
 import uuid
 from io import BytesIO
 
-from django.core.paginator import Paginator
 from django.utils import timezone
 from django.utils.six import iteritems
+from django.utils.six import reraise
 from requests.adapters import HTTPAdapter
 from requests.exceptions import HTTPError
 from requests.packages.urllib3.util.retry import Retry
-from rest_framework.exceptions import ValidationError
 from django.utils.six.moves.urllib.parse import urljoin
 from django.utils.six.moves.urllib.parse import urlparse
 
 from .session import SessionWrapper
-from .utils import validate_and_create_buffer_data
-from morango.api.serializers import BufferSerializer
 from morango.api.serializers import CertificateSerializer
 from morango.api.serializers import InstanceIDSerializer
 from morango.constants import api_urls
@@ -33,10 +30,8 @@ from morango.errors import MorangoResumeSyncError
 from morango.errors import MorangoServerDoesNotAllowNewCertPush
 from morango.models.certificates import Certificate
 from morango.models.certificates import Key
-from morango.models.core import Buffer
 from morango.models.core import InstanceIDModel
 from morango.models.core import SyncSession
-from morango.models.core import TransferSession
 from morango.sync.controller import SessionController
 from morango.sync.context import LocalSessionContext
 from morango.sync.context import NetworkSessionContext
@@ -270,7 +265,7 @@ class NetworkSyncConnection(Connection):
         try:
             self._get_sync_session(sync_session)
         except HTTPError as e:
-            raise MorangoResumeSyncError("Unable to verify remote sync session") from e
+            reraise(MorangoResumeSyncError, e)
 
         return SyncSessionClient(self, sync_session)
 

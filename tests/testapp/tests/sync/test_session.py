@@ -49,12 +49,7 @@ class SessionWrapperTestCase(TestCase):
     @mock.patch("morango.sync.session.logger")
     @mock.patch("morango.sync.session.Session.request")
     def test_request__really_not_ok(self, mocked_super_request, mocked_logger):
-        raise_for_status = mock.Mock()
-        mocked_super_request.return_value = mock.Mock(
-            headers={"Content-Length": 1024}, raise_for_status=raise_for_status,
-        )
-
-        raise_for_status.side_effect = RequestException()
+        mocked_super_request.side_effect = RequestException()
 
         wrapper = SessionWrapper()
 
