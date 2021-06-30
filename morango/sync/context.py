@@ -23,7 +23,14 @@ class SessionContext(object):
         "capabilities",
     )
 
-    def __init__(self, sync_session=None, transfer_session=None, sync_filter=None, is_push=None, capabilities=None):
+    def __init__(
+        self,
+        sync_session=None,
+        transfer_session=None,
+        sync_filter=None,
+        is_push=None,
+        capabilities=None,
+    ):
         """
         :param sync_session: The sync session instance
         :type sync_session: SyncSession|None
@@ -54,7 +61,13 @@ class SessionContext(object):
             )
 
     def update(
-        self, transfer_session=None, sync_filter=None, is_push=None, stage=None, stage_status=None, capabilities=None
+        self,
+        transfer_session=None,
+        sync_filter=None,
+        is_push=None,
+        stage=None,
+        stage_status=None,
+        capabilities=None,
     ):
         """
         Updates the context
@@ -67,7 +80,11 @@ class SessionContext(object):
         """
         if transfer_session and self.transfer_session:
             raise MorangoContextUpdateError("Transfer session already exists")
-        elif transfer_session and self.sync_session and transfer_session.sync_session_id != self.sync_session.id:
+        elif (
+            transfer_session
+            and self.sync_session
+            and transfer_session.sync_session_id != self.sync_session.id
+        ):
             raise MorangoContextUpdateError("Sync session mismatch")
 
         if sync_filter and self.filter:
@@ -101,9 +118,7 @@ class SessionContext(object):
         return dict(
             sync_session_id=self.sync_session.id if self.sync_session else None,
             transfer_session_id=(
-                self.transfer_session.id
-                if self.transfer_session
-                else None
+                self.transfer_session.id if self.transfer_session else None
             ),
             filter=str(self.filter),
             is_push=self.is_push,
@@ -165,7 +180,9 @@ class LocalSessionContext(SessionContext):
         # local transfer session object
         if "transfer_session" in kwargs:
             self.stage = self.transfer_session.transfer_stage or self.stage
-            self.stage_status = self.transfer_session.transfer_stage_status or self.stage_status
+            self.stage_status = (
+                self.transfer_session.transfer_stage_status or self.stage_status
+            )
 
         # finally, since stage and status should be in sync with local transfer session object
         # we be sure to pass along updates to stage and status. we also `refresh_from_db` too so
@@ -203,6 +220,5 @@ class NetworkSessionContext(SessionContext):
         """
         self.connection = connection
         super(NetworkSessionContext, self).__init__(
-            capabilities=self.connection.server_info.get("capabilities", []),
-            **kwargs
+            capabilities=self.connection.server_info.get("capabilities", []), **kwargs
         )

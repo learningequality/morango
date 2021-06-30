@@ -86,7 +86,9 @@ class SessionController(object):
         :return: A new transfer controller
         :rtype: SessionController
         """
-        return SessionController(session_middleware, context=context, enable_logging=enable_logging)
+        return SessionController(
+            session_middleware, context=context, enable_logging=enable_logging
+        )
 
     def proceed_to(self, stage, context=None):
         """
@@ -141,9 +143,9 @@ class SessionController(object):
             if middleware_stage > stage:
                 break
             # execute middleware, up to and including the requested stage
-            elif (
-                middleware_stage > current_stage
-                or (context.stage_status == transfer_status.PENDING and middleware_stage == current_stage)
+            elif middleware_stage > current_stage or (
+                context.stage_status == transfer_status.PENDING
+                and middleware_stage == current_stage
             ):
                 # if the result is not completed status, then break because that means we can't
                 # proceed to the next stage (yet)

@@ -607,7 +607,9 @@ class LocalInitializeOperation(LocalOperation):
             if context.request:
                 data.update(
                     id=context.request.data.get("id"),
-                    records_total=context.request.data.get("records_total") if context.is_push else None,
+                    records_total=context.request.data.get("records_total")
+                    if context.is_push
+                    else None,
                     client_fsic=context.request.data.get("client_fsic") or "{}",
                     server_fsic=fsic,
                 )
@@ -619,7 +621,9 @@ class LocalInitializeOperation(LocalOperation):
                     # above too
                 )
             else:
-                raise MorangoResumeSyncError("Cannot create transfer session without request as server")
+                raise MorangoResumeSyncError(
+                    "Cannot create transfer session without request as server"
+                )
 
             # create, validate, and save!
             transfer_session = TransferSession(**data)
@@ -691,6 +695,7 @@ class LocalPushTransferOperation(LocalOperation):
     """
     Handles push of buffer data for the transfer session
     """
+
     def handle(self, context):
         """
         :type context: LocalSessionContext
@@ -704,7 +709,10 @@ class LocalPushTransferOperation(LocalOperation):
 
         validate_and_create_buffer_data(data, context.transfer_session)
 
-        if context.transfer_session.records_transferred == context.transfer_session.records_total:
+        if (
+            context.transfer_session.records_transferred
+            == context.transfer_session.records_total
+        ):
             return transfer_status.COMPLETED
         return transfer_status.PENDING
 
@@ -713,6 +721,7 @@ class LocalPullTransferOperation(LocalOperation):
     """
     Handles push of buffer data for the transfer session
     """
+
     def handle(self, context):
         """
         :type context: LocalSessionContext
@@ -720,7 +729,9 @@ class LocalPullTransferOperation(LocalOperation):
         assert context.request is not None
         assert context.is_pull
 
-        records_transferred = context.request.data.get("records_transferred", context.transfer_session.records_transferred)
+        records_transferred = context.request.data.get(
+            "records_transferred", context.transfer_session.records_transferred
+        )
 
         if records_transferred == context.transfer_session.records_total:
             return transfer_status.COMPLETED
@@ -867,9 +878,7 @@ class RemoteNetworkOperation(BaseOperation):
         :type context: NetworkSessionContext
         :return: The Response
         """
-        return context.connection._close_transfer_session(
-            context.transfer_session
-        )
+        return context.connection._close_transfer_session(context.transfer_session)
 
     def put_buffers(self, context, buffers):
         """
@@ -886,9 +895,7 @@ class RemoteNetworkOperation(BaseOperation):
         :type context: NetworkSessionContext
         :return: A list of dicts, serialized Buffers
         """
-        response = context.connection._pull_record_chunk(
-            context.transfer_session
-        )
+        response = context.connection._pull_record_chunk(context.transfer_session)
 
         data = response.json()
 
@@ -897,13 +904,9 @@ class RemoteNetworkOperation(BaseOperation):
             data = data["results"]
 
             # ensure the transfer session allows pulls, and is same across records
-        transfer_session = TransferSession.objects.get(
-            id=data[0]["transfer_session"]
-        )
+        transfer_session = TransferSession.objects.get(id=data[0]["transfer_session"])
         if transfer_session.push:
-            raise ValidationError(
-                "Specified TransferSession does not allow pulling."
-            )
+            raise ValidationError("Specified TransferSession does not allow pulling.")
 
         if len(set(rec["transfer_session"] for rec in data)) > 1:
             raise ValidationError(
@@ -1094,14 +1097,15 @@ class RemotePushTransferOperation(RemoteNetworkOperation):
             transfer_session=context.transfer_session
         ).order_by("pk")
 
-        data = BufferSerializer(buffered_records[offset : offset + chunk_size], many=True).data
+        data = BufferSerializer(
+            buffered_records[offset : offset + chunk_size], many=True
+        ).data
 
         # push buffers chunk to server
         self.put_buffers(context, data)
 
         context.transfer_session.records_transferred = min(
-            offset + chunk_size,
-            context.transfer_session.records_total
+            offset + chunk_size, context.transfer_session.records_total
         )
         context.transfer_session.bytes_sent = context.connection.bytes_sent
         context.transfer_session.bytes_received = context.connection.bytes_received
@@ -1109,7 +1113,10 @@ class RemotePushTransferOperation(RemoteNetworkOperation):
 
         # if we've transferred all records, return a completed status
         op_status = transfer_status.PENDING
-        if context.transfer_session.records_transferred >= context.transfer_session.records_total:
+        if (
+            context.transfer_session.records_transferred
+            >= context.transfer_session.records_total
+        ):
             op_status = transfer_status.COMPLETED
 
         return op_status
@@ -1127,11 +1134,16 @@ class RemotePullTransferOperation(RemoteNetworkOperation):
         data = self.get_buffers(context)
         transfer_session = context.transfer_session
 
-        validate_and_create_buffer_data(data, transfer_session, connection=context.connection)
+        validate_and_create_buffer_data(
+            data, transfer_session, connection=context.connection
+        )
 
         # if we've transferred all records, return a completed status
         op_status = transfer_status.PENDING
-        if context.transfer_session.records_transferred >= context.transfer_session.records_total:
+        if (
+            context.transfer_session.records_transferred
+            >= context.transfer_session.records_total
+        ):
             op_status = transfer_status.COMPLETED
 
         # update the records transferred so client and server are in agreement

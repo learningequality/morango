@@ -59,9 +59,7 @@ class SessionWrapper(Session):
             if response is None:
                 response = req_err.response
 
-            response_content = (
-                response.content if response else "(no response)"
-            )
+            response_content = response.content if response else "(no response)"
             logger.error(
                 "{} Reason: {}".format(req_err.__class__.__name__, response_content)
             )

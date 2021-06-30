@@ -384,12 +384,17 @@ class TransferSessionViewSet(viewsets.ModelViewSet):
         # If both client and ourselves allow async, we just return accepted status, and the client
         # should PATCH the transfer_session to the appropriate stage. If not async, we wait until
         # queuing is complete
-        to_stage = transfer_stage.INITIALIZING if self.async_allowed() else transfer_stage.QUEUING
+        to_stage = (
+            transfer_stage.INITIALIZING
+            if self.async_allowed()
+            else transfer_stage.QUEUING
+        )
         result = session_controller.proceed_to_and_wait_for(to_stage, context=context)
 
         if result == transfer_status.ERRORED:
             return response.Response(
-                "Failed to initialize session", status=status.HTTP_500_INTERNAL_SERVER_ERROR
+                "Failed to initialize session",
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR,
             )
 
         response_status = status.HTTP_201_CREATED
@@ -419,7 +424,9 @@ class TransferSessionViewSet(viewsets.ModelViewSet):
             if self.async_allowed() or update_stage == transfer_stage.TRANSFERRING:
                 session_controller.proceed_to(update_stage, context=context)
             else:
-                session_controller.proceed_to_and_wait_for(update_stage, context=context)
+                session_controller.proceed_to_and_wait_for(
+                    update_stage, context=context
+                )
 
         return super(TransferSessionViewSet, self).update(request, *args, **kwargs)
 
@@ -434,7 +441,9 @@ class TransferSessionViewSet(viewsets.ModelViewSet):
         if self.async_allowed():
             session_controller.proceed_to(transfer_stage.CLEANUP, context=context)
         else:
-            result = session_controller.proceed_to_and_wait_for(transfer_stage.CLEANUP, context=context)
+            result = session_controller.proceed_to_and_wait_for(
+                transfer_stage.CLEANUP, context=context
+            )
             # raise an error for synchronous, if status is false
             if result == transfer_status.ERRORED:
                 raise RuntimeError("Cleanup failed")
@@ -473,8 +482,12 @@ class BufferViewSet(mixins.ListModelMixin, viewsets.GenericViewSet):
                 status=status.HTTP_403_FORBIDDEN,
             )
 
-        context = LocalSessionContext(request=request, transfer_session=transfer_session)
-        result = session_controller.proceed_to(transfer_stage.TRANSFERRING, context=context)
+        context = LocalSessionContext(
+            request=request, transfer_session=transfer_session
+        )
+        result = session_controller.proceed_to(
+            transfer_stage.TRANSFERRING, context=context
+        )
 
         if result == transfer_status.ERRORED:
             return response.Response(status=status.HTTP_500_INTERNAL_SERVER_ERROR)

@@ -101,18 +101,24 @@ class Connection(object):
 
 class NetworkSyncConnection(Connection):
     __slots__ = (
-        'base_url',
-        'compresslevel',
-        'session',
-        'server_info',
-        'capabilities',
-        'chunk_size',
+        "base_url",
+        "compresslevel",
+        "session",
+        "server_info",
+        "capabilities",
+        "chunk_size",
     )
 
     default_chunk_size = 500
 
-    def __init__(self, base_url="", compresslevel=9, retries=7, backoff_factor=0.3,
-                 chunk_size=default_chunk_size):
+    def __init__(
+        self,
+        base_url="",
+        compresslevel=9,
+        retries=7,
+        backoff_factor=0.3,
+        chunk_size=default_chunk_size,
+    ):
         """
         The underlying network connection with a syncing peer. Any network requests
         (such as certificate querying or syncing related) will be done through this class.
@@ -149,9 +155,7 @@ class NetworkSyncConnection(Connection):
         url = urljoin(urljoin(self.base_url, endpoint), lookup)
         return url
 
-    def create_sync_session(
-        self, client_cert, server_cert, chunk_size=None
-    ):
+    def create_sync_session(self, client_cert, server_cert, chunk_size=None):
         """
         Starts a sync session by creating it on the server side and returning a client to use
         for initiating transfer operations
@@ -582,7 +586,9 @@ class TransferClient(object):
 
         # TODO: come up with strategy to use only one context here
         self.local_context = LocalSessionContext(sync_session=sync_session)
-        self.remote_context = NetworkSessionContext(sync_connection, sync_session=sync_session)
+        self.remote_context = NetworkSessionContext(
+            sync_connection, sync_session=sync_session
+        )
 
     def proceed_to_and_wait_for(self, stage):
         for context in (self.remote_context, self.local_context):
@@ -614,9 +620,7 @@ class TransferClient(object):
         )
 
         # create transfer session on server side and proceed to queuing
-        with self.signals.queuing.send(
-            transfer_session=self.current_transfer_session
-        ):
+        with self.signals.queuing.send(transfer_session=self.current_transfer_session):
             self.proceed_to_and_wait_for(transfer_stage.QUEUING)
 
     def run(self):
@@ -645,8 +649,12 @@ class TransferClient(object):
         result = transfer_status.PENDING
 
         while result not in transfer_status.FINISHED_STATES:
-            result = self.controller.proceed_to(transfer_stage.TRANSFERRING, context=self.remote_context)
-            self.local_context.update(stage=transfer_stage.TRANSFERRING, stage_status=result)
+            result = self.controller.proceed_to(
+                transfer_stage.TRANSFERRING, context=self.remote_context
+            )
+            self.local_context.update(
+                stage=transfer_stage.TRANSFERRING, stage_status=result
+            )
             if callback is not None:
                 callback()
 
@@ -658,6 +666,7 @@ class PushClient(TransferClient):
     """
     Sync client for pushing to a server
     """
+
     def __init__(self, *args, **kwargs):
         super(PushClient, self).__init__(*args, **kwargs)
         self.local_context.update(is_push=True)
