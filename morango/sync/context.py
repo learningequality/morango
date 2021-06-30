@@ -204,5 +204,5 @@ class NetworkSessionContext(SessionContext):
         self.connection = connection
         super(NetworkSessionContext, self).__init__(
             capabilities=self.connection.server_info.get("capabilities", []),
-            **kwargs,
+            **kwargs
         )
