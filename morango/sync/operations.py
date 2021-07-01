@@ -756,13 +756,9 @@ class LocalDequeueOperation(LocalOperation):
             return transfer_status.COMPLETED
 
         # if no records were transferred, we can safely skip
-        if (
-            context.transfer_session.records_transferred is None
-            or context.transfer_session.records_transferred == 0
-        ):
-            return transfer_status.COMPLETED
-
-        _dequeue_into_store(context.transfer_session)
+        records_transferred = context.transfer_session.records_transferred or 0
+        if records_transferred > 0:
+            _dequeue_into_store(context.transfer_session)
 
         return transfer_status.COMPLETED
 
@@ -786,7 +782,8 @@ class LocalDeserializeOperation(LocalOperation):
         if context.is_pull == context.is_server:
             return transfer_status.COMPLETED
 
-        if SETTINGS.MORANGO_DESERIALIZE_AFTER_DEQUEUING:
+        records_transferred = context.transfer_session.records_transferred or 0
+        if SETTINGS.MORANGO_DESERIALIZE_AFTER_DEQUEUING and records_transferred > 0:
             # we first serialize to avoid deserialization merge conflicts
             _serialize_into_store(
                 context.sync_session.profile,
@@ -902,6 +899,10 @@ class RemoteNetworkOperation(BaseOperation):
         # parse out the results from a paginated set, if needed
         if isinstance(data, dict) and "results" in data:
             data = data["results"]
+
+        # no buffers?
+        if len(data) == 0:
+            return data
 
             # ensure the transfer session allows pulls, and is same across records
         transfer_session = TransferSession.objects.get(id=data[0]["transfer_session"])
@@ -1102,7 +1103,8 @@ class RemotePushTransferOperation(RemoteNetworkOperation):
         ).data
 
         # push buffers chunk to server
-        self.put_buffers(context, data)
+        if len(data) > 0:
+            self.put_buffers(context, data)
 
         context.transfer_session.records_transferred = min(
             offset + chunk_size, context.transfer_session.records_total

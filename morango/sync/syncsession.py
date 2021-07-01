@@ -9,7 +9,7 @@ from io import BytesIO
 
 from django.utils import timezone
 from django.utils.six import iteritems
-from django.utils.six import reraise
+from django.utils.six import raise_from
 from requests.adapters import HTTPAdapter
 from requests.exceptions import HTTPError
 from requests.packages.urllib3.util.retry import Retry
@@ -265,7 +265,7 @@ class NetworkSyncConnection(Connection):
         try:
             self._get_sync_session(sync_session)
         except HTTPError as e:
-            reraise(MorangoResumeSyncError, e)
+            raise_from(MorangoResumeSyncError("Failure resuming sync session"), e)
 
         return SyncSessionClient(self, sync_session)
 
@@ -589,7 +589,7 @@ class TransferClient(object):
         for context in (self.remote_context, self.local_context):
             result = self.controller.proceed_to_and_wait_for(stage, context=context)
             if result == transfer_status.ERRORED:
-                raise MorangoError("Stage `{}` failed".format(stage))
+                raise_from(MorangoError("Stage `{}` failed".format(stage)), self.controller.last_error)
 
     def initialize(self, sync_filter):
         """
@@ -604,7 +604,7 @@ class TransferClient(object):
             transfer_stage.INITIALIZING, context=self.local_context
         )
         if status == transfer_status.ERRORED:
-            raise MorangoError("Failed to initialize transfer session")
+            raise_from(MorangoError("Failed to initialize transfer session"), self.controller.last_error)
 
         # copy the transfer session to local state and update remote controller context
         self.current_transfer_session = self.local_context.transfer_session
@@ -654,7 +654,7 @@ class TransferClient(object):
                 callback()
 
         if result == transfer_status.ERRORED:
-            raise MorangoError("Failure occurred during transfer")
+            raise_from(MorangoError("Failure occurred during transfer"), self.controller.last_error)
 
 
 class PushClient(TransferClient):
