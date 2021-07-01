@@ -330,6 +330,7 @@ class TransferClientTestCase(BaseTransferClientTestCase):
         self.assertEqual(self.client.local_context, mock_proceed_calls[1][1].get("context"))
 
     def test_proceed_to_and_wait_for__error(self):
+        self.controller.last_error = Exception("Oops")
         self.controller.proceed_to_and_wait_for.return_value = transfer_status.ERRORED
         with self.assertRaises(MorangoError):
             self.client.proceed_to_and_wait_for(transfer_stage.QUEUING)
@@ -396,6 +397,7 @@ class TransferClientTestCase(BaseTransferClientTestCase):
 
     def test_transfer__error(self):
         mock_callback = mock.Mock()
+        self.controller.last_error = Exception("Oops")
         self.controller.proceed_to.side_effect = [
             transfer_status.PENDING,
             transfer_status.ERRORED,
