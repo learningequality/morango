@@ -589,7 +589,10 @@ class TransferClient(object):
         for context in (self.remote_context, self.local_context):
             result = self.controller.proceed_to_and_wait_for(stage, context=context)
             if result == transfer_status.ERRORED:
-                raise_from(MorangoError("Stage `{}` failed".format(stage)), self.controller.last_error)
+                raise_from(
+                    MorangoError("Stage `{}` failed".format(stage)),
+                    self.controller.last_error,
+                )
 
     def initialize(self, sync_filter):
         """
@@ -604,7 +607,10 @@ class TransferClient(object):
             transfer_stage.INITIALIZING, context=self.local_context
         )
         if status == transfer_status.ERRORED:
-            raise_from(MorangoError("Failed to initialize transfer session"), self.controller.last_error)
+            raise_from(
+                MorangoError("Failed to initialize transfer session"),
+                self.controller.last_error,
+            )
 
         # copy the transfer session to local state and update remote controller context
         self.current_transfer_session = self.local_context.transfer_session
@@ -654,7 +660,10 @@ class TransferClient(object):
                 callback()
 
         if result == transfer_status.ERRORED:
-            raise_from(MorangoError("Failure occurred during transfer"), self.controller.last_error)
+            raise_from(
+                MorangoError("Failure occurred during transfer"),
+                self.controller.last_error,
+            )
 
 
 class PushClient(TransferClient):
