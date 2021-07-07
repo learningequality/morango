@@ -152,14 +152,8 @@ def create_dummy_store_data():
     return data
 
 
-def setUpIds(common_id=True):
-
-    if common_id:
-        data = ["1" * 32]
-    else:
-        data = [uuid.uuid4().hex]
-    data = data + [uuid.uuid4().hex for _ in range(3)]
-    return data
+def random_ids(count):
+    return [uuid.uuid4().hex for _ in range(count)]
 
 
 def create_rmc_data(c1, c2, c3, c4, ids, model_id):
@@ -176,9 +170,12 @@ def create_rmcb_data(c1, c2, c3, c4, ids, model_id, ts):
 
 def create_buffer_and_store_dummy_data(transfer_session_id):
     data = {}
+    common_id = [uuid.uuid4().hex]
+
     # example data for reverse ff
-    data["model1"] = "a" * 32
-    data["model1_rmc_ids"] = setUpIds()
+    data["model1"] = uuid.uuid4().hex
+    data["model1_rmc_ids"] = common_id + random_ids(3)
+
     # store1: last_saved => D: 3
     # RMCs A: 3, B: 1, C: 2, D: 3
     StoreFactory(
@@ -188,7 +185,7 @@ def create_buffer_and_store_dummy_data(transfer_session_id):
         id=data["model1"],
     )
     create_rmc_data(3, 1, 2, 3, data["model1_rmc_ids"], data["model1"])
-    data["model1_rmcb_ids"] = setUpIds()
+    data["model1_rmcb_ids"] = common_id + random_ids(3)
     # buffer1: last_saved => A: 1
     # RMCBs A: 1, F: 2, G: 3, H: 4
     BufferFactory(
@@ -203,8 +200,8 @@ def create_buffer_and_store_dummy_data(transfer_session_id):
     )
 
     # example data for merge conflict (rmcb.counter > rmc.counter)
-    data["model2"] = "b" * 32
-    data["model2_rmc_ids"] = setUpIds()
+    data["model2"] = uuid.uuid4().hex
+    data["model2_rmc_ids"] = common_id + random_ids(3)
     # store2: last_saved => C: 2
     # RMCs A: 1, B: 1, C: 2, D: 3
     StoreFactory(
@@ -215,7 +212,7 @@ def create_buffer_and_store_dummy_data(transfer_session_id):
         conflicting_serialized_data="store",
     )
     create_rmc_data(1, 1, 2, 3, data["model2_rmc_ids"], data["model2"])
-    data["model2_rmcb_ids"] = setUpIds()
+    data["model2_rmcb_ids"] = common_id + random_ids(3)
     # buffer2: last_saved => F: 2
     # RMCBs A: 3, F: 2, G: 3, H: 4
     BufferFactory(
@@ -231,8 +228,8 @@ def create_buffer_and_store_dummy_data(transfer_session_id):
     )
 
     # example data for merge conflict (rmcb.counter <= rmc.counter)
-    data["model5"] = "e" * 32
-    data["model5_rmc_ids"] = setUpIds()
+    data["model5"] = uuid.uuid4().hex
+    data["model5_rmc_ids"] = common_id + random_ids(3)
     # store5: last_saved => C: 2
     # RMCs A: 3, B: 1, C: 2, D: 3
     StoreFactory(
@@ -243,7 +240,7 @@ def create_buffer_and_store_dummy_data(transfer_session_id):
         conflicting_serialized_data="store",
     )
     create_rmc_data(3, 1, 2, 3, data["model5_rmc_ids"], data["model5"])
-    data["model5_rmcb_ids"] = setUpIds()
+    data["model5_rmcb_ids"] = common_id + random_ids(3)
     # buffer5: last_saved => F: 2
     # RMCBs A: 1, F: 2, G: 3, H: 4
     BufferFactory(
@@ -258,8 +255,8 @@ def create_buffer_and_store_dummy_data(transfer_session_id):
     )
 
     # example data for merge conflict with hard delete(rmcb.counter <= rmc.counter)
-    data["model7"] = "8" * 32
-    data["model7_rmc_ids"] = setUpIds()
+    data["model7"] = uuid.uuid4().hex
+    data["model7_rmc_ids"] = common_id + random_ids(3)
     # store5: last_saved => C: 2
     # RMCs A: 3, B: 1, C: 2, D: 3
     StoreFactory(
@@ -270,7 +267,7 @@ def create_buffer_and_store_dummy_data(transfer_session_id):
         conflicting_serialized_data="store",
     )
     create_rmc_data(3, 1, 2, 3, data["model7_rmc_ids"], data["model7"])
-    data["model7_rmcb_ids"] = setUpIds()
+    data["model7_rmcb_ids"] = common_id + random_ids(3)
     # buffer5: last_saved => F: 2
     # RMCBs A: 1, F: 2, G: 3, H: 4
     BufferFactory(
@@ -286,8 +283,8 @@ def create_buffer_and_store_dummy_data(transfer_session_id):
     )
 
     # example data for ff
-    data["model3"] = "c" * 32
-    data["model3_rmc_ids"] = setUpIds()
+    data["model3"] = uuid.uuid4().hex
+    data["model3_rmc_ids"] = common_id + random_ids(3)
     # store3: last_saved => A: 1
     # RMCs A: 1, B: 2, C: 3, D: 4
     StoreFactory(
@@ -297,7 +294,7 @@ def create_buffer_and_store_dummy_data(transfer_session_id):
         id=data["model3"],
     )
     create_rmc_data(1, 2, 3, 4, data["model3_rmc_ids"], data["model3"])
-    data["model3_rmcb_ids"] = setUpIds()
+    data["model3_rmcb_ids"] = common_id + random_ids(3)
     # buffer3: last_saved => F: 2
     # RMCBs A: 3, F: 2, G: 3, H: 4
     BufferFactory(
@@ -312,8 +309,8 @@ def create_buffer_and_store_dummy_data(transfer_session_id):
     )
 
     # example for missing store data
-    data["model4"] = "d" * 32
-    data["model4_rmcb_ids"] = setUpIds()
+    data["model4"] = uuid.uuid4().hex
+    data["model4_rmcb_ids"] = common_id + random_ids(3)
     BufferFactory(
         serialized="buffer",
         last_saved_instance=data["model4_rmcb_ids"][0],
@@ -329,15 +326,15 @@ def create_buffer_and_store_dummy_data(transfer_session_id):
     session = SyncSession.objects.create(
         id=uuid.uuid4().hex, profile="", last_activity_timestamp=timezone.now()
     )
-    data["tfs_id"] = "9" * 32
+    data["tfs_id"] = uuid.uuid4().hex
     TransferSession.objects.create(
         id=data["tfs_id"],
         sync_session=session,
         push=True,
         last_activity_timestamp=timezone.now(),
     )
-    data["model6"] = "f" * 32
-    data["model6_rmcb_ids"] = setUpIds()
+    data["model6"] = uuid.uuid4().hex
+    data["model6_rmcb_ids"] = common_id + random_ids(3)
     BufferFactory(
         last_saved_instance=data["model6_rmcb_ids"][0],
         last_saved_counter=1,
