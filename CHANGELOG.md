@@ -2,6 +2,12 @@
 
 List of the most important changes for each release.
 
+
+## 0.5.6
+
+- Add management command for garbage collection of buffer data
+- Speed up instance ID calculation by skipping hostname check
+
 ## 0.5.5
 
 - Allow MAC address to be overridden by envvar for instance_id calculation

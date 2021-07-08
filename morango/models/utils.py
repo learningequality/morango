@@ -2,6 +2,7 @@ import hashlib
 import ifcfg
 import os
 import platform
+import socket
 import subprocess
 import sys
 import uuid
@@ -203,6 +204,18 @@ def _mac_is_local(mac):
     return _get_mac_address_flags(mac)[1]
 
 
+class gethostbyaddr_disabled(object):
+    def __init__(self, fake_hostname=""):
+        self.fake_hostname = fake_hostname
+
+    def __enter__(self):
+        self.original_fn = socket.gethostbyaddr
+        socket.gethostbyaddr = lambda x: (self.fake_hostname, [], [x])
+
+    def __exit__(self, type, value, traceback):
+        socket.gethostbyaddr = self.original_fn
+
+
 def get_0_5_mac_address():
 
     # check whether envvar was set, and use that if available
@@ -213,7 +226,8 @@ def get_0_5_mac_address():
     # first, try using ifcfg
     interfaces = []
     try:
-        interfaces = ifcfg.interfaces().values()
+        with gethostbyaddr_disabled():
+            interfaces = ifcfg.interfaces().values()
     except:  # noqa: E722
         pass
     for iface in sorted(interfaces, key=_device_sort_key):
