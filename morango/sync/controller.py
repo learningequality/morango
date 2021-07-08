@@ -8,6 +8,7 @@ from morango.registry import session_middleware
 from morango.sync.operations import _deserialize_from_store
 from morango.sync.operations import _serialize_into_store
 from morango.sync.operations import OperationLogger
+from morango.sync.utils import SyncSignalGroup
 
 
 logger = logging.getLogger(__name__)
@@ -56,6 +57,26 @@ class MorangoProfileController(object):
         raise NotImplementedError("Coming soon...")
 
 
+class SessionControllerSignals(object):
+    __slots__ = transfer_stage.ALL
+
+    def __init__(self):
+        """
+        Initializes signal group for each transfer stage
+        """
+        for stage in transfer_stage.ALL:
+            setattr(self, stage, SyncSignalGroup(context=None))
+
+    def connect(self, handler):
+        """
+        Connects handler to every stage's signal
+        :param handler: callable
+        """
+        for stage in transfer_stage.ALL:
+            signal = getattr(self, stage)
+            signal.connect(handler)
+
+
 class SessionController(object):
     """
     Controller class that is used to execute transfer operations, like queuing and serializing,
@@ -63,33 +84,34 @@ class SessionController(object):
     those transfer stage operations are handled
     """
 
-    __slots__ = ("middleware", "context", "logging_enabled", "last_error")
+    __slots__ = ("middleware", "signals", "context", "last_error",)
 
-    def __init__(self, middleware, context=None, enable_logging=False):
+    def __init__(self, middleware, signals, context=None):
         """
         :type middleware: morango.registry.SessionMiddlewareRegistry|list
+        :type signals: SessionControllerSignals
         :type context: morango.sync.context.SessionContext|None
-        :type enable_logging: bool
         """
         self.middleware = middleware
+        self.signals = signals
         self.context = context
-        self.logging_enabled = enable_logging
         self.last_error = None
 
     @classmethod
-    def build(cls, context=None, enable_logging=False):
+    def build(cls, middleware=None, signals=None, context=None):
         """
         Factory method that instantiates the `SessionController` with the specified context and
         the global middleware registry `session_middleware`
 
+        :type middleware: morango.registry.SessionMiddlewareRegistry|list|None
+        :type signals: SessionControllerSignals|none
         :type context: morango.sync.context.SessionContext|None
-        :type enable_logging: bool
         :return: A new transfer controller
         :rtype: SessionController
         """
-        return SessionController(
-            session_middleware, context=context, enable_logging=enable_logging
-        )
+        middleware = middleware or session_middleware
+        signals = signals or SessionControllerSignals()
+        return SessionController(middleware, signals, context=context)
 
     def proceed_to(self, stage, context=None):
         """
@@ -179,23 +201,6 @@ class SessionController(object):
             sleep(interval)
         return result
 
-    def _log_invocation(self, stage, result=None):
-        """
-        Logs messages about middleware invocation, if logging is enabled. We avoid logging when
-        used through the SyncClient to avoid messing up stdout
-        """
-        if not self.logging_enabled:
-            return
-
-        if result is None:
-            logging.info("Starting stage '{}'".format(stage))
-        if result == transfer_status.COMPLETED:
-            logging.info("Completed stage '{}'".format(stage))
-        elif result == transfer_status.STARTED:
-            logging.info("Stage is in progress '{}' = '{}'".format(stage, result))
-        elif result == transfer_status.ERRORED:
-            logging.info("Encountered error during stage '{}'".format(stage))
-
     def _invoke_middleware(self, context, middleware):
         """
         Invokes middleware, with logging if enabled, and handles updating the transfer session state
@@ -207,18 +212,33 @@ class SessionController(object):
         :rtype: str
         """
         stage = middleware.related_stage
-        self._log_invocation(stage)
+        signal = getattr(self.signals, stage)
+        at_stage = context.stage == stage
 
         try:
             context.update(stage=stage, stage_status=transfer_status.PENDING)
+
+            # only fire "started" when we first try to invoke the stage
+            # NOTE: this means that signals.started is not equivalent to transfer_stage.STARTED
+            if not at_stage:
+                signal.started.fire(context=context)
+
             result = middleware(context)
-            self._log_invocation(stage, result=result)
+
             context.update(stage_status=result)
+
+            # fire signals based off , progress signal if not completed
+            if result == transfer_status.COMPLETED:
+                signal.completed.fire(context=context)
+            else:
+                signal.in_progress.fire(context=context)
+
             return result
         except Exception as e:
             # always log the error itself
-            self.last_error = e
             logging.error(e)
-            self._log_invocation(stage, result=transfer_status.ERRORED)
+            self.last_error = e
             context.update(stage_status=transfer_status.ERRORED)
+            # fire completed signal, after context update. handlers can use context to detect error
+            signal.completed.fire(context=context)
             return transfer_status.ERRORED

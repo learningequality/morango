@@ -1,6 +1,7 @@
 import json
 import platform
 import uuid
+import logging
 
 from django.core.exceptions import ValidationError
 from django.utils import timezone
@@ -41,7 +42,21 @@ else:
     parsers = (JSONParser,)
 
 
-session_controller = SessionController.build(enable_logging=True)
+def controller_signal_logger(context=None):
+    assert context is not None
+
+    if context.stage_status == transfer_status.PENDING:
+        logging.info("Starting stage '{}'".format(context.stage))
+    elif context.stage_status == transfer_status.STARTED:
+        logging.info("Stage is in progress '{}'".format(context.stage))
+    elif context.stage_status == transfer_status.COMPLETED:
+        logging.info("Completed stage '{}'".format(context.stage))
+    elif context.stage_status == transfer_status.ERRORED:
+        logging.info("Encountered error during stage '{}'".format(context.stage))
+
+
+session_controller = SessionController.build()
+session_controller.signals.connect(controller_signal_logger)
 
 
 class CertificateChainViewSet(viewsets.ViewSet):

@@ -643,7 +643,7 @@ class SessionControllerTestCase(SimpleTestCase):
             for stage, _ in transfer_stage.CHOICES
         ]
         self.context = SessionContext()
-        self.controller = SessionController(self.middleware, self.context, False)
+        self.controller = SessionController.build(middleware=self.middleware, context=self.context)
 
     @contextlib.contextmanager
     def _mock_method(self, method):
@@ -706,19 +706,21 @@ class SessionControllerTestCase(SimpleTestCase):
     def test_invoke_middleware(self):
         context = mock.Mock(spec=SessionContext)
         self.controller.context = context
-        with self._mock_method('_log_invocation') as log:
-            middleware = self.middleware[0]
-            middleware.return_value = transfer_status.STARTED
-            result = self.controller._invoke_middleware(context, middleware)
-            self.assertEqual(result, transfer_status.STARTED)
+        handler = mock.Mock()
+        self.controller.signals.connect(handler)
 
-            context_update_calls = self.controller.context.update.call_args_list
-            self.assertEqual(2, len(context_update_calls))
-            self.assertEqual(mock.call(stage=middleware.related_stage, stage_status=transfer_status.PENDING), context_update_calls[0])
-            self.assertEqual(mock.call(stage_status=transfer_status.STARTED), context_update_calls[1])
+        middleware = self.middleware[0]
+        middleware.return_value = transfer_status.STARTED
+        result = self.controller._invoke_middleware(context, middleware)
+        self.assertEqual(result, transfer_status.STARTED)
 
-            self.assertEqual(2, len(log.call_args_list))
-            self.assertEqual(mock.call(middleware.related_stage), log.call_args_list[0])
-            self.assertEqual(mock.call(middleware.related_stage, result=transfer_status.STARTED), log.call_args_list[1])
+        context_update_calls = self.controller.context.update.call_args_list
+        self.assertEqual(2, len(context_update_calls))
+        self.assertEqual(mock.call(stage=middleware.related_stage, stage_status=transfer_status.PENDING), context_update_calls[0])
+        self.assertEqual(mock.call(stage_status=transfer_status.STARTED), context_update_calls[1])
+
+        self.assertEqual(2, len(handler.call_args_list))
+        self.assertEqual(mock.call(context=context), handler.call_args_list[0])
+        self.assertEqual(mock.call(context=context), handler.call_args_list[1])
 
 

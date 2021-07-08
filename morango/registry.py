@@ -191,11 +191,16 @@ class SyncableModelRegistry(object):
 syncable_models = SyncableModelRegistry()
 
 
-class SessionMiddleware(list):
+class SessionMiddlewareOperations(list):
     """
-    Iterable list class that holds and initializes a list of transfer middleware as configured
-    through Morango settings
+    Iterable list class that holds and initializes a list of transfer operations as configured
+    through Morango settings, and associate the group with a transfer stage by `related_stage`
     """
+    __slots__ = ("related_stage",)
+
+    def __init__(self, related_stage):
+        super(SessionMiddlewareOperations, self).__init__()
+        self.related_stage = related_stage
 
     def populate(self, callable_imports):
         """
@@ -213,31 +218,6 @@ class SessionMiddleware(list):
             else:
                 self.append(middleware_callable)
 
-
-class SessionMiddlewareHooks(SessionMiddleware):
-    """
-    Iterable list class that holds and initializes a list of callback hooks
-    """
-
-    def __call__(self, context):
-        # As a list of hooks, all of them should be called
-        for hook in self:
-            hook(context)
-
-
-class SessionMiddlewareOperations(SessionMiddleware):
-    """
-    Iterable list class that holds and initializes a list of transfer operations as configured
-    through Morango settings, and associate the group with a transfer stage by `related_stage`
-    """
-    __slots__ = ("related_stage",)
-
-    def __init__(self, related_stage):
-        super(SessionMiddlewareOperations, self).__init__()
-        self.related_stage = related_stage
-        self.pre_hooks = SessionMiddlewareHooks()
-        self.post_hooks = SessionMiddlewareHooks()
-
     def __call__(self, context):
         # As middleware list, we expect that one of the operations should handle the request context
         # so executing the middleware loops through each of the operations and executes them until
@@ -245,9 +225,7 @@ class SessionMiddlewareOperations(SessionMiddleware):
         # returning the non-false value, otherwise the middleware has failed to handle the operation
         # for the related transfer stage
         for operation in self:
-            self.pre_hooks(context)
             result = operation(context)
-            self.post_hooks(context)
             # operation tells us it has "handled" the context by returning result that is not False
             if result is not False:
                 return result
@@ -258,13 +236,13 @@ class SessionMiddlewareOperations(SessionMiddleware):
 
 
 STAGE_TO_SETTINGS = {
-    transfer_stage.INITIALIZING: "INITIALIZE_OPERATIONS",
-    transfer_stage.SERIALIZING: "SERIALIZE_OPERATIONS",
-    transfer_stage.QUEUING: "QUEUE_OPERATIONS",
-    transfer_stage.TRANSFERRING: "TRANSFERRING_OPERATIONS",
-    transfer_stage.DEQUEUING: "DEQUEUE_OPERATIONS",
-    transfer_stage.DESERIALIZING: "DESERIALIZE_OPERATIONS",
-    transfer_stage.CLEANUP: "CLEANUP_OPERATIONS",
+    transfer_stage.INITIALIZING: "MORANGO_INITIALIZE_OPERATIONS",
+    transfer_stage.SERIALIZING: "MORANGO_SERIALIZE_OPERATIONS",
+    transfer_stage.QUEUING: "MORANGO_QUEUE_OPERATIONS",
+    transfer_stage.TRANSFERRING: "MORANGO_TRANSFERRING_OPERATIONS",
+    transfer_stage.DEQUEUING: "MORANGO_DEQUEUE_OPERATIONS",
+    transfer_stage.DESERIALIZING: "MORANGO_DESERIALIZE_OPERATIONS",
+    transfer_stage.CLEANUP: "MORANGO_CLEANUP_OPERATIONS",
 }
 
 
@@ -279,13 +257,7 @@ class SessionMiddlewareRegistry(list):
         # add middleware operations groups in order of stage precedence
         for stage, setting in sorted_stage_map:
             transfer_middleware = SessionMiddlewareOperations(stage)
-            transfer_middleware.pre_hooks.populate(
-                getattr(SETTINGS, "MORANGO_PRE_{}".format(setting)) or []
-            )
-            transfer_middleware.populate(getattr(SETTINGS, "MORANGO_{}".format(setting)))
-            transfer_middleware.post_hooks.populate(
-                getattr(SETTINGS, "MORANGO_POST_{}".format(setting)) or []
-            )
+            transfer_middleware.populate(getattr(SETTINGS, setting))
             self.append(transfer_middleware)
 
 

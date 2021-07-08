@@ -21,6 +21,8 @@ CHOICES = (
     (CLEANUP, _("Cleanup")),
 )
 
+ALL = {stage for stage, _ in CHOICES}
+
 PRECEDENCE = {
     INITIALIZING: 10,
     SERIALIZING: 20,
