@@ -20,8 +20,8 @@ from .session import SessionWrapper
 from morango.api.serializers import CertificateSerializer
 from morango.api.serializers import InstanceIDSerializer
 from morango.constants import api_urls
-from morango.constants import transfer_stage
-from morango.constants import transfer_status
+from morango.constants import transfer_stages
+from morango.constants import transfer_statuses
 from morango.constants.capabilities import ALLOW_CERTIFICATE_PUSHING
 from morango.constants.capabilities import GZIP_BUFFER_POST
 from morango.errors import CertificateSignatureInvalid
@@ -588,10 +588,10 @@ class TransferClient(object):
     def proceed_to_and_wait_for(self, stage):
         for context in (self.remote_context, self.local_context):
             result = self.controller.proceed_to_and_wait_for(stage, context=context)
-            if result == transfer_status.ERRORED:
+            if result == transfer_statuses.ERRORED:
                 raise_from(
                     MorangoError("Stage `{}` failed".format(stage)),
-                    self.controller.last_error,
+                    context.error,
                 )
 
     def initialize(self, sync_filter):
@@ -604,12 +604,12 @@ class TransferClient(object):
 
         # initialize the transfer session locally
         status = self.controller.proceed_to_and_wait_for(
-            transfer_stage.INITIALIZING, context=self.local_context
+            transfer_stages.INITIALIZING, context=self.local_context
         )
-        if status == transfer_status.ERRORED:
+        if status == transfer_statuses.ERRORED:
             raise_from(
                 MorangoError("Failed to initialize transfer session"),
-                self.controller.last_error,
+                self.local_context.error,
             )
 
         # copy the transfer session to local state and update remote controller context
@@ -622,7 +622,7 @@ class TransferClient(object):
 
         # create transfer session on server side and proceed to queuing
         with self.signals.queuing.send(transfer_session=self.current_transfer_session):
-            self.proceed_to_and_wait_for(transfer_stage.QUEUING)
+            self.proceed_to_and_wait_for(transfer_stages.QUEUING)
 
     def run(self):
         with self.signals.transferring.send(
@@ -638,31 +638,31 @@ class TransferClient(object):
         with self.signals.dequeuing.send(
             transfer_session=self.current_transfer_session
         ):
-            self.proceed_to_and_wait_for(transfer_stage.DESERIALIZING)
+            self.proceed_to_and_wait_for(transfer_stages.DESERIALIZING)
 
-        self.proceed_to_and_wait_for(transfer_stage.CLEANUP)
+        self.proceed_to_and_wait_for(transfer_stages.CLEANUP)
         self.signals.session.completed.fire(
             transfer_session=self.current_transfer_session
         )
         self.current_transfer_session = None
 
     def _transfer(self, callback=None):
-        result = transfer_status.PENDING
+        result = transfer_statuses.PENDING
 
-        while result not in transfer_status.FINISHED_STATES:
+        while result not in transfer_statuses.FINISHED_STATES:
             result = self.controller.proceed_to(
-                transfer_stage.TRANSFERRING, context=self.remote_context
+                transfer_stages.TRANSFERRING, context=self.remote_context
             )
             self.local_context.update(
-                stage=transfer_stage.TRANSFERRING, stage_status=result
+                stage=transfer_stages.TRANSFERRING, stage_status=result
             )
             if callback is not None:
                 callback()
 
-        if result == transfer_status.ERRORED:
+        if result == transfer_statuses.ERRORED:
             raise_from(
                 MorangoError("Failure occurred during transfer"),
-                self.controller.last_error,
+                self.remote_context.error,
             )
 
 

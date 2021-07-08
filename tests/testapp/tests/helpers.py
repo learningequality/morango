@@ -25,6 +25,7 @@ from morango.models.core import RecordMaxCounterBuffer
 from morango.models.core import Store
 from morango.models.core import SyncSession
 from morango.models.core import TransferSession
+from morango.sync.context import SessionContext
 from morango.sync.controller import MorangoProfileController
 from morango.sync.controller import SessionController
 from morango.sync.syncsession import NetworkSyncConnection
@@ -423,3 +424,21 @@ class BaseTransferClientTestCase(BaseClientTestCase):
             client.local_context.update(transfer_session=self.transfer_session)
             client.remote_context.update(transfer_session=self.transfer_session)
         return client
+
+
+class TestSessionContext(SessionContext):
+    __test__ = False
+    _stage = None
+    _stage_status = None
+
+    @property
+    def stage(self):
+        return self._stage
+
+    @property
+    def stage_status(self):
+        return self._stage_status
+
+    def update_state(self, stage=None, stage_status=None):
+        self._stage = stage or self._stage
+        self._stage_status = stage_status or self._stage_status

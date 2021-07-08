@@ -11,7 +11,7 @@ import mock
 
 from ..helpers import create_buffer_and_store_dummy_data
 from ..helpers import create_dummy_store_data
-from morango.constants import transfer_status
+from morango.constants import transfer_statuses
 from morango.models.core import Buffer
 from morango.models.core import DatabaseIDModel
 from morango.models.core import InstanceIDModel
@@ -171,7 +171,7 @@ class QueueStoreIntoBufferTestCase(TestCase):
         ]
         self.context.filter = [self.transfer_session.get_filter()]
         operation = LocalInitializeOperation()
-        self.assertEqual(transfer_status.COMPLETED, operation.handle(self.context))
+        self.assertEqual(transfer_statuses.COMPLETED, operation.handle(self.context))
         self.context.update.assert_called_once()
         transfer_session = self.context.update.call_args_list[0][1].get("transfer_session")
         self.assertEqual(id, transfer_session.id)
@@ -184,13 +184,13 @@ class QueueStoreIntoBufferTestCase(TestCase):
         self.context.is_server = False
         self.context.filter = [self.transfer_session.get_filter()]
         operation = LocalInitializeOperation()
-        self.assertEqual(transfer_status.COMPLETED, operation.handle(self.context))
+        self.assertEqual(transfer_statuses.COMPLETED, operation.handle(self.context))
         self.context.update.assert_called_once()
 
     def test_local_initialize_operation__resume(self):
         self.context.transfer_session = None
         operation = LocalInitializeOperation()
-        self.assertEqual(transfer_status.COMPLETED, operation.handle(self.context))
+        self.assertEqual(transfer_statuses.COMPLETED, operation.handle(self.context))
         self.context.update.assert_called_once_with(transfer_session=self.transfer_session)
 
     def test_local_queue_operation(self):
@@ -199,7 +199,7 @@ class QueueStoreIntoBufferTestCase(TestCase):
 
         self.assertEqual(0, self.transfer_session.records_total or 0)
         operation = LocalQueueOperation()
-        self.assertEqual(transfer_status.COMPLETED, operation.handle(self.context))
+        self.assertEqual(transfer_statuses.COMPLETED, operation.handle(self.context))
         self.assertNotEqual(0, self.transfer_session.records_total)
 
         # ensure all store and buffer records are buffered
@@ -217,7 +217,7 @@ class QueueStoreIntoBufferTestCase(TestCase):
         self.context.is_server = True
 
         operation = LocalQueueOperation()
-        self.assertEqual(transfer_status.COMPLETED, operation.handle(self.context))
+        self.assertEqual(transfer_statuses.COMPLETED, operation.handle(self.context))
         mock_queue.assert_not_called()
 
 
@@ -569,7 +569,7 @@ class DequeueBufferIntoStoreTestCase(TestCase):
         self.transfer_session.records_transferred = 1
         self.context.filter = [self.transfer_session.filter]
         operation = LocalDequeueOperation()
-        self.assertEqual(transfer_status.COMPLETED, operation.handle(self.context))
+        self.assertEqual(transfer_statuses.COMPLETED, operation.handle(self.context))
         self.assertFalse(
             Buffer.objects.filter(transfer_session_id=self.transfer_session.id).exists()
         )
@@ -578,14 +578,14 @@ class DequeueBufferIntoStoreTestCase(TestCase):
     def test_local_dequeue_operation__noop(self, mock_dequeue):
         self.context.is_server = False
         operation = LocalDequeueOperation()
-        self.assertEqual(transfer_status.COMPLETED, operation.handle(self.context))
+        self.assertEqual(transfer_statuses.COMPLETED, operation.handle(self.context))
         mock_dequeue.assert_not_called()
 
     @mock.patch("morango.sync.operations._dequeue_into_store")
     def test_local_dequeue_operation__noop__nothing_transferred(self, mock_dequeue):
         self.transfer_session.records_transferred = 0
         operation = LocalDequeueOperation()
-        self.assertEqual(transfer_status.COMPLETED, operation.handle(self.context))
+        self.assertEqual(transfer_statuses.COMPLETED, operation.handle(self.context))
         mock_dequeue.assert_not_called()
 
     @mock.patch("morango.sync.operations.DatabaseMaxCounter.update_fsics")
@@ -593,7 +593,7 @@ class DequeueBufferIntoStoreTestCase(TestCase):
         self.transfer_session.records_transferred = 1
         self.context.filter = [self.transfer_session.filter]
         operation = LocalDeserializeOperation()
-        self.assertEqual(transfer_status.COMPLETED, operation.handle(self.context))
+        self.assertEqual(transfer_statuses.COMPLETED, operation.handle(self.context))
         mock_update_fsics.assert_called()
 
     def test_local_cleanup(self):
@@ -607,7 +607,7 @@ class DequeueBufferIntoStoreTestCase(TestCase):
         self.assertTrue(
             RecordMaxCounterBuffer.objects.filter(transfer_session_id=self.transfer_session.id).exists()
         )
-        self.assertEqual(transfer_status.COMPLETED, operation.handle(self.context))
+        self.assertEqual(transfer_statuses.COMPLETED, operation.handle(self.context))
         self.assertFalse(self.transfer_session.active)
         self.assertFalse(
             Buffer.objects.filter(transfer_session_id=self.transfer_session.id).exists()

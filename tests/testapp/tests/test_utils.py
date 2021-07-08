@@ -3,7 +3,7 @@ from django.http.request import HttpRequest
 from django.test.testcases import SimpleTestCase
 import mock
 
-from morango.constants import transfer_stage
+from morango.constants import transfer_stages
 from morango.utils import SETTINGS
 from morango.utils import CAPABILITIES_CLIENT_HEADER
 from morango.utils import serialize_capabilities_to_client_request
@@ -56,9 +56,9 @@ class CapabilitiesTestCase(SimpleTestCase):
 
 class TransferStageTestCase(SimpleTestCase):
     def test_stage(self):
-        stage_a = transfer_stage.stage(transfer_stage.INITIALIZING)
-        stage_b = transfer_stage.stage(transfer_stage.CLEANUP)
-        stage_c = transfer_stage.stage(transfer_stage.CLEANUP)
+        stage_a = transfer_stages.stage(transfer_stages.INITIALIZING)
+        stage_b = transfer_stages.stage(transfer_stages.CLEANUP)
+        stage_c = transfer_stages.stage(transfer_stages.CLEANUP)
 
         self.assertTrue(stage_b > stage_a)
         self.assertFalse(stage_b < stage_a)

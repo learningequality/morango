@@ -83,23 +83,6 @@ class CertificatePushPermissions(permissions.BasePermission):
         return False
 
 
-class NoncePermissions(permissions.BasePermission):
-    def has_permission(self, request, view):
-        return request.method in ("POST",)
-
-
-class SyncSessionPermissions(permissions.BasePermission):
-    def has_permission(self, request, view):
-        # we'll be doing some additional permission checks in the viewset
-        return request.method in ("POST", "GET", "DELETE")
-
-
-class TransferSessionPermissions(permissions.BasePermission):
-    def has_permission(self, request, view):
-        # we'll be doing some additional permission checks in the viewset
-        return request.method in ("POST", "PATCH", "GET", "DELETE")
-
-
 class BufferPermissions(permissions.BasePermission):
     def has_permission(self, request, view):
         if request.method == "GET":

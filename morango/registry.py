@@ -10,7 +10,7 @@ from importlib import import_module
 from django.db.models.fields.related import ForeignKey
 from django.utils import six
 
-from morango.constants import transfer_stage
+from morango.constants import transfer_stages
 from morango.errors import InvalidMorangoModelConfiguration
 from morango.errors import ModelRegistryNotReady
 from morango.errors import UnsupportedFieldType
@@ -230,19 +230,20 @@ class SessionMiddlewareOperations(list):
             if result is not False:
                 return result
         else:
+            print("XXX", len(self))
             raise NotImplementedError(
                 "Operation for {} stage has no middleware".format(self.related_stage)
             )
 
 
 STAGE_TO_SETTINGS = {
-    transfer_stage.INITIALIZING: "MORANGO_INITIALIZE_OPERATIONS",
-    transfer_stage.SERIALIZING: "MORANGO_SERIALIZE_OPERATIONS",
-    transfer_stage.QUEUING: "MORANGO_QUEUE_OPERATIONS",
-    transfer_stage.TRANSFERRING: "MORANGO_TRANSFERRING_OPERATIONS",
-    transfer_stage.DEQUEUING: "MORANGO_DEQUEUE_OPERATIONS",
-    transfer_stage.DESERIALIZING: "MORANGO_DESERIALIZE_OPERATIONS",
-    transfer_stage.CLEANUP: "MORANGO_CLEANUP_OPERATIONS",
+    transfer_stages.INITIALIZING: "MORANGO_INITIALIZE_OPERATIONS",
+    transfer_stages.SERIALIZING: "MORANGO_SERIALIZE_OPERATIONS",
+    transfer_stages.QUEUING: "MORANGO_QUEUE_OPERATIONS",
+    transfer_stages.TRANSFERRING: "MORANGO_TRANSFERRING_OPERATIONS",
+    transfer_stages.DEQUEUING: "MORANGO_DEQUEUE_OPERATIONS",
+    transfer_stages.DESERIALIZING: "MORANGO_DESERIALIZE_OPERATIONS",
+    transfer_stages.CLEANUP: "MORANGO_CLEANUP_OPERATIONS",
 }
 
 
@@ -252,7 +253,7 @@ class SessionMiddlewareRegistry(list):
     def populate(self):
         # sort dict items according to stage precedence
         sorted_stage_map = sorted(
-            STAGE_TO_SETTINGS.items(), key=lambda s: transfer_stage.precedence(s[0])
+            STAGE_TO_SETTINGS.items(), key=lambda s: transfer_stages.precedence(s[0])
         )
         # add middleware operations groups in order of stage precedence
         for stage, setting in sorted_stage_map:

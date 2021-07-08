@@ -17,8 +17,8 @@ import morango
 from morango import errors
 from morango.api import permissions
 from morango.api import serializers
-from morango.constants import transfer_stage
-from morango.constants import transfer_status
+from morango.constants import transfer_stages
+from morango.constants import transfer_statuses
 from morango.constants.capabilities import ASYNC_OPERATIONS
 from morango.constants.capabilities import GZIP_BUFFER_POST
 from morango.models import certificates
@@ -45,13 +45,13 @@ else:
 def controller_signal_logger(context=None):
     assert context is not None
 
-    if context.stage_status == transfer_status.PENDING:
+    if context.stage_status == transfer_statuses.PENDING:
         logging.info("Starting stage '{}'".format(context.stage))
-    elif context.stage_status == transfer_status.STARTED:
+    elif context.stage_status == transfer_statuses.STARTED:
         logging.info("Stage is in progress '{}'".format(context.stage))
-    elif context.stage_status == transfer_status.COMPLETED:
+    elif context.stage_status == transfer_statuses.COMPLETED:
         logging.info("Completed stage '{}'".format(context.stage))
-    elif context.stage_status == transfer_status.ERRORED:
+    elif context.stage_status == transfer_statuses.ERRORED:
         logging.info("Encountered error during stage '{}'".format(context.stage))
 
 
@@ -127,7 +127,7 @@ class CertificateViewSet(
     viewsets.mixins.CreateModelMixin,
     viewsets.mixins.RetrieveModelMixin,
     viewsets.mixins.ListModelMixin,
-    viewsets.GenericViewSet
+    viewsets.GenericViewSet,
 ):
     permission_classes = (permissions.CertificatePermissions,)
     serializer_class = serializers.CertificateSerializer
@@ -216,7 +216,6 @@ class CertificateViewSet(
 
 
 class NonceViewSet(viewsets.mixins.CreateModelMixin, viewsets.GenericViewSet):
-    permission_classes = (permissions.NoncePermissions,)
     serializer_class = serializers.NonceSerializer
 
     def create(self, request):
@@ -227,11 +226,7 @@ class NonceViewSet(viewsets.mixins.CreateModelMixin, viewsets.GenericViewSet):
         )
 
 
-class SyncSessionViewSet(
-    viewsets.mixins.DestroyModelMixin,
-    viewsets.GenericViewSet
-):
-    permission_classes = (permissions.SyncSessionPermissions,)
+class SyncSessionViewSet(viewsets.mixins.DestroyModelMixin, viewsets.GenericViewSet):
     serializer_class = serializers.SyncSessionSerializer
 
     def create(self, request):
@@ -359,9 +354,8 @@ class TransferSessionViewSet(
     viewsets.mixins.RetrieveModelMixin,
     viewsets.mixins.UpdateModelMixin,
     viewsets.mixins.DestroyModelMixin,
-    viewsets.GenericViewSet
+    viewsets.GenericViewSet,
 ):
-    permission_classes = (permissions.TransferSessionPermissions,)
     serializer_class = serializers.TransferSessionSerializer
 
     def create(self, request):  # noqa: C901
@@ -409,20 +403,24 @@ class TransferSessionViewSet(
         # should PATCH the transfer_session to the appropriate stage. If not async, we wait until
         # queuing is complete
         to_stage = (
-            transfer_stage.INITIALIZING
+            transfer_stages.INITIALIZING
             if self.async_allowed()
-            else transfer_stage.QUEUING
+            else transfer_stages.QUEUING
         )
         result = session_controller.proceed_to_and_wait_for(to_stage, context=context)
 
-        if result == transfer_status.ERRORED:
+        if result == transfer_statuses.ERRORED:
+            if context.error:
+                raise context.error
+
             return response.Response(
                 "Failed to initialize session",
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR,
             )
 
-        response_status = status.HTTP_201_CREATED
-        if result != transfer_status.COMPLETED:
+        if result == transfer_statuses.COMPLETED:
+            response_status = status.HTTP_201_CREATED
+        else:
             response_status = status.HTTP_202_ACCEPTED
 
         return response.Response(
@@ -445,7 +443,7 @@ class TransferSessionViewSet(
                 transfer_session=self.get_object(),
             )
             # special case for transferring, not to wait since it's a chunked process
-            if self.async_allowed() or update_stage == transfer_stage.TRANSFERRING:
+            if self.async_allowed() or update_stage == transfer_stages.TRANSFERRING:
                 session_controller.proceed_to(update_stage, context=context)
             else:
                 session_controller.proceed_to_and_wait_for(
@@ -460,13 +458,13 @@ class TransferSessionViewSet(
             transfer_session=transfer_session,
         )
         if self.async_allowed():
-            session_controller.proceed_to(transfer_stage.CLEANUP, context=context)
+            session_controller.proceed_to(transfer_stages.CLEANUP, context=context)
         else:
             result = session_controller.proceed_to_and_wait_for(
-                transfer_stage.CLEANUP, context=context
+                transfer_stages.CLEANUP, context=context
             )
             # raise an error for synchronous, if status is false
-            if result == transfer_status.ERRORED:
+            if result == transfer_statuses.ERRORED:
                 raise RuntimeError("Cleanup failed")
 
     def get_queryset(self):
@@ -507,15 +505,16 @@ class BufferViewSet(mixins.ListModelMixin, viewsets.GenericViewSet):
             request=request, transfer_session=transfer_session
         )
         result = session_controller.proceed_to(
-            transfer_stage.TRANSFERRING, context=context
+            transfer_stages.TRANSFERRING, context=context
         )
 
-        response_status = status.HTTP_201_CREATED
-        if result == transfer_status.ERRORED:
-            if session_controller.last_error:
-                raise session_controller.last_error
+        if result == transfer_statuses.ERRORED:
+            if context.error:
+                raise context.error
             else:
                 response_status = status.HTTP_500_INTERNAL_SERVER_ERROR
+        else:
+            response_status = status.HTTP_201_CREATED
 
         return response.Response(status=response_status)
 

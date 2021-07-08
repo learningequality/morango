@@ -151,6 +151,7 @@ class SyncSignal(object):
     """
     Helper class for firing signals from the sync client
     """
+
     __slots__ = ("_handlers", "_defaults")
 
     def __init__(self, **kwargs_defaults):

@@ -15,8 +15,8 @@ from test.support import EnvironmentVarGuard
 from morango.api.serializers import BufferSerializer
 from morango.api.serializers import CertificateSerializer
 from morango.api.serializers import InstanceIDSerializer
-from morango.constants import transfer_stage
-from morango.constants import transfer_status
+from morango.constants import transfer_stages
+from morango.constants import transfer_statuses
 from morango.models.certificates import Certificate
 from morango.models.certificates import Key
 from morango.models.certificates import Nonce
@@ -508,7 +508,7 @@ class NonceCreationTestCase(APITestCase):
 
     def test_nonces_list_cannot_be_read(self):
         response = self.client.get(reverse("nonces-list"), {}, format="json")
-        self.assertEqual(response.status_code, 403)
+        self.assertEqual(response.status_code, 405)
         nonces = Nonce.objects.all()
         self.assertEqual(nonces.count(), 0)
 
@@ -806,7 +806,7 @@ class TransferSessionEndpointTestCase(CertificateTestCaseMixin, APITestCase):
 
         transfersession = TransferSession.objects.get()
         transfersession.update_state(
-            stage=transfer_stage.DESERIALIZING, stage_status=transfer_status.COMPLETED
+            stage=transfer_stages.DESERIALIZING, stage_status=transfer_statuses.COMPLETED
         )
         self.assertEqual(transfersession.active, True)
 
@@ -819,7 +819,7 @@ class TransferSessionEndpointTestCase(CertificateTestCaseMixin, APITestCase):
         transfersession = TransferSession.objects.get()
         transfersession.records_total = None
         transfersession.update_state(
-            stage=transfer_stage.DESERIALIZING, stage_status=transfer_status.COMPLETED
+            stage=transfer_stages.DESERIALIZING, stage_status=transfer_statuses.COMPLETED
         )
 
         self._delete_transfer_session(transfersession)

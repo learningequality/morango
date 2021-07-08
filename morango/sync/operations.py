@@ -18,8 +18,8 @@ from rest_framework.exceptions import ValidationError
 
 from morango.api.serializers import BufferSerializer
 from morango.constants.capabilities import ASYNC_OPERATIONS
-from morango.constants import transfer_stage
-from morango.constants import transfer_status
+from morango.constants import transfer_stages
+from morango.constants import transfer_statuses
 from morango.errors import MorangoResumeSyncError
 from morango.models.certificates import Filter
 from morango.models.core import Buffer
@@ -633,7 +633,7 @@ class LocalInitializeOperation(LocalOperation):
         # if resuming, this should also update the context such that the next attempted stage
         # is the next stage to invoke
         context.update(transfer_session=transfer_session)
-        return transfer_status.COMPLETED
+        return transfer_statuses.COMPLETED
 
 
 class LocalSerializeOperation(LocalOperation):
@@ -652,7 +652,7 @@ class LocalSerializeOperation(LocalOperation):
 
         # we only trigger serialize if we're going to be pulled from as a server, or push as client
         if context.is_push == context.is_server:
-            return transfer_status.COMPLETED
+            return transfer_statuses.COMPLETED
 
         if SETTINGS.MORANGO_SERIALIZE_BEFORE_QUEUING:
             _serialize_into_store(
@@ -660,7 +660,7 @@ class LocalSerializeOperation(LocalOperation):
                 filter=context.filter,
             )
 
-        return transfer_status.COMPLETED
+        return transfer_statuses.COMPLETED
 
 
 class LocalQueueOperation(LocalOperation):
@@ -677,7 +677,7 @@ class LocalQueueOperation(LocalOperation):
 
         # we only trigger queue if we're going to be pulled from as a server, or push as client
         if context.is_push == context.is_server:
-            return transfer_status.COMPLETED
+            return transfer_statuses.COMPLETED
 
         _queue_into_buffer(context.transfer_session)
 
@@ -688,7 +688,7 @@ class LocalQueueOperation(LocalOperation):
 
         context.transfer_session.records_total = records_total
         context.transfer_session.save()
-        return transfer_status.COMPLETED
+        return transfer_statuses.COMPLETED
 
 
 class LocalPushTransferOperation(LocalOperation):
@@ -713,8 +713,8 @@ class LocalPushTransferOperation(LocalOperation):
             context.transfer_session.records_transferred
             == context.transfer_session.records_total
         ):
-            return transfer_status.COMPLETED
-        return transfer_status.PENDING
+            return transfer_statuses.COMPLETED
+        return transfer_statuses.PENDING
 
 
 class LocalPullTransferOperation(LocalOperation):
@@ -734,8 +734,8 @@ class LocalPullTransferOperation(LocalOperation):
         )
 
         if records_transferred == context.transfer_session.records_total:
-            return transfer_status.COMPLETED
-        return transfer_status.PENDING
+            return transfer_statuses.COMPLETED
+        return transfer_statuses.PENDING
 
 
 class LocalDequeueOperation(LocalOperation):
@@ -753,14 +753,14 @@ class LocalDequeueOperation(LocalOperation):
         # we only trigger dequeue if we're going to be pulled from as a client,
         # or pushed to as server
         if context.is_pull == context.is_server:
-            return transfer_status.COMPLETED
+            return transfer_statuses.COMPLETED
 
         # if no records were transferred, we can safely skip
         records_transferred = context.transfer_session.records_transferred or 0
         if records_transferred > 0:
             _dequeue_into_store(context.transfer_session)
 
-        return transfer_status.COMPLETED
+        return transfer_statuses.COMPLETED
 
 
 class LocalDeserializeOperation(LocalOperation):
@@ -780,7 +780,7 @@ class LocalDeserializeOperation(LocalOperation):
         # we only trigger deserialize if we're going to be pulled from as a client,
         # or pushed to as server
         if context.is_pull == context.is_server:
-            return transfer_status.COMPLETED
+            return transfer_statuses.COMPLETED
 
         records_transferred = context.transfer_session.records_transferred or 0
         if SETTINGS.MORANGO_DESERIALIZE_AFTER_DEQUEUING and records_transferred > 0:
@@ -804,7 +804,7 @@ class LocalDeserializeOperation(LocalOperation):
         # update database max counters but use latest fsics on client
         DatabaseMaxCounter.update_fsics(json.loads(fsic), context.filter)
 
-        return transfer_status.COMPLETED
+        return transfer_statuses.COMPLETED
 
 
 class LocalCleanupOperation(LocalOperation):
@@ -826,7 +826,7 @@ class LocalCleanupOperation(LocalOperation):
 
         context.transfer_session.active = False
         context.transfer_session.save()
-        return transfer_status.COMPLETED
+        return transfer_statuses.COMPLETED
 
 
 class RemoteNetworkOperation(BaseOperation):
@@ -929,9 +929,9 @@ class RemoteNetworkOperation(BaseOperation):
         :param stage: A transfer_stage.*
         :return: A tuple of the remote's status, and the server response JSON
         """
-        stage = transfer_stage.stage(stage)
+        stage = transfer_stages.stage(stage)
         data = self.get_transfer_session(context)
-        remote_stage = transfer_stage.stage(data.get("transfer_stage"))
+        remote_stage = transfer_stages.stage(data.get("transfer_stage"))
         remote_status = data.get("transfer_stage_status")
 
         if remote_stage < stage:
@@ -940,15 +940,15 @@ class RemoteNetworkOperation(BaseOperation):
             remote_status = data.get("transfer_stage_status")
         elif remote_stage > stage:
             # if past this stage, then we just make sure returned status is completed
-            remote_status = transfer_status.COMPLETED
+            remote_status = transfer_statuses.COMPLETED
 
         if not remote_status:
             raise MorangoResumeSyncError("Error")
 
         # if still in progress, then we return PENDING which will cause controller
         # to again call the middleware that contains this operation, and check the server status
-        if remote_status in transfer_status.IN_PROGRESS_STATES:
-            remote_status = transfer_status.PENDING
+        if remote_status in transfer_statuses.IN_PROGRESS_STATES:
+            remote_status = transfer_statuses.PENDING
 
         return remote_status, data
 
@@ -968,10 +968,10 @@ class RemoteSynchronousInitializeOperation(RemoteNetworkOperation):
 
         # if local stage is transferring or beyond, we definitely don't need to initialize
         local_stage = context.stage
-        if transfer_stage.stage(local_stage) >= transfer_stage.stage(
-            transfer_stage.TRANSFERRING
+        if transfer_stages.stage(local_stage) >= transfer_stages.stage(
+            transfer_stages.TRANSFERRING
         ):
-            return transfer_status.COMPLETED
+            return transfer_statuses.COMPLETED
 
         data = self.create_transfer_session(context)
         context.transfer_session.server_fsic = data.get("server_fsic") or "{}"
@@ -980,7 +980,7 @@ class RemoteSynchronousInitializeOperation(RemoteNetworkOperation):
             context.transfer_session.records_total = data.get("records_total", 0)
 
         context.transfer_session.save()
-        return transfer_status.COMPLETED
+        return transfer_statuses.COMPLETED
 
 
 class RemoteInitializeOperation(RemoteNetworkOperation):
@@ -997,12 +997,12 @@ class RemoteInitializeOperation(RemoteNetworkOperation):
         assert ASYNC_OPERATIONS in context.capabilities
 
         # if local stage is transferring or beyond, we definitely don't need to initialize
-        if transfer_stage.stage(context.stage) < transfer_stage.stage(
-            transfer_stage.TRANSFERRING
+        if transfer_stages.stage(context.stage) < transfer_stages.stage(
+            transfer_stages.TRANSFERRING
         ):
             self.create_transfer_session(context)
 
-        return transfer_status.COMPLETED
+        return transfer_statuses.COMPLETED
 
 
 class RemoteSynchronousNoOpMixin(object):
@@ -1016,7 +1016,7 @@ class RemoteSynchronousNoOpMixin(object):
         :type context: NetworkSessionContext
         """
         assert ASYNC_OPERATIONS not in context.capabilities
-        return transfer_status.COMPLETED
+        return transfer_statuses.COMPLETED
 
 
 class RemoteSynchronousSerializeOperation(
@@ -1042,10 +1042,10 @@ class RemoteSerializeOperation(RemoteNetworkOperation):
         assert ASYNC_OPERATIONS in context.capabilities
 
         remote_status, data = self.remote_proceed_to(
-            context, transfer_stage.SERIALIZING
+            context, transfer_stages.SERIALIZING
         )
 
-        if remote_status == transfer_status.COMPLETED:
+        if remote_status == transfer_statuses.COMPLETED:
             context.transfer_session.server_fsic = data.get("server_fsic") or "{}"
             context.transfer_session.save()
 
@@ -1074,9 +1074,9 @@ class RemoteQueueOperation(RemoteNetworkOperation):
         assert context.transfer_session is not None
         assert ASYNC_OPERATIONS in context.capabilities
 
-        remote_status, data = self.remote_proceed_to(context, transfer_stage.QUEUING)
+        remote_status, data = self.remote_proceed_to(context, transfer_stages.QUEUING)
 
-        if remote_status == transfer_status.COMPLETED:
+        if remote_status == transfer_statuses.COMPLETED:
             context.transfer_session.records_total = data.get("records_total", 0)
             context.transfer_session.save()
 
@@ -1114,12 +1114,12 @@ class RemotePushTransferOperation(RemoteNetworkOperation):
         context.transfer_session.save()
 
         # if we've transferred all records, return a completed status
-        op_status = transfer_status.PENDING
+        op_status = transfer_statuses.PENDING
         if (
             context.transfer_session.records_transferred
             >= context.transfer_session.records_total
         ):
-            op_status = transfer_status.COMPLETED
+            op_status = transfer_statuses.COMPLETED
 
         return op_status
 
@@ -1141,17 +1141,17 @@ class RemotePullTransferOperation(RemoteNetworkOperation):
         )
 
         # if we've transferred all records, return a completed status
-        op_status = transfer_status.PENDING
+        op_status = transfer_statuses.PENDING
         if (
             context.transfer_session.records_transferred
             >= context.transfer_session.records_total
         ):
-            op_status = transfer_status.COMPLETED
+            op_status = transfer_statuses.COMPLETED
 
         # update the records transferred so client and server are in agreement
         self.update_transfer_session(
             context,
-            transfer_stage=transfer_stage.TRANSFERRING,
+            transfer_stage=transfer_stages.TRANSFERRING,
             records_transferred=transfer_session.records_transferred,
             # flip each of these since we're talking about the remote instance
             bytes_received=transfer_session.bytes_sent,
@@ -1182,7 +1182,7 @@ class RemoteDequeueOperation(RemoteNetworkOperation):
         """
         assert ASYNC_OPERATIONS in context.capabilities
 
-        remote_status, _ = self.remote_proceed_to(context, transfer_stage.DEQUEUING)
+        remote_status, _ = self.remote_proceed_to(context, transfer_stages.DEQUEUING)
         return remote_status
 
 
@@ -1208,7 +1208,9 @@ class RemoteDeserializeOperation(RemoteNetworkOperation):
         assert context.transfer_session is not None
         assert ASYNC_OPERATIONS in context.capabilities
 
-        remote_status, _ = self.remote_proceed_to(context, transfer_stage.DESERIALIZING)
+        remote_status, _ = self.remote_proceed_to(
+            context, transfer_stages.DESERIALIZING
+        )
         return remote_status
 
 
@@ -1223,7 +1225,7 @@ class RemoteCleanupOperation(RemoteNetworkOperation):
         :type context: NetworkSessionContext
         """
         response = self.close_transfer_session(context)
-        remote_status = transfer_status.COMPLETED
+        remote_status = transfer_statuses.COMPLETED
         if response.status_code < 200 or response.status_code >= 300:
-            remote_status = transfer_status.ERRORED
+            remote_status = transfer_statuses.ERRORED
         return remote_status

@@ -1,5 +1,5 @@
-from morango.constants import transfer_stage
-from morango.constants import transfer_status
+from morango.constants import transfer_stages
+from morango.constants import transfer_statuses
 from morango.errors import MorangoContextUpdateError
 from morango.models.certificates import Filter
 from morango.models.core import SyncSession
@@ -18,9 +18,8 @@ class SessionContext(object):
         "transfer_session",
         "filter",
         "is_push",
-        "stage",
-        "stage_status",
         "capabilities",
+        "error",
     )
 
     def __init__(
@@ -47,18 +46,13 @@ class SessionContext(object):
         self.transfer_session = transfer_session
         self.filter = sync_filter
         self.is_push = is_push
-        self.stage = transfer_stage.INITIALIZING
-        self.stage_status = transfer_status.PENDING
         self.capabilities = set(capabilities or []) & CAPABILITIES
+        self.error = None
 
         if self.transfer_session:
             self.sync_session = transfer_session.sync_session or self.sync_session
             self.filter = transfer_session.get_filter() or self.filter
             self.is_push = transfer_session.push or self.is_push
-            self.stage = transfer_session.transfer_stage or self.stage
-            self.stage_status = (
-                transfer_session.transfer_stage_status or self.stage_status
-            )
 
     def update(
         self,
@@ -68,6 +62,7 @@ class SessionContext(object):
         stage=None,
         stage_status=None,
         capabilities=None,
+        error=None,
     ):
         """
         Updates the context
@@ -77,6 +72,7 @@ class SessionContext(object):
         :type stage: str|None
         :type stage_status: str|None
         :type capabilities: str[]|None
+        :type error: BaseException|None
         """
         if transfer_session and self.transfer_session:
             raise MorangoContextUpdateError("Transfer session already exists")
@@ -96,9 +92,9 @@ class SessionContext(object):
         self.transfer_session = transfer_session or self.transfer_session
         self.filter = sync_filter or self.filter
         self.is_push = is_push if is_push is not None else self.is_push
-        self.stage = stage or self.stage
-        self.stage_status = stage_status or self.stage_status
         self.capabilities = set(capabilities or self.capabilities) & CAPABILITIES
+        self.update_state(stage=stage, stage_status=stage_status)
+        self.error = error or self.error
 
         # if transfer session was passed in, that takes precedence
         if transfer_session:
@@ -113,6 +109,32 @@ class SessionContext(object):
         """
         return not self.is_push
 
+    @property
+    def stage(self):
+        """
+        The stage of the transfer context
+        :return: A transfer_stages.* constant
+        :rtype: str
+        """
+        raise NotImplementedError("Context `stage` getter is missing")
+
+    @property
+    def stage_status(self):
+        """
+        The status of the transfer context's stage
+        :return: A transfer_statuses.* constant
+        :rtype: str
+        """
+        raise NotImplementedError("Context `stage_status` getter is missing")
+
+    def update_state(self, stage=None, stage_status=None):
+        """
+        Updates the stage state
+        :type stage: transfer_stages.*|None
+        :type stage_status: transfer_statuses.*|None
+        """
+        raise NotImplementedError("Context `update_state` method is missing")
+
     def __getstate__(self):
         """Return dict of simplified data for serialization"""
         return dict(
@@ -125,6 +147,7 @@ class SessionContext(object):
             stage=self.stage,
             stage_status=self.stage_status,
             capabilities=self.capabilities,
+            error=self.error,
         )
 
     def __setstate__(self, state):
@@ -144,9 +167,12 @@ class SessionContext(object):
             self.filter = Filter(sync_filter)
 
         self.is_push = state.get("is_push", None)
-        self.stage = state.get("stage", None)
-        self.stage_status = state.get("stage_status", None)
         self.capabilities = state.get("capabilities", None)
+
+        stage = state.get("stage", None)
+        stage_status = state.get("stage_status", None)
+        self.update_state(stage=stage, stage_status=stage_status)
+        self.error = state.get("error", None)
 
 
 class LocalSessionContext(SessionContext):
@@ -174,24 +200,44 @@ class LocalSessionContext(SessionContext):
         self.request = request
         self.is_server = request is not None
 
-    def update(self, **kwargs):
-        super(LocalSessionContext, self).update(**kwargs)
-        # this is a "local" session context, so the stage and status should be in sync with the
-        # local transfer session object
-        if "transfer_session" in kwargs:
-            self.stage = self.transfer_session.transfer_stage or self.stage
-            self.stage_status = (
-                self.transfer_session.transfer_stage_status or self.stage_status
-            )
+    @property
+    def _has_transfer_session(self):
+        """
+        :rtype: bool
+        """
+        return getattr(self, "transfer_session", None) is not None
 
-        # finally, since stage and status should be in sync with local transfer session object
-        # we be sure to pass along updates to stage and status. we also `refresh_from_db` too so
-        # context has the up-to-date instance
-        if self.transfer_session:
+    @property
+    def stage(self):
+        """
+        :return: A transfer_stage.* constant
+        """
+        stage = transfer_stages.INITIALIZING
+        if self._has_transfer_session:
+            stage = self.transfer_session.transfer_stage or stage
+        return stage
+
+    @property
+    def stage_status(self):
+        """
+        :return: A transfer_statuses.* constant
+        """
+        stage_status = transfer_statuses.PENDING
+        if self._has_transfer_session:
+            stage_status = self.transfer_session.transfer_stage_status or stage_status
+        return stage_status
+
+    def update_state(self, stage=None, stage_status=None):
+        """
+        Passes through updating state to `TransferSession`, refreshing it from the DB in case it
+        has changed during operation
+
+        :param stage: Target stage for update
+        :param stage_status: Target status for update
+        """
+        if self._has_transfer_session:
             self.transfer_session.refresh_from_db()
-            self.transfer_session.update_state(
-                stage=self.stage, stage_status=self.stage_status
-            )
+            self.transfer_session.update_state(stage=stage, stage_status=stage_status)
 
     def __getstate__(self):
         """Return dict of simplified data for serialization"""
@@ -210,7 +256,7 @@ class NetworkSessionContext(SessionContext):
     Class that holds the context for operating on a transfer remotely through network connection
     """
 
-    __slots__ = ("connection",)
+    __slots__ = ("connection", "_stage", "_stage_status")
 
     def __init__(self, connection, **kwargs):
         """
@@ -222,3 +268,29 @@ class NetworkSessionContext(SessionContext):
         super(NetworkSessionContext, self).__init__(
             capabilities=self.connection.server_info.get("capabilities", []), **kwargs
         )
+
+        # since this is network context, keep local reference to state vars
+        self._stage = transfer_stages.INITIALIZING
+        self._stage_status = transfer_statuses.PENDING
+
+    @property
+    def stage(self):
+        """
+        :return: A transfer_stage.* constant
+        """
+        return self._stage
+
+    @property
+    def stage_status(self):
+        """
+        :return: A transfer_statuses.* constant
+        """
+        return self._stage_status
+
+    def update_state(self, stage=None, stage_status=None):
+        """
+        :param stage: Target stage for update
+        :param stage_status: Target status for update
+        """
+        self._stage = stage or self._stage
+        self._stage_status = stage_status or self._stage_status

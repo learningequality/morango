@@ -31,8 +31,8 @@ from morango.models.morango_mptt import MorangoMPTTModel
 from morango.models.utils import get_0_4_system_parameters
 from morango.models.utils import get_0_5_system_id
 from morango.models.utils import get_0_5_mac_address
-from morango.constants import transfer_stage
-from morango.constants import transfer_status
+from morango.constants import transfer_stages
+from morango.constants import transfer_statuses
 
 logger = logging.getLogger(__name__)
 
@@ -261,10 +261,10 @@ class TransferSession(models.Model):
 
     # stages and stage status of transfer session
     transfer_stage = models.CharField(
-        max_length=20, choices=transfer_stage.CHOICES, blank=True
+        max_length=20, choices=transfer_stages.CHOICES, blank=True
     )
     transfer_stage_status = models.CharField(
-        max_length=20, choices=transfer_status.CHOICES, blank=True
+        max_length=20, choices=transfer_statuses.CHOICES, blank=True
     )
 
     @property
@@ -277,11 +277,11 @@ class TransferSession(models.Model):
 
     def update_state(self, stage=None, stage_status=None):
         """
-        :type stage: morango.constants.transfer_stage.*|None
-        :type stage_status: morango.constants.transfer_status.*|None
+        :type stage: morango.constants.transfer_stages.*|None
+        :type stage_status: morango.constants.transfer_statuses.*|None
         """
         if stage is not None:
-            if self.transfer_stage and transfer_stage.stage(self.transfer_stage) > transfer_stage.stage(stage):
+            if self.transfer_stage and transfer_stages.stage(self.transfer_stage) > transfer_stages.stage(stage):
                 raise ValueError("Update stage is behind current stage | current={}, new={}".format(self.transfer_stage, stage))
             self.transfer_stage = stage
         if stage_status is not None:
