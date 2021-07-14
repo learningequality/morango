@@ -36,7 +36,7 @@ def get_capabilities():
         capabilities.add(ALLOW_CERTIFICATE_PUSHING)
 
     # Middleware async operation capabilities are standard in 0.6.0 and above
-    if SETTINGS.MORANGO_DISALLOW_ASYNC_OPERATIONS:
+    if not SETTINGS.MORANGO_DISALLOW_ASYNC_OPERATIONS:
         capabilities.add(ASYNC_OPERATIONS)
 
     return capabilities

@@ -230,7 +230,6 @@ class SessionMiddlewareOperations(list):
             if result is not False:
                 return result
         else:
-            print("XXX", len(self))
             raise NotImplementedError(
                 "Operation for {} stage has no middleware".format(self.related_stage)
             )

@@ -48,7 +48,7 @@ def controller_signal_logger(context=None):
     if context.stage_status == transfer_statuses.PENDING:
         logging.info("Starting stage '{}'".format(context.stage))
     elif context.stage_status == transfer_statuses.STARTED:
-        logging.info("Stage is in progress '{}'".format(context.stage))
+        logging.info("Stage '{}' is in progress".format(context.stage))
     elif context.stage_status == transfer_statuses.COMPLETED:
         logging.info("Completed stage '{}'".format(context.stage))
     elif context.stage_status == transfer_statuses.ERRORED:

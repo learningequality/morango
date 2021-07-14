@@ -528,11 +528,13 @@ class BaseOperation(object):
         """
         try:
             # verify context object matches what the operation expects
-            assert self.expects_context is None or isinstance(
+            result = False
+            if self.expects_context is None or isinstance(
                 context, self.expects_context
-            )
-            result = self.handle(context)
-            if result is None:
+            ):
+                result = self.handle(context)
+
+            if result is not False and result not in transfer_statuses.ALL:
                 raise NotImplementedError(
                     "Transfer operation must return False, or a transfer status"
                 )
@@ -559,43 +561,35 @@ class LocalOperation(BaseOperation):
     expects_context = LocalSessionContext
 
 
-class LocalInitializeOperation(LocalOperation):
+class InitializeOperation(LocalOperation):
     """
-    A local initialize operation, currently unused as transfer session is instantiated outside of
-    operations
+    Operation to initialize the transfer session in the local instance
     """
 
     def handle(self, context):
         """
         :type context: LocalSessionContext
         """
-        assert context.sync_session is not None
         assert context.transfer_session is None
-        assert context.filter is not None
 
         # attributes that we'll use to identify existing sessions. we really only want there to
         # be one of these at a time
         data = dict(
             push=context.is_push,
-            filter=str(context.filter),
             sync_session_id=context.sync_session.id,
             active=True,
         )
-        transfer_sessions = TransferSession.objects.filter(**data)
-        transfer_session = None
 
-        # order by the last activity to pull the first, and deactivate other matching sessions
-        for existing_session in transfer_sessions.order_by("-last_activity_timestamp"):
-            if transfer_session is None:
-                transfer_session = existing_session
-            else:
-                # TODO: cleanup other lingering sessions
-                pass
+        # get the most recent transfer session
+        transfer_sessions = TransferSession.objects.order_by("-last_activity_timestamp")
 
-        if transfer_session is None:
+        try:
+            transfer_session = transfer_sessions.get(**data)
+        except TransferSession.DoesNotExist:
             # build data for creating transfer session
             data.update(
                 id=uuid.uuid4().hex,
+                filter=str(context.filter),
                 start_timestamp=timezone.now(),
                 last_activity_timestamp=timezone.now(),
                 active=True,
@@ -636,23 +630,19 @@ class LocalInitializeOperation(LocalOperation):
         return transfer_statuses.COMPLETED
 
 
-class LocalSerializeOperation(LocalOperation):
+class ProducerSerializeOperation(LocalOperation):
     """
-    Performs serialization if enabled through configuration and if applicable for local transfer
-    session
+    Performs serialization if enabled through configuration, for contexts that are producing
+    transfer data
     """
 
     def handle(self, context):
         """
         :type context: LocalSessionContext
         """
-        assert context.transfer_session is not None
+        assert context.is_producer
         assert context.sync_session is not None
         assert context.filter is not None
-
-        # we only trigger serialize if we're going to be pulled from as a server, or push as client
-        if context.is_push == context.is_server:
-            return transfer_statuses.COMPLETED
 
         if SETTINGS.MORANGO_SERIALIZE_BEFORE_QUEUING:
             _serialize_into_store(
@@ -663,21 +653,31 @@ class LocalSerializeOperation(LocalOperation):
         return transfer_statuses.COMPLETED
 
 
-class LocalQueueOperation(LocalOperation):
+class ReceiverSerializeOperation(LocalOperation):
     """
-    Performs queuing of data for local transfer session if applicable
+    Receivers of transfer data do not need serialize any data
     """
 
     def handle(self, context):
         """
         :type context: LocalSessionContext
         """
+        assert context.is_receiver
+        return transfer_statuses.COMPLETED
+
+
+class ProducerQueueOperation(LocalOperation):
+    """
+    Performs queuing of data for as local instance
+    """
+
+    def handle(self, context):
+        """
+        :type context: LocalSessionContext
+        """
+        assert context.is_producer
         assert context.sync_session is not None
         assert context.transfer_session is not None
-
-        # we only trigger queue if we're going to be pulled from as a server, or push as client
-        if context.is_push == context.is_server:
-            return transfer_statuses.COMPLETED
 
         _queue_into_buffer(context.transfer_session)
 
@@ -691,17 +691,53 @@ class LocalQueueOperation(LocalOperation):
         return transfer_statuses.COMPLETED
 
 
-class LocalPushTransferOperation(LocalOperation):
+class ReceiverQueueOperation(LocalOperation):
     """
-    Handles push of buffer data for the transfer session
+    Receiver of transfer data does not need to queue anything
     """
 
     def handle(self, context):
         """
         :type context: LocalSessionContext
         """
+        assert context.is_receiver
+        return transfer_statuses.COMPLETED
+
+
+class PullProducerOperation(LocalOperation):
+    """
+    Operation that handles the transfer session updates for the server during a pull
+    """
+
+    def handle(self, context):
+        """
+        :type context: LocalSessionContext
+        """
+        assert context.is_pull
+        assert context.is_producer
         assert context.request is not None
+
+        records_transferred = context.request.data.get(
+            "records_transferred", context.transfer_session.records_transferred
+        )
+
+        if records_transferred == context.transfer_session.records_total:
+            return transfer_statuses.COMPLETED
+        return transfer_statuses.PENDING
+
+
+class PushReceiverOperation(LocalOperation):
+    """
+    Operation that handles the result of a push, as the server, using a local context / session
+    """
+
+    def handle(self, context):
+        """
+        :type context: LocalSessionContext
+        """
         assert context.is_push
+        assert context.is_receiver
+        assert context.request is not None
 
         data = context.request.data
         if not isinstance(context.request.data, list):
@@ -717,43 +753,31 @@ class LocalPushTransferOperation(LocalOperation):
         return transfer_statuses.PENDING
 
 
-class LocalPullTransferOperation(LocalOperation):
+class ProducerDequeueOperation(LocalOperation):
     """
-    Handles push of buffer data for the transfer session
-    """
-
-    def handle(self, context):
-        """
-        :type context: LocalSessionContext
-        """
-        assert context.request is not None
-        assert context.is_pull
-
-        records_transferred = context.request.data.get(
-            "records_transferred", context.transfer_session.records_transferred
-        )
-
-        if records_transferred == context.transfer_session.records_total:
-            return transfer_statuses.COMPLETED
-        return transfer_statuses.PENDING
-
-
-class LocalDequeueOperation(LocalOperation):
-    """
-    Performs dequeuing of transferred data if applicable for local transfer session
+    Producers of transfer data do not need to dequeue
     """
 
     def handle(self, context):
         """
         :type context: LocalSessionContext
         """
+        assert context.is_producer
+        return transfer_statuses.COMPLETED
+
+
+class ReceiverDequeueOperation(LocalOperation):
+    """
+    Performs dequeuing of transferred data for receiver contexts
+    """
+
+    def handle(self, context):
+        """
+        :type context: LocalSessionContext
+        """
+        assert context.is_receiver
         assert context.transfer_session is not None
         assert context.filter is not None
-
-        # we only trigger dequeue if we're going to be pulled from as a client,
-        # or pushed to as server
-        if context.is_pull == context.is_server:
-            return transfer_statuses.COMPLETED
 
         # if no records were transferred, we can safely skip
         records_transferred = context.transfer_session.records_transferred or 0
@@ -763,7 +787,20 @@ class LocalDequeueOperation(LocalOperation):
         return transfer_statuses.COMPLETED
 
 
-class LocalDeserializeOperation(LocalOperation):
+class ProducerDeserializeOperation(LocalOperation):
+    """
+    Producers of transfer data do not need to deserialize
+    """
+
+    def handle(self, context):
+        """
+        :type context: LocalSessionContext
+        """
+        assert context.is_producer
+        return transfer_statuses.COMPLETED
+
+
+class ReceiverDeserializeOperation(LocalOperation):
     """
     Performs deserialization if enabled through configuration and if applicable for local transfer
     session
@@ -776,11 +813,6 @@ class LocalDeserializeOperation(LocalOperation):
         assert context.sync_session is not None
         assert context.transfer_session is not None
         assert context.filter is not None
-
-        # we only trigger deserialize if we're going to be pulled from as a client,
-        # or pushed to as server
-        if context.is_pull == context.is_server:
-            return transfer_statuses.COMPLETED
 
         records_transferred = context.transfer_session.records_transferred or 0
         if SETTINGS.MORANGO_DESERIALIZE_AFTER_DEQUEUING and records_transferred > 0:
@@ -807,7 +839,7 @@ class LocalDeserializeOperation(LocalOperation):
         return transfer_statuses.COMPLETED
 
 
-class LocalCleanupOperation(LocalOperation):
+class CleanupOperation(LocalOperation):
     """
     Marks the local transfer session as inactive, and deletes queued buffer data if applicable
     """
@@ -816,20 +848,17 @@ class LocalCleanupOperation(LocalOperation):
         """
         :type context: LocalSessionContext
         """
-        assert context.transfer_session
+        assert context.transfer_session is not None
 
-        if context.is_push != context.is_server:
-            Buffer.objects.filter(transfer_session=context.transfer_session).delete()
-            RecordMaxCounterBuffer.objects.filter(
-                transfer_session=context.transfer_session
-            ).delete()
+        if context.is_producer:
+            context.transfer_session.delete_buffers()
 
         context.transfer_session.active = False
         context.transfer_session.save()
         return transfer_statuses.COMPLETED
 
 
-class RemoteNetworkOperation(BaseOperation):
+class NetworkOperation(BaseOperation):
     expects_context = NetworkSessionContext
 
     def create_transfer_session(self, context):
@@ -904,7 +933,7 @@ class RemoteNetworkOperation(BaseOperation):
         if len(data) == 0:
             return data
 
-            # ensure the transfer session allows pulls, and is same across records
+        # ensure the transfer session allows pulls, and is same across records
         transfer_session = TransferSession.objects.get(id=data[0]["transfer_session"])
         if transfer_session.push:
             raise ValidationError("Specified TransferSession does not allow pulling.")
@@ -953,7 +982,7 @@ class RemoteNetworkOperation(BaseOperation):
         return remote_status, data
 
 
-class RemoteSynchronousInitializeOperation(RemoteNetworkOperation):
+class LegacyNetworkInitializeOperation(NetworkOperation):
     """
     Initializes remote transfer session in backwards compatible way, by expecting that the server
     will perform serialization and queuing during the create API call
@@ -983,7 +1012,7 @@ class RemoteSynchronousInitializeOperation(RemoteNetworkOperation):
         return transfer_statuses.COMPLETED
 
 
-class RemoteInitializeOperation(RemoteNetworkOperation):
+class NetworkInitializeOperation(NetworkOperation):
     """
     Performs initialization (create) of transfer session on the remote, and does not expect the
     server to advance the transfer session beyond initialization
@@ -1005,7 +1034,7 @@ class RemoteInitializeOperation(RemoteNetworkOperation):
         return transfer_statuses.COMPLETED
 
 
-class RemoteSynchronousNoOpMixin(object):
+class NetworkLegacyNoOpMixin(object):
     """
     Mixin that handles contexts without ASYNC_OPERATIONS capability, either because the remote
     is on older version of Morango, or either the client or server has it disabled.
@@ -1019,9 +1048,7 @@ class RemoteSynchronousNoOpMixin(object):
         return transfer_statuses.COMPLETED
 
 
-class RemoteSynchronousSerializeOperation(
-    RemoteSynchronousNoOpMixin, RemoteNetworkOperation
-):
+class LegacyNetworkSerializeOperation(NetworkLegacyNoOpMixin, NetworkOperation):
     """
     Without ASYNC_OPERATIONS capability, the server will perform serialization during initialization
     """
@@ -1029,7 +1056,7 @@ class RemoteSynchronousSerializeOperation(
     pass
 
 
-class RemoteSerializeOperation(RemoteNetworkOperation):
+class NetworkSerializeOperation(NetworkOperation):
     """
     Performs serialization on the remote by updating the remote's transfer stage
     """
@@ -1052,9 +1079,7 @@ class RemoteSerializeOperation(RemoteNetworkOperation):
         return remote_status
 
 
-class RemoteSynchronousQueueOperation(
-    RemoteSynchronousNoOpMixin, RemoteNetworkOperation
-):
+class LegacyNetworkQueueOperation(NetworkLegacyNoOpMixin, NetworkOperation):
     """
     Without ASYNC_OPERATIONS capability, the server will perform queuing during initialization
     """
@@ -1062,7 +1087,7 @@ class RemoteSynchronousQueueOperation(
     pass
 
 
-class RemoteQueueOperation(RemoteNetworkOperation):
+class NetworkQueueOperation(NetworkOperation):
     """
     Performs queuing on the remote by updating the remote's transfer stage
     """
@@ -1083,7 +1108,7 @@ class RemoteQueueOperation(RemoteNetworkOperation):
         return remote_status
 
 
-class RemotePushTransferOperation(RemoteNetworkOperation):
+class NetworkPushTransferOperation(NetworkOperation):
     def handle(self, context):
         """
         :type context: NetworkSessionContext
@@ -1124,7 +1149,7 @@ class RemotePushTransferOperation(RemoteNetworkOperation):
         return op_status
 
 
-class RemotePullTransferOperation(RemoteNetworkOperation):
+class NetworkPullTransferOperation(NetworkOperation):
     def handle(self, context):
         """
         :type context: NetworkSessionContext
@@ -1161,9 +1186,7 @@ class RemotePullTransferOperation(RemoteNetworkOperation):
         return op_status
 
 
-class RemoteSynchronousDequeueOperation(
-    RemoteSynchronousNoOpMixin, RemoteNetworkOperation
-):
+class LegacyDequeueOperation(NetworkLegacyNoOpMixin, NetworkOperation):
     """
     Without ASYNC_OPERATIONS capability, the server will perform dequeuing during cleanup
     """
@@ -1171,7 +1194,7 @@ class RemoteSynchronousDequeueOperation(
     pass
 
 
-class RemoteDequeueOperation(RemoteNetworkOperation):
+class NetworkDequeueOperation(NetworkOperation):
     """
     Performs dequeuing on the remote by updating the remote's transfer stage
     """
@@ -1186,9 +1209,7 @@ class RemoteDequeueOperation(RemoteNetworkOperation):
         return remote_status
 
 
-class RemoteSynchronousDeserializeOperation(
-    RemoteSynchronousNoOpMixin, RemoteNetworkOperation
-):
+class LegacyNetworkDeserializeOperation(NetworkLegacyNoOpMixin, NetworkOperation):
     """
     Without ASYNC_OPERATIONS capability, the server will perform deserialization during cleanup
     """
@@ -1196,7 +1217,7 @@ class RemoteSynchronousDeserializeOperation(
     pass
 
 
-class RemoteDeserializeOperation(RemoteNetworkOperation):
+class NetworkDeserializeOperation(NetworkOperation):
     """
     Performs deserialization on the remote by updating the remote's transfer stage
     """
@@ -1214,7 +1235,7 @@ class RemoteDeserializeOperation(RemoteNetworkOperation):
         return remote_status
 
 
-class RemoteCleanupOperation(RemoteNetworkOperation):
+class NetworkCleanupOperation(NetworkOperation):
     """
     "Cleans up" the remote transfer session, which will trigger the LocalCleanupOperation on the
     server

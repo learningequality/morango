@@ -3,9 +3,12 @@ from django.http.request import HttpRequest
 from django.test.testcases import SimpleTestCase
 import mock
 
+from morango.constants.capabilities import ALLOW_CERTIFICATE_PUSHING
+from morango.constants.capabilities import ASYNC_OPERATIONS
 from morango.constants import transfer_stages
 from morango.utils import SETTINGS
 from morango.utils import CAPABILITIES_CLIENT_HEADER
+from morango.utils import get_capabilities
 from morango.utils import serialize_capabilities_to_client_request
 from morango.utils import parse_capabilities_from_server_request
 
@@ -21,10 +24,10 @@ class SettingsTestCase(SimpleTestCase):
         self.assertEqual(SETTINGS.MORANGO_DESERIALIZE_AFTER_DEQUEUING, True)
         self.assertEqual(SETTINGS.MORANGO_DISALLOW_ASYNC_OPERATIONS, False)
         self.assertLength(3, SETTINGS.MORANGO_INITIALIZE_OPERATIONS)
-        self.assertLength(3, SETTINGS.MORANGO_SERIALIZE_OPERATIONS)
-        self.assertLength(3, SETTINGS.MORANGO_QUEUE_OPERATIONS)
-        self.assertLength(3, SETTINGS.MORANGO_DEQUEUE_OPERATIONS)
-        self.assertLength(3, SETTINGS.MORANGO_DESERIALIZE_OPERATIONS)
+        self.assertLength(4, SETTINGS.MORANGO_SERIALIZE_OPERATIONS)
+        self.assertLength(4, SETTINGS.MORANGO_QUEUE_OPERATIONS)
+        self.assertLength(4, SETTINGS.MORANGO_DEQUEUE_OPERATIONS)
+        self.assertLength(4, SETTINGS.MORANGO_DESERIALIZE_OPERATIONS)
         self.assertLength(2, SETTINGS.MORANGO_CLEANUP_OPERATIONS)
 
     def test_overriding(self):
@@ -36,9 +39,19 @@ class SettingsTestCase(SimpleTestCase):
 
 
 class CapabilitiesTestCase(SimpleTestCase):
-    def test_get_capabilities(self):
-        # TODO
-        pass
+    def test_get_capabilities__certs(self):
+        with self.settings(ALLOW_CERTIFICATE_PUSHING=True):
+            self.assertIn(ALLOW_CERTIFICATE_PUSHING, get_capabilities())
+
+        with self.settings(ALLOW_CERTIFICATE_PUSHING=False):
+            self.assertNotIn(ALLOW_CERTIFICATE_PUSHING, get_capabilities())
+
+    def test_get_capabilities__async_ops(self):
+        with self.settings(MORANGO_DISALLOW_ASYNC_OPERATIONS=False):
+            self.assertIn(ASYNC_OPERATIONS, get_capabilities())
+
+        with self.settings(MORANGO_DISALLOW_ASYNC_OPERATIONS=True):
+            self.assertNotIn(ASYNC_OPERATIONS, get_capabilities())
 
     @mock.patch("morango.utils.CAPABILITIES", ("TEST", "SERIALIZE"))
     def test_serialize(self):

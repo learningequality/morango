@@ -26,11 +26,13 @@ from morango.sync.controller import MorangoProfileController
 from morango.sync.controller import SessionController
 from morango.sync.operations import _dequeue_into_store
 from morango.sync.operations import _queue_into_buffer
-from morango.sync.operations import LocalCleanupOperation
-from morango.sync.operations import LocalDequeueOperation
-from morango.sync.operations import LocalDeserializeOperation
-from morango.sync.operations import LocalInitializeOperation
-from morango.sync.operations import LocalQueueOperation
+from morango.sync.operations import CleanupOperation
+from morango.sync.operations import ReceiverDequeueOperation
+from morango.sync.operations import ProducerDequeueOperation
+from morango.sync.operations import ReceiverDeserializeOperation
+from morango.sync.operations import InitializeOperation
+from morango.sync.operations import ProducerQueueOperation
+from morango.sync.operations import ReceiverQueueOperation
 from morango.sync.syncsession import TransferClient
 
 DBBackend = load_backend(connection).SQLWrapper()
@@ -160,6 +162,8 @@ class QueueStoreIntoBufferTestCase(TestCase):
         self.assertRecordsNotBuffered([self.data["user4"]])
 
     def test_local_initialize_operation__server(self):
+        self.transfer_session.active = False
+        self.transfer_session.save()
         self.context.transfer_session = None
         id = uuid.uuid4().hex
         client_fsic = '{"abc123": 456}'
@@ -170,7 +174,7 @@ class QueueStoreIntoBufferTestCase(TestCase):
             client_fsic,
         ]
         self.context.filter = [self.transfer_session.get_filter()]
-        operation = LocalInitializeOperation()
+        operation = InitializeOperation()
         self.assertEqual(transfer_statuses.COMPLETED, operation.handle(self.context))
         self.context.update.assert_called_once()
         transfer_session = self.context.update.call_args_list[0][1].get("transfer_session")
@@ -183,13 +187,13 @@ class QueueStoreIntoBufferTestCase(TestCase):
         self.context.request = None
         self.context.is_server = False
         self.context.filter = [self.transfer_session.get_filter()]
-        operation = LocalInitializeOperation()
+        operation = InitializeOperation()
         self.assertEqual(transfer_statuses.COMPLETED, operation.handle(self.context))
         self.context.update.assert_called_once()
 
     def test_local_initialize_operation__resume(self):
         self.context.transfer_session = None
-        operation = LocalInitializeOperation()
+        operation = InitializeOperation()
         self.assertEqual(transfer_statuses.COMPLETED, operation.handle(self.context))
         self.context.update.assert_called_once_with(transfer_session=self.transfer_session)
 
@@ -198,7 +202,7 @@ class QueueStoreIntoBufferTestCase(TestCase):
         self.transfer_session.client_fsic = json.dumps(fsics)
 
         self.assertEqual(0, self.transfer_session.records_total or 0)
-        operation = LocalQueueOperation()
+        operation = ProducerQueueOperation()
         self.assertEqual(transfer_statuses.COMPLETED, operation.handle(self.context))
         self.assertNotEqual(0, self.transfer_session.records_total)
 
@@ -216,7 +220,7 @@ class QueueStoreIntoBufferTestCase(TestCase):
         self.context.is_push = True
         self.context.is_server = True
 
-        operation = LocalQueueOperation()
+        operation = ReceiverQueueOperation()
         self.assertEqual(transfer_statuses.COMPLETED, operation.handle(self.context))
         mock_queue.assert_not_called()
 
@@ -568,7 +572,7 @@ class DequeueBufferIntoStoreTestCase(TestCase):
     def test_local_dequeue_operation(self):
         self.transfer_session.records_transferred = 1
         self.context.filter = [self.transfer_session.filter]
-        operation = LocalDequeueOperation()
+        operation = ReceiverDequeueOperation()
         self.assertEqual(transfer_statuses.COMPLETED, operation.handle(self.context))
         self.assertFalse(
             Buffer.objects.filter(transfer_session_id=self.transfer_session.id).exists()
@@ -577,14 +581,14 @@ class DequeueBufferIntoStoreTestCase(TestCase):
     @mock.patch("morango.sync.operations._dequeue_into_store")
     def test_local_dequeue_operation__noop(self, mock_dequeue):
         self.context.is_server = False
-        operation = LocalDequeueOperation()
+        operation = ProducerDequeueOperation()
         self.assertEqual(transfer_statuses.COMPLETED, operation.handle(self.context))
         mock_dequeue.assert_not_called()
 
     @mock.patch("morango.sync.operations._dequeue_into_store")
     def test_local_dequeue_operation__noop__nothing_transferred(self, mock_dequeue):
         self.transfer_session.records_transferred = 0
-        operation = LocalDequeueOperation()
+        operation = ReceiverDequeueOperation()
         self.assertEqual(transfer_statuses.COMPLETED, operation.handle(self.context))
         mock_dequeue.assert_not_called()
 
@@ -592,14 +596,14 @@ class DequeueBufferIntoStoreTestCase(TestCase):
     def test_local_deserialize_operation(self, mock_update_fsics):
         self.transfer_session.records_transferred = 1
         self.context.filter = [self.transfer_session.filter]
-        operation = LocalDeserializeOperation()
+        operation = ReceiverDeserializeOperation()
         self.assertEqual(transfer_statuses.COMPLETED, operation.handle(self.context))
         mock_update_fsics.assert_called()
 
     def test_local_cleanup(self):
         self.context.is_server = False
         self.context.is_push = True
-        operation = LocalCleanupOperation()
+        operation = CleanupOperation()
         self.assertTrue(self.transfer_session.active)
         self.assertTrue(
             Buffer.objects.filter(transfer_session_id=self.transfer_session.id).exists()

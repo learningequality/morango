@@ -229,7 +229,7 @@ class SessionController(object):
 
             context.update(stage_status=result)
 
-            # fire signals based off , progress signal if not completed
+            # fire signals based off middleware invocation result; the progress signal if incomplete
             if result == transfer_statuses.COMPLETED:
                 signal.completed.fire(context=context)
             else:

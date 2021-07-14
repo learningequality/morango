@@ -227,6 +227,27 @@ class LocalSessionContext(SessionContext):
             stage_status = self.transfer_session.transfer_stage_status or stage_status
         return stage_status
 
+    @property
+    def is_receiver(self):
+        """
+        Whether or not the context indicates that the current local instance is receiving data,
+        which means either:
+            - A server context and a push transfer, or
+            - A client context and a pull transfer
+        :return: bool
+        """
+        return self.is_push == self.is_server
+
+    @property
+    def is_producer(self):
+        """
+        The opposite of `is_receiver`, meaning either:
+            - A server context and a pull transfer, or
+            - A client context and a push transfer
+        :return: bool
+        """
+        return not self.is_receiver
+
     def update_state(self, stage=None, stage_status=None):
         """
         Passes through updating state to `TransferSession`, refreshing it from the DB in case it

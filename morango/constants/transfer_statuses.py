@@ -15,6 +15,8 @@ CHOICES = (
     (ERRORED, _("Errored")),
 )
 
+ALL = {stage for stage, _ in CHOICES}
+
 IN_PROGRESS_STATES = (
     PENDING,
     STARTED,

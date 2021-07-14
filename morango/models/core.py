@@ -289,6 +289,21 @@ class TransferSession(models.Model):
         if stage is not None or stage_status is not None:
             self.save()
 
+    def delete_buffers(self):
+        """
+        Deletes `Buffer` and `RecordMaxCounterBuffer` model records by executing SQL directly
+        against the database for better performance
+        """
+        with connection.cursor() as cursor:
+            cursor.execute(
+                "DELETE FROM morango_buffer WHERE transfer_session_id = %s",
+                (self.id,),
+            )
+            cursor.execute(
+                "DELETE FROM morango_recordmaxcounterbuffer WHERE transfer_session_id = %s",
+                (self.id,),
+            )
+
 
 class DeletedModels(models.Model):
     """
