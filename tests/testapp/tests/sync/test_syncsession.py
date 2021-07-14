@@ -261,13 +261,13 @@ class NetworkSyncConnectionTestCase(LiveServerTestCase):
         client = self.network_connection.create_sync_session(self.subset_cert, self.root_cert)
         # reset process ID
         sync_session = client.sync_session
-        sync_session.process_id = 123
+        sync_session.process_id = 123000111
         sync_session.save()
 
         with mock.patch("morango.sync.syncsession.psutil.pid_exists") as mock_pid_exists:
             mock_pid_exists.return_value = True
             with mock.patch("morango.sync.syncsession.os.getpid") as mock_getpid:
-                mock_getpid.return_value = 245
+                mock_getpid.return_value = 245111222
                 with self.assertRaises(MorangoResumeSyncError):
                     self.network_connection.resume_sync_session(sync_session.id)
 
