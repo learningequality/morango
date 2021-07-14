@@ -166,6 +166,8 @@ def _serialize_into_store(profile, filter=None):
                     # update deleted flags in case it was previously deleted
                     store_model.deleted = False
                     store_model.hard_deleted = False
+                    # clear last_transfer_session_id
+                    store_model.last_transfer_session_id = None
 
                     # update this model
                     store_model.save()
@@ -492,7 +494,7 @@ def _dequeue_into_store(transfersession):
     Takes data from the buffers and merges into the store and record max counters.
 
     ALGORITHM: Incrementally insert and delete on a case by case basis to ensure subsequent cases
-    are not effected by previous cases.
+    are not affected by previous cases.
     """
     with connection.cursor() as cursor:
         DBBackend._dequeuing_delete_rmcb_records(cursor, transfersession.id)

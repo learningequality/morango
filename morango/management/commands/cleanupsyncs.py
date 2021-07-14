@@ -4,7 +4,7 @@ from django.core.management.base import BaseCommand
 from django.db import transaction
 from django.utils import timezone
 
-from morango.models import *
+from morango.models import TransferSession
 
 
 class Command(BaseCommand):
