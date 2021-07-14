@@ -244,7 +244,7 @@ class NetworkSyncConnectionTestCase(LiveServerTestCase):
         client = self.network_connection.create_sync_session(self.subset_cert, self.root_cert)
         # reset process ID
         sync_session = client.sync_session
-        sync_session.process_id = 123
+        sync_session.process_id = None
         sync_session.save()
         resume_client = self.network_connection.resume_sync_session(sync_session.id)
         self.assertEqual(sync_session.id, resume_client.sync_session.id)
