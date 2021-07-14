@@ -1,12 +1,14 @@
 """
 The main module to be used for initiating the synchronization of data between morango instances.
 """
+import os
 import json
 import logging
 import socket
 import uuid
 from io import BytesIO
 
+import psutil
 from django.utils import timezone
 from django.utils.six import iteritems
 from django.utils.six import raise_from
@@ -240,11 +242,12 @@ class NetworkSyncConnection(Connection):
                 ).data
             ),
             "server_instance": session_resp.json().get("server_instance") or "{}",
+            "process_id": os.getpid(),
         }
         sync_session = SyncSession.objects.create(**data)
         return SyncSessionClient(self, sync_session)
 
-    def resume_sync_session(self, sync_session_id, chunk_size=default_chunk_size):
+    def resume_sync_session(self, sync_session_id, chunk_size=None):
         """
         Resumes an existing sync session given an ID
 
@@ -253,11 +256,24 @@ class NetworkSyncConnection(Connection):
         :return: A SyncSessionClient instance
         :rtype: SyncSessionClient
         """
+        if chunk_size is not None:
+            self.chunk_size = chunk_size
+
         try:
             sync_session = SyncSession.objects.get(pk=sync_session_id, active=True)
         except SyncSession.DoesNotExist:
             raise MorangoResumeSyncError(
                 "Session for ID '{}' not found".format(sync_session_id)
+            )
+
+        # check that process of existing session isn't still running
+        if (
+            sync_session.process_id
+            and sync_session.process_id != os.getpid()
+            and psutil.pid_exists(sync_session.process_id)
+        ):
+            raise MorangoResumeSyncError(
+                "Session process '{}' is still running".format(sync_session.process_id)
             )
 
         # In order to resume, we need sync sessions on both server and client, otherwise resuming
@@ -267,6 +283,9 @@ class NetworkSyncConnection(Connection):
         except HTTPError as e:
             raise_from(MorangoResumeSyncError("Failure resuming sync session"), e)
 
+        # update process id
+        sync_session.process_id = os.getpid()
+        sync_session.save()
         return SyncSessionClient(self, sync_session)
 
     def close_sync_session(self, sync_session):
@@ -416,15 +435,8 @@ class NetworkSyncConnection(Connection):
         return self.session.post(self.urlresolve(api_urls.SYNCSESSION), json=data)
 
     def _get_sync_session(self, sync_session):
-        nonce = self._get_nonce().json().get("id")
-        message = "{nonce}:{id}".format(nonce=nonce, id=sync_session.id)
-
         return self.session.get(
-            self.urlresolve(api_urls.SYNCSESSION, lookup=sync_session.id),
-            params=dict(
-                nonce=nonce,
-                signature=sync_session.client_cert.sign(message),
-            ),
+            self.urlresolve(api_urls.SYNCSESSION, lookup=sync_session.id)
         )
 
     def _create_transfer_session(self, data):

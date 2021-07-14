@@ -227,6 +227,9 @@ class SyncSession(models.Model):
     # used to store other data we may need to know about this sync session
     extra_fields = models.TextField(default="{}")
 
+    # system process ID for ensuring same sync session does not run in parallel
+    process_id = models.IntegerField(blank=True, null=True)
+
 
 class TransferSession(models.Model):
     """

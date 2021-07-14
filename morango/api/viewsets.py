@@ -226,7 +226,11 @@ class NonceViewSet(viewsets.mixins.CreateModelMixin, viewsets.GenericViewSet):
         )
 
 
-class SyncSessionViewSet(viewsets.mixins.DestroyModelMixin, viewsets.GenericViewSet):
+class SyncSessionViewSet(
+    viewsets.mixins.DestroyModelMixin,
+    viewsets.mixins.RetrieveModelMixin,
+    viewsets.GenericViewSet,
+):
     serializer_class = serializers.SyncSessionSerializer
 
     def create(self, request):
@@ -312,35 +316,6 @@ class SyncSessionViewSet(viewsets.mixins.DestroyModelMixin, viewsets.GenericView
         }
 
         return response.Response(resp_data, status=status.HTTP_201_CREATED)
-
-    def retrieve(self, request, *args, **kwargs):
-        nonce = request.query_params.get("nonce", None)
-        signature = request.query_params.get("signature", None)
-
-        if not nonce or not signature:
-            return response.Response(
-                "Requests to get a sync session must have signature data",
-                status=status.HTTP_400_BAD_REQUEST,
-            )
-
-        sync_session = self.get_object()
-
-        message = "{nonce}:{id}".format(nonce=nonce, id=sync_session.id)
-        if not sync_session.client_certificate.verify(message, signature):
-            return response.Response(
-                "Client certificate failed to verify signature",
-                status=status.HTTP_403_FORBIDDEN,
-            )
-
-        # check that the nonce is valid, and consume it so it can't be used again
-        try:
-            certificates.Nonce.use_nonce(nonce)
-        except errors.MorangoNonceError:
-            return response.Response(
-                "Nonce is not valid", status=status.HTTP_403_FORBIDDEN
-            )
-
-        return response.Response(self.get_serializer(sync_session).data)
 
     def perform_destroy(self, syncsession):
         syncsession.active = False

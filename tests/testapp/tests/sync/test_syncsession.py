@@ -4,31 +4,25 @@ import uuid
 import mock
 from django.test.testcases import LiveServerTestCase
 from django.test.utils import override_settings
-from django.utils import timezone
-from facility_profile.models import SummaryLog
 from requests.exceptions import HTTPError
 
 from ..helpers import BaseClientTestCase
 from ..helpers import BaseTransferClientTestCase
-from morango.api.serializers import BufferSerializer
 from morango.api.serializers import CertificateSerializer
 from morango.constants import transfer_stages
 from morango.constants import transfer_statuses
 from morango.constants.capabilities import ALLOW_CERTIFICATE_PUSHING
 from morango.errors import CertificateSignatureInvalid
 from morango.errors import MorangoServerDoesNotAllowNewCertPush
+from morango.errors import MorangoResumeSyncError
 from morango.errors import MorangoError
 from morango.models.certificates import Certificate
 from morango.models.certificates import Filter
 from morango.models.certificates import Key
 from morango.models.certificates import ScopeDefinition
-from morango.models.core import Buffer
-from morango.models.core import InstanceIDModel
 from morango.models.core import SyncSession
-from morango.models.core import TransferSession
 from morango.models.fields.crypto import SharedKey
 from morango.sync.controller import MorangoProfileController
-from morango.sync.controller import SessionController
 from morango.sync.context import LocalSessionContext
 from morango.sync.context import NetworkSessionContext
 from morango.sync.session import SessionWrapper
@@ -237,6 +231,45 @@ class NetworkSyncConnectionTestCase(LiveServerTestCase):
 
         self.network_connection.close_sync_session(client.sync_session)
         self.assertEqual(SyncSession.objects.filter(active=True).count(), 0)
+
+    @mock.patch.object(SyncSession.objects, "create")
+    def test_resume_sync_session(self, mock_create):
+        def create(**data):
+            """Trickery to get around same DB being used for both client and server"""
+            return SyncSession.objects.get(pk=data.get("id"))
+
+        mock_create.side_effect = create
+
+        # first create a session
+        client = self.network_connection.create_sync_session(self.subset_cert, self.root_cert)
+        # reset process ID
+        sync_session = client.sync_session
+        sync_session.process_id = 123
+        sync_session.save()
+        resume_client = self.network_connection.resume_sync_session(sync_session.id)
+        self.assertEqual(sync_session.id, resume_client.sync_session.id)
+
+    @mock.patch.object(SyncSession.objects, "create")
+    def test_resume_sync_session__still_running(self, mock_create):
+        def create(**data):
+            """Trickery to get around same DB being used for both client and server"""
+            return SyncSession.objects.get(pk=data.get("id"))
+
+        mock_create.side_effect = create
+
+        # first create a session
+        client = self.network_connection.create_sync_session(self.subset_cert, self.root_cert)
+        # reset process ID
+        sync_session = client.sync_session
+        sync_session.process_id = 123
+        sync_session.save()
+
+        with mock.patch("morango.sync.syncsession.psutil.pid_exists") as mock_pid_exists:
+            mock_pid_exists.return_value = True
+            with mock.patch("morango.sync.syncsession.os.getpid") as mock_getpid:
+                mock_getpid.return_value = 245
+                with self.assertRaises(MorangoResumeSyncError):
+                    self.network_connection.resume_sync_session(sync_session.id)
 
 
 class SyncSessionClientTestCase(BaseClientTestCase):

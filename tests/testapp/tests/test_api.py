@@ -677,25 +677,10 @@ class SyncSessionEndpointTestCase(CertificateTestCaseMixin, APITestCase):
         data = self.get_initial_syncsession_data_for_request()
         self.client.post(reverse("syncsessions-list"), data, format="json")
 
-        nonce = self._get_nonce()
-        sig = self.sub_subset_cert1_with_key.sign(
-            "{nonce}:{id}".format(nonce=nonce, id=data["id"])
-        )
-
-        get_params = dict(nonce=nonce, signature=sig)
-        response = self.client.get(
-            reverse("syncsessions-detail", kwargs={"pk": data["id"]}), get_params
-        )
-        self.assertEqual(response.status_code, 200)
-
-    def test_get_sync_session__no_signature(self):
-        data = self.get_initial_syncsession_data_for_request()
-        self.client.post(reverse("syncsessions-list"), data, format="json")
-
         response = self.client.get(
             reverse("syncsessions-detail", kwargs={"pk": data["id"]})
         )
-        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.status_code, 200)
 
 
 class TransferSessionEndpointTestCase(CertificateTestCaseMixin, APITestCase):
