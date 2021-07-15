@@ -264,7 +264,7 @@ class NetworkSyncConnectionTestCase(LiveServerTestCase):
         sync_session.process_id = 123000111
         sync_session.save()
 
-        with mock.patch("morango.sync.syncsession.psutil.pid_exists") as mock_pid_exists:
+        with mock.patch("morango.sync.syncsession.pid_exists") as mock_pid_exists:
             mock_pid_exists.return_value = True
             with mock.patch("morango.sync.syncsession.os.getpid") as mock_getpid:
                 mock_getpid.return_value = 245111222
