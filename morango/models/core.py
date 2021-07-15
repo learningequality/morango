@@ -284,13 +284,22 @@ class TransferSession(models.Model):
         :type stage_status: morango.constants.transfer_statuses.*|None
         """
         if stage is not None:
-            if self.transfer_stage and transfer_stages.stage(self.transfer_stage) > transfer_stages.stage(stage):
-                raise ValueError("Update stage is behind current stage | current={}, new={}".format(self.transfer_stage, stage))
+            if self.transfer_stage and transfer_stages.stage(
+                self.transfer_stage
+            ) > transfer_stages.stage(stage):
+                raise ValueError(
+                    "Update stage is behind current stage | current={}, new={}".format(
+                        self.transfer_stage, stage
+                    )
+                )
             self.transfer_stage = stage
         if stage_status is not None:
             self.transfer_stage_status = stage_status
         if stage is not None or stage_status is not None:
+            self.last_activity_timestamp = timezone.now()
             self.save()
+            self.sync_session.last_activity_timestamp = timezone.now()
+            self.sync_session.save()
 
     def delete_buffers(self):
         """
@@ -311,7 +320,9 @@ class TransferSession(models.Model):
         if isinstance(model, SyncableModel):
             model = model.morango_model_name
         assert isinstance(model, six.string_types)
-        return Store.objects.filter(model_name=model, last_transfer_session_id=self.id).values_list("id", flat=True)
+        return Store.objects.filter(
+            model_name=model, last_transfer_session_id=self.id
+        ).values_list("id", flat=True)
 
 
 class DeletedModels(models.Model):
@@ -395,7 +406,9 @@ class Store(AbstractStore):
     dirty_bit = models.BooleanField(default=False)
     deserialization_error = models.TextField(blank=True)
 
-    last_transfer_session_id = UUIDField(blank=True, null=True, default=None, db_index=True)
+    last_transfer_session_id = UUIDField(
+        blank=True, null=True, default=None, db_index=True
+    )
 
     objects = StoreManager()
 
