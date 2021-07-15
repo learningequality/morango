@@ -1,7 +1,9 @@
+import os
 from requests import Request
 from django.http.request import HttpRequest
 from django.test.testcases import SimpleTestCase
 import mock
+import pytest
 
 from morango.constants.capabilities import ALLOW_CERTIFICATE_PUSHING
 from morango.constants.capabilities import ASYNC_OPERATIONS
@@ -11,6 +13,9 @@ from morango.utils import CAPABILITIES_CLIENT_HEADER
 from morango.utils import get_capabilities
 from morango.utils import serialize_capabilities_to_client_request
 from morango.utils import parse_capabilities_from_server_request
+from morango.utils import pid_exists
+from morango.utils import _posix_pid_exists
+from morango.utils import _windows_pid_exists
 
 
 class SettingsTestCase(SimpleTestCase):
@@ -78,3 +83,19 @@ class TransferStageTestCase(SimpleTestCase):
         self.assertFalse(stage_b <= stage_a)
         self.assertTrue(stage_b <= stage_c)
         self.assertTrue(stage_b >= stage_c)
+
+
+class ProcessIDExistsTestCase(SimpleTestCase):
+    @pytest.mark.skipif(os.name != "posix", reason="Not POSIX OS")
+    def test_posix(self):
+        self.assertEqual(_posix_pid_exists, pid_exists)
+        pid = os.getpid()
+        self.assertTrue(pid_exists(pid))
+        self.assertFalse(pid_exists(123456789))
+
+    @pytest.mark.skipif(os.name == "posix", reason="POSIX platform")
+    def test_windows(self):
+        self.assertEqual(_windows_pid_exists, pid_exists)
+        pid = os.getpid()
+        self.assertTrue(pid_exists(pid))
+        self.assertFalse(pid_exists(123456789))

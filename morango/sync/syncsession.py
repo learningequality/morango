@@ -8,7 +8,6 @@ import socket
 import uuid
 from io import BytesIO
 
-import psutil
 from django.utils import timezone
 from django.utils.six import iteritems
 from django.utils.six import raise_from
@@ -40,6 +39,7 @@ from morango.sync.context import NetworkSessionContext
 from morango.sync.utils import SyncSignal
 from morango.sync.utils import SyncSignalGroup
 from morango.utils import CAPABILITIES
+from morango.utils import pid_exists
 
 if GZIP_BUFFER_POST in CAPABILITIES:
     from gzip import GzipFile
@@ -270,7 +270,7 @@ class NetworkSyncConnection(Connection):
         if (
             sync_session.process_id
             and sync_session.process_id != os.getpid()
-            and psutil.pid_exists(sync_session.process_id)
+            and pid_exists(sync_session.process_id)
         ):
             raise MorangoResumeSyncError(
                 "Session process '{}' is still running".format(sync_session.process_id)

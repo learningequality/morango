@@ -1,3 +1,5 @@
+import os
+
 from django.conf import settings
 
 from morango.constants import settings as default_settings
@@ -62,3 +64,38 @@ def parse_capabilities_from_server_request(request):
     :return: A set of capabilities
     """
     return set(request.META.get(CAPABILITIES_SERVER_HEADER, "").split(" "))
+
+
+def _posix_pid_exists(pid):
+    """Check whether PID exists in the current process table."""
+    import errno
+
+    if pid < 0:
+        return False
+    try:
+        # Send signal 0, this is harmless
+        os.kill(pid, 0)
+    except OSError as e:
+        return e.errno == errno.EPERM
+    else:
+        return True
+
+
+def _windows_pid_exists(pid):
+    import ctypes
+
+    kernel32 = ctypes.windll.kernel32
+    SYNCHRONIZE = 0x100000
+
+    process = kernel32.OpenProcess(SYNCHRONIZE, 0, pid)
+    if process != 0:
+        kernel32.CloseHandle(process)
+        return True
+    else:
+        return False
+
+
+if os.name == "posix":
+    pid_exists = _posix_pid_exists
+else:
+    pid_exists = _windows_pid_exists

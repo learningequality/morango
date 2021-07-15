@@ -116,3 +116,27 @@ jobs:
                   key: ${{ runner.os }}-tox-py${{ matrix.python-version }}-${{ hashFiles('setup.py', 'requirements/*.txt') }}
             - name: Test with tox
               run: tox -e postgres
+    windows:
+        name: Python unit tests on Windows Server
+        needs: pre_job
+        runs-on: windows-latest
+        strategy:
+            max-parallel: 5
+            matrix:
+                python-version: [3.6]
+
+        steps:
+            - uses: actions/checkout@v2
+            - name: Set up Python ${{ matrix.python-version }}
+              if: ${{ needs.pre_job.outputs.should_skip != 'true' }}
+              uses: actions/setup-python@v2
+              with:
+                  python-version: ${{ matrix.python-version }}
+            - name: Install tox
+              if: ${{ needs.pre_job.outputs.should_skip != 'true' }}
+              run: |
+                  python -m pip install --upgrade pip
+                  pip install tox
+            - name: Test with tox
+              if: ${{ needs.pre_job.outputs.should_skip != 'true' }}
+              run: tox -e windows

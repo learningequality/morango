@@ -33,7 +33,6 @@ setup(
         "future==0.16.0",
         "requests",
         "ifcfg",
-        "psutil",
     ],
     license="MIT",
     zip_safe=False,
