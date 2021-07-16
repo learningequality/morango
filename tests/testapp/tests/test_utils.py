@@ -93,6 +93,7 @@ class ProcessIDExistsTestCase(SimpleTestCase):
         self.assertTrue(pid_exists(pid))
         self.assertFalse(pid_exists(123456789))
 
+    @pytest.mark.windows
     @pytest.mark.skipif(os.name == "posix", reason="POSIX platform")
     def test_windows(self):
         self.assertEqual(_windows_pid_exists, pid_exists)

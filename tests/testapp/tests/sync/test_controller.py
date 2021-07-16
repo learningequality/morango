@@ -640,7 +640,7 @@ class SessionControllerTestCase(SimpleTestCase):
         super(SessionControllerTestCase, self).setUp()
         self.middleware = [
             mock.Mock(related_stage=stage)
-            for stage, _ in transfer_stages.CHOICES
+            for stage in transfer_stages.ALL
         ]
         self.context = TestSessionContext()
         self.controller = SessionController.build(middleware=self.middleware, context=self.context)
@@ -683,6 +683,26 @@ class SessionControllerTestCase(SimpleTestCase):
             result = self.controller.proceed_to(transfer_stages.CLEANUP)
             self.assertEqual(transfer_statuses.COMPLETED, result)
             self.assertEqual(5, len(invoke.call_args_list))
+
+    def test_proceed_to__resuming_fast_forward(self):
+        self.context.update(stage=transfer_stages.INITIALIZING, stage_status=transfer_statuses.PENDING)
+        expected_stages = (
+            transfer_stages.INITIALIZING,
+            transfer_stages.DESERIALIZING,
+            transfer_stages.CLEANUP,
+        )
+
+        def invoke(context, middleware):
+            self.assertIn(context.stage, expected_stages)
+            if context.stage == transfer_stages.INITIALIZING:
+                context.update(stage=transfer_stages.DESERIALIZING, stage_status=transfer_statuses.PENDING)
+            return transfer_statuses.COMPLETED
+
+        with self._mock_method('_invoke_middleware') as mock_invoke:
+            mock_invoke.side_effect = invoke
+            result = self.controller.proceed_to(transfer_stages.CLEANUP)
+            self.assertEqual(transfer_statuses.COMPLETED, result)
+            self.assertEqual(3, len(mock_invoke.call_args_list))
 
     def test_proceed_to_and_wait_for(self):
         with self._mock_method('proceed_to') as proceed_to:

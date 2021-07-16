@@ -176,6 +176,8 @@ class SessionController(object):
                 # if the result is not completed status, then break because that means we can't
                 # proceed to the next stage (yet)
                 result = self._invoke_middleware(context, middleware)
+                # update local stage variable after completion
+                current_stage = transfer_stages.stage(context.stage)
                 if result != transfer_statuses.COMPLETED:
                     break
 
@@ -227,7 +229,9 @@ class SessionController(object):
 
             result = middleware(context)
 
-            context.update(stage_status=result)
+            # don't update stage result if context's stage was updated during operation
+            if context.stage == stage:
+                context.update(stage_status=result)
 
             # fire signals based off middleware invocation result; the progress signal if incomplete
             if result == transfer_statuses.COMPLETED:

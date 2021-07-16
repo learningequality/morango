@@ -1,6 +1,7 @@
 import json
 import contextlib
 import pytest
+import mock
 
 from django.conf import settings
 from django.db import connections
@@ -8,8 +9,10 @@ from django.test.testcases import LiveServerTestCase
 from facility_profile.models import SummaryLog
 from facility_profile.models import InteractionLog
 from facility_profile.models import MyUser
+from requests.exceptions import Timeout
 from test.support import EnvironmentVarGuard
 
+from morango.errors import MorangoError
 from morango.models.certificates import Certificate
 from morango.models.certificates import Filter
 from morango.models.certificates import Key
@@ -171,3 +174,53 @@ class PushPullClientTestCase(LiveServerTestCase):
 
         self.assertEqual(5, SummaryLog.objects.filter(user=self.local_user).count())
         self.assertEqual(5, InteractionLog.objects.filter(user=self.local_user).count())
+
+    def test_resume(self):
+        # create data
+        for _ in range(5):
+            SummaryLog.objects.create(user=self.local_user)
+            InteractionLog.objects.create(user=self.local_user)
+        self.profile_controller.serialize_into_store(self.filter)
+
+        with second_environment():
+            self.assertEqual(0, SummaryLog.objects.filter(user=self.remote_user).count())
+            self.assertEqual(0, InteractionLog.objects.filter(user=self.remote_user).count())
+
+        # use client to start a sync
+        client = self.client.get_push_client()
+        self.assertEqual(0, TransferSession.objects.filter(active=True).count())
+        client.initialize(self.filter)
+        self.assertEqual(1, TransferSession.objects.filter(active=True).count())
+        transfer_session = client.local_context.transfer_session
+        self.assertNotEqual(0, transfer_session.records_total)
+        self.assertEqual(0, transfer_session.records_transferred)
+        self.assertLessEqual(1, Buffer.objects.filter(transfer_session=transfer_session).count())
+
+        # simulate timeout
+        with mock.patch("morango.sync.operations.NetworkOperation.put_buffers") as mock_put_buffers:
+            mock_put_buffers.side_effect = Timeout("Network disconnected")
+            with self.assertRaises(MorangoError):
+                client.run()
+
+        self.assertEqual(0, transfer_session.records_transferred)
+
+        # get resume client and retry
+        resume_client = self.conn.resume_sync_session(client.sync_session.id).get_push_client()
+        self.assertEqual(1, TransferSession.objects.filter(active=True).count())
+        resume_client.initialize(self.filter)
+        self.assertEqual(1, TransferSession.objects.filter(active=True).count())
+        transfer_session = resume_client.local_context.transfer_session
+        self.assertNotEqual(0, transfer_session.records_total)
+        self.assertEqual(0, transfer_session.records_transferred)
+        self.assertLessEqual(1, Buffer.objects.filter(transfer_session=transfer_session).count())
+        self.assertEqual(0, transfer_session.records_transferred)
+        resume_client.run()
+        self.assertNotEqual(0, transfer_session.records_transferred)
+
+        resume_client.finalize()
+        self.assertEqual(0, Buffer.objects.filter(transfer_session=transfer_session).count())
+        self.assertEqual(0, TransferSession.objects.filter(active=True).count())
+
+        with second_environment():
+            self.assertEqual(5, SummaryLog.objects.filter(user=self.remote_user).count())
+            self.assertEqual(5, InteractionLog.objects.filter(user=self.remote_user).count())

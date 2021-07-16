@@ -13,7 +13,6 @@ from django.db.models import Q
 from django.db.models import signals
 from django.utils import six
 from django.utils import timezone
-from rest_framework import status
 from rest_framework.exceptions import ValidationError
 
 from morango.api.serializers import BufferSerializer
