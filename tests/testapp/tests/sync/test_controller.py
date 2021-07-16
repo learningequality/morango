@@ -640,7 +640,7 @@ class SessionControllerTestCase(SimpleTestCase):
         super(SessionControllerTestCase, self).setUp()
         self.middleware = [
             mock.Mock(related_stage=stage)
-            for stage in transfer_stages.ALL
+            for stage, _ in transfer_stages.CHOICES
         ]
         self.context = TestSessionContext()
         self.controller = SessionController.build(middleware=self.middleware, context=self.context)
@@ -649,6 +649,7 @@ class SessionControllerTestCase(SimpleTestCase):
     def _mock_method(self, method):
         with mock.patch('morango.sync.controller.SessionController.{}'.format(method)) as invoke:
             yield invoke
+            invoke.reset_mock()
 
     def test_proceed_to__passed_stage(self):
         self.context.update(stage=transfer_stages.CLEANUP)
@@ -667,14 +668,15 @@ class SessionControllerTestCase(SimpleTestCase):
 
     def test_proceed_to__executes_middleware__incrementally(self):
         self.context.update(stage=transfer_stages.SERIALIZING, stage_status=transfer_statuses.COMPLETED)
-        with self._mock_method('_invoke_middleware') as invoke:
-            invoke.return_value = transfer_statuses.STARTED
+        with self._mock_method('_invoke_middleware') as mock_invoke:
+            mock_invoke.return_value = transfer_statuses.STARTED
             result = self.controller.proceed_to(transfer_stages.QUEUING)
             self.assertEqual(transfer_statuses.STARTED, result)
-            self.assertEqual(1, len(invoke.call_args_list))
-            call = invoke.call_args[0]
+            self.assertEqual(1, len(mock_invoke.call_args_list))
+            call = mock_invoke.call_args[0]
             self.assertEqual(self.context, call[0])
             self.assertEqual(transfer_stages.QUEUING, call[1].related_stage)
+            mock_invoke.reset_mock()
 
     def test_proceed_to__executes_middleware__all(self):
         self.context.update(stage=transfer_stages.SERIALIZING, stage_status=transfer_statuses.COMPLETED)
@@ -724,23 +726,23 @@ class SessionControllerTestCase(SimpleTestCase):
             self.assertEqual(result, transfer_statuses.ERRORED)
 
     def test_invoke_middleware(self):
-        context = mock.Mock(spec=TestSessionContext)
+        context = TestSessionContext()
         self.controller.context = context
         handler = mock.Mock()
         self.controller.signals.connect(handler)
 
         middleware = self.middleware[0]
         middleware.return_value = transfer_statuses.STARTED
-        result = self.controller._invoke_middleware(context, middleware)
-        self.assertEqual(result, transfer_statuses.STARTED)
 
-        context_update_calls = self.controller.context.update.call_args_list
-        self.assertEqual(2, len(context_update_calls))
-        self.assertEqual(mock.call(stage=middleware.related_stage, stage_status=transfer_statuses.PENDING), context_update_calls[0])
-        self.assertEqual(mock.call(stage_status=transfer_statuses.STARTED), context_update_calls[1])
+        with mock.patch.object(TestSessionContext, "update_state", wraps=context.update_state) as m:
+            result = self.controller._invoke_middleware(context, middleware)
+            self.assertEqual(result, transfer_statuses.STARTED)
+
+            context_update_calls = m.call_args_list
+            self.assertEqual(2, len(context_update_calls))
+            self.assertEqual(mock.call(stage=middleware.related_stage, stage_status=transfer_statuses.PENDING), context_update_calls[0])
+            self.assertEqual(mock.call(stage=None, stage_status=transfer_statuses.STARTED), context_update_calls[1])
 
         self.assertEqual(2, len(handler.call_args_list))
         self.assertEqual(mock.call(context=context), handler.call_args_list[0])
         self.assertEqual(mock.call(context=context), handler.call_args_list[1])
-
-
