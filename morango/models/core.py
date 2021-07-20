@@ -19,18 +19,20 @@ from django.db.models.functions import Cast
 from django.utils import six
 from django.utils import timezone
 
-from .. import proquint
-from ..registry import syncable_models
-from .certificates import Certificate
-from .certificates import Filter
-from .fields.uuids import sha2_uuid
-from .fields.uuids import UUIDField
-from .fields.uuids import UUIDModelMixin
-from .manager import SyncableModelManager
-from .morango_mptt import MorangoMPTTModel
-from .utils import get_0_4_system_parameters
-from .utils import get_0_5_system_id
-from .utils import get_0_5_mac_address
+from morango import proquint
+from morango.registry import syncable_models
+from morango.models.certificates import Certificate
+from morango.models.certificates import Filter
+from morango.models.fields.uuids import sha2_uuid
+from morango.models.fields.uuids import UUIDField
+from morango.models.fields.uuids import UUIDModelMixin
+from morango.models.manager import SyncableModelManager
+from morango.models.morango_mptt import MorangoMPTTModel
+from morango.models.utils import get_0_4_system_parameters
+from morango.models.utils import get_0_5_system_id
+from morango.models.utils import get_0_5_mac_address
+from morango.constants import transfer_stages
+from morango.constants import transfer_statuses
 
 logger = logging.getLogger(__name__)
 
@@ -119,7 +121,6 @@ class InstanceIDModel(models.Model):
     def get_or_create_current_instance(cls, clear_cache=False):
         """Get the instance model corresponding to the current system, or create a new
         one if the system is new or its properties have changed (e.g. new MAC address)."""
-
         if clear_cache:
             cls._cached_instance = None
 
@@ -157,9 +158,9 @@ class InstanceIDModel(models.Model):
             kwargs["current"] = True
 
             # ensure we only ever have 1 current instance ID
-            InstanceIDModel.objects.filter(current=True).exclude(id=kwargs["id"]).update(
-                current=False
-            )
+            InstanceIDModel.objects.filter(current=True).exclude(
+                id=kwargs["id"]
+            ).update(current=False)
             # create the model, or get existing if one already exists with this ID
             instance, created = InstanceIDModel.objects.update_or_create(
                 id=kwargs["id"], defaults=kwargs
@@ -226,10 +227,13 @@ class SyncSession(models.Model):
     # used to store other data we may need to know about this sync session
     extra_fields = models.TextField(default="{}")
 
+    # system process ID for ensuring same sync session does not run in parallel
+    process_id = models.IntegerField(blank=True, null=True)
+
 
 class TransferSession(models.Model):
     """
-    ``TransferSession`` holds metatada that is related to a specific transfer (push/pull) session
+    ``TransferSession`` holds metadata that is related to a specific transfer (push/pull) session
     between 2 morango instances.
     """
 
@@ -258,8 +262,50 @@ class TransferSession(models.Model):
     client_fsic = models.TextField(blank=True, default="{}")
     server_fsic = models.TextField(blank=True, default="{}")
 
+    # stages and stage status of transfer session
+    transfer_stage = models.CharField(
+        max_length=20, choices=transfer_stages.CHOICES, blank=True
+    )
+    transfer_stage_status = models.CharField(
+        max_length=20, choices=transfer_statuses.CHOICES, blank=True
+    )
+
+    @property
+    def pull(self):
+        """Getter for `not push` condition, which adds complexity in conditional statements"""
+        return not self.push
+
     def get_filter(self):
         return Filter(self.filter)
+
+    def update_state(self, stage=None, stage_status=None):
+        """
+        :type stage: morango.constants.transfer_stages.*|None
+        :type stage_status: morango.constants.transfer_statuses.*|None
+        """
+        if stage is not None:
+            if self.transfer_stage and transfer_stages.stage(self.transfer_stage) > transfer_stages.stage(stage):
+                raise ValueError("Update stage is behind current stage | current={}, new={}".format(self.transfer_stage, stage))
+            self.transfer_stage = stage
+        if stage_status is not None:
+            self.transfer_stage_status = stage_status
+        if stage is not None or stage_status is not None:
+            self.save()
+
+    def delete_buffers(self):
+        """
+        Deletes `Buffer` and `RecordMaxCounterBuffer` model records by executing SQL directly
+        against the database for better performance
+        """
+        with connection.cursor() as cursor:
+            cursor.execute(
+                "DELETE FROM morango_buffer WHERE transfer_session_id = %s",
+                (self.id,),
+            )
+            cursor.execute(
+                "DELETE FROM morango_recordmaxcounterbuffer WHERE transfer_session_id = %s",
+                (self.id,),
+            )
 
     def get_touched_record_ids_for_model(self, model):
         if isinstance(model, SyncableModel):
@@ -584,9 +630,11 @@ class SyncableModel(UUIDModelMixin):
         self, using=None, keep_parents=False, hard_delete=False, *args, **kwargs
     ):
         using = using or router.db_for_write(self.__class__, instance=self)
-        assert self._get_pk_val() is not None, (
-            "%s object can't be deleted because its %s attribute is set to None."
-            % (self._meta.object_name, self._meta.pk.attname)
+        assert (
+            self._get_pk_val() is not None
+        ), "%s object can't be deleted because its %s attribute is set to None." % (
+            self._meta.object_name,
+            self._meta.pk.attname,
         )
         collector = Collector(using=using)
         collector.collect([self], keep_parents=keep_parents)

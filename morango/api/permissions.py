@@ -1,6 +1,5 @@
 import json
 
-from django.conf import settings
 from django.contrib.auth import authenticate
 from django.contrib.auth import get_user_model
 from rest_framework import authentication
@@ -8,6 +7,7 @@ from rest_framework import exceptions
 from rest_framework import permissions
 
 from morango.models.core import TransferSession
+from morango.utils import SETTINGS
 
 
 class BasicMultiArgumentAuthentication(authentication.BasicAuthentication):
@@ -78,57 +78,13 @@ class CertificatePushPermissions(permissions.BasePermission):
     message = "Server does not allow certificate pushing."
 
     def has_permission(self, request, view):
-        if getattr(settings, "ALLOW_CERTIFICATE_PUSHING", False):
+        if SETTINGS.ALLOW_CERTIFICATE_PUSHING:
             return True
-        return False
-
-
-class NoncePermissions(permissions.BasePermission):
-    def has_permission(self, request, view):
-
-        if request.method != "POST":
-            return False
-
-        return True
-
-
-class SyncSessionPermissions(permissions.BasePermission):
-    def has_permission(self, request, view):
-
-        if request.method == "DELETE":
-            return True
-
-        if request.method == "POST":
-            return (
-                True
-            )  # we'll be doing some additional permission checks in the viewset
-
-        return False
-
-
-class TransferSessionPermissions(permissions.BasePermission):
-    def has_permission(self, request, view):
-
-        if request.method == "DELETE":
-            return True
-
-        if request.method == "POST":
-            return (
-                True
-            )  # we'll be doing some additional permission checks in the viewset
-
-        if request.method == "PATCH":
-            return True
-
         return False
 
 
 class BufferPermissions(permissions.BasePermission):
     def has_permission(self, request, view):
-
-        if request.method == "POST":
-            return True
-
         if request.method == "GET":
             sesh_id = request.query_params.get("transfer_session_id")
             if not sesh_id:
@@ -139,4 +95,4 @@ class BufferPermissions(permissions.BasePermission):
                 return False
             return True
 
-        return False
+        return request.method in ("POST",)

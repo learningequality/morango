@@ -1,7 +1,6 @@
 import datetime
 
 from django.core.management.base import BaseCommand
-from django.db import connection
 from django.db import transaction
 from django.utils import timezone
 
@@ -45,15 +44,7 @@ class Command(BaseCommand):
 
             # delete buffer data and mark session as inactive
             with transaction.atomic():
-                with connection.cursor() as cursor:
-                    cursor.execute(
-                        "DELETE FROM morango_buffer WHERE transfer_session_id = %s",
-                        (sess.id,),
-                    )
-                    cursor.execute(
-                        "DELETE FROM morango_recordmaxcounterbuffer WHERE transfer_session_id = %s",
-                        (sess.id,),
-                    )
+                sess.delete_buffers()
                 sess.active = False
                 sess.save()
                 sess.sync_session.active = False

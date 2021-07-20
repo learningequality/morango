@@ -5,6 +5,8 @@ from requests.sessions import Session
 from requests.utils import super_len
 from requests.packages.urllib3.util.url import parse_url
 
+from morango.utils import serialize_capabilities_to_client_request
+
 
 logger = logging.getLogger(__name__)
 
@@ -34,6 +36,7 @@ class SessionWrapper(Session):
     bytes_received = 0
 
     def request(self, method, url, **kwargs):
+        response = None
         try:
             response = super(SessionWrapper, self).request(method, url, **kwargs)
 
@@ -53,9 +56,10 @@ class SessionWrapper(Session):
             return response
         except exceptions.RequestException as req_err:
             # we want to log all request errors for debugging purposes
-            response_content = (
-                req_err.response.content if req_err.response else "(no response)"
-            )
+            if response is None:
+                response = req_err.response
+
+            response_content = response.content if response else "(no response)"
             logger.error(
                 "{} Reason: {}".format(req_err.__class__.__name__, response_content)
             )
@@ -66,9 +70,11 @@ class SessionWrapper(Session):
         Override request preparer so we can get the prepared content length, for tracking
         transfer sizes
 
-        :param request: requests.Request
+        :type request: requests.Request
         :rtype: requests.PreparedRequest
         """
+        # add header with client's morango capabilities so server has that information
+        serialize_capabilities_to_client_request(request)
         prepped = super(SessionWrapper, self).prepare_request(request)
         parsed_url = parse_url(request.url)
 

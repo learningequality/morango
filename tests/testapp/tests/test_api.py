@@ -6,6 +6,7 @@ import uuid
 import mock
 from django.core.urlresolvers import reverse
 from django.test.utils import override_settings
+from django.urls.exceptions import NoReverseMatch
 from django.utils import timezone
 from facility_profile.models import MyUser
 from rest_framework.test import APITestCase as BaseTestCase
@@ -14,6 +15,8 @@ from test.support import EnvironmentVarGuard
 from morango.api.serializers import BufferSerializer
 from morango.api.serializers import CertificateSerializer
 from morango.api.serializers import InstanceIDSerializer
+from morango.constants import transfer_stages
+from morango.constants import transfer_statuses
 from morango.models.certificates import Certificate
 from morango.models.certificates import Key
 from morango.models.certificates import Nonce
@@ -36,6 +39,8 @@ if sys.version_info >= (3,):
     class APITestCase(BaseTestCase):
         def assertItemsEqual(self, *args, **kwargs):
             self.assertCountEqual(*args, **kwargs)
+
+
 else:
     from base64 import encodestring as b64encode
 
@@ -44,7 +49,6 @@ else:
 
 
 class CertificateTestCaseMixin(object):
-
     def setUp(self):
 
         self.user = MyUser(username="user")
@@ -84,14 +88,21 @@ class CertificateTestCaseMixin(object):
             read_write_filter_template="",
         )
 
-        self.root_cert1_with_key = Certificate.generate_root_certificate(self.root_scope_def.id)
+        self.root_cert1_with_key = Certificate.generate_root_certificate(
+            self.root_scope_def.id
+        )
 
         self.subset_cert1_without_key = Certificate(
             parent=self.root_cert1_with_key,
             profile=self.profile,
             scope_definition=self.subset_scope_def,
             scope_version=self.subset_scope_def.version,
-            scope_params=json.dumps({"mainpartition": self.root_cert1_with_key.id, "subpartition": "abracadabra"}),
+            scope_params=json.dumps(
+                {
+                    "mainpartition": self.root_cert1_with_key.id,
+                    "subpartition": "abracadabra",
+                }
+            ),
             private_key=Key(),
         )
         self.root_cert1_with_key.sign_certificate(self.subset_cert1_without_key)
@@ -111,14 +122,21 @@ class CertificateTestCaseMixin(object):
         self.subset_cert1_without_key._private_key = None
         self.subset_cert1_without_key.save()
 
-        self.root_cert2_without_key = Certificate.generate_root_certificate(self.root_scope_def.id)
+        self.root_cert2_without_key = Certificate.generate_root_certificate(
+            self.root_scope_def.id
+        )
 
         self.subset_cert2_with_key = Certificate(
             parent=self.root_cert2_without_key,
             profile=self.profile,
             scope_definition=self.subset_scope_def,
             scope_version=self.subset_scope_def.version,
-            scope_params=json.dumps({"mainpartition": self.root_cert2_without_key.id, "subpartition": "abracadabra"}),
+            scope_params=json.dumps(
+                {
+                    "mainpartition": self.root_cert2_without_key.id,
+                    "subpartition": "abracadabra",
+                }
+            ),
             private_key=Key(),
         )
         self.root_cert2_without_key.sign_certificate(self.subset_cert2_with_key)
@@ -135,10 +153,12 @@ class CertificateTestCaseMixin(object):
             scope_definition=self.root_scope_def,
             scope_version=self.root_scope_def.version,
             profile=self.profile,
-            private_key=Key()
+            private_key=Key(),
         )
         self.unsaved_root_cert.id = self.unsaved_root_cert.calculate_uuid()
-        self.unsaved_root_cert.scope_params = json.dumps({self.root_scope_def.primary_scope_param_key: self.unsaved_root_cert.id})
+        self.unsaved_root_cert.scope_params = json.dumps(
+            {self.root_scope_def.primary_scope_param_key: self.unsaved_root_cert.id}
+        )
         self.unsaved_root_cert.sign_certificate(self.unsaved_root_cert)
 
         # create a child cert
@@ -147,18 +167,22 @@ class CertificateTestCaseMixin(object):
             profile=self.profile,
             scope_definition=self.subset_scope_def,
             scope_version=self.subset_scope_def.version,
-            scope_params=json.dumps({"mainpartition": self.unsaved_root_cert.id, "subpartition": "hooplah"}),
+            scope_params=json.dumps(
+                {"mainpartition": self.unsaved_root_cert.id, "subpartition": "hooplah"}
+            ),
             public_key=self.sharedkey.public_key,
         )
 
     def make_cert_endpoint_request(self, params={}, method="GET"):
         fn = getattr(self.client, method.lower())
-        response = fn(reverse('certificates-list'), params, format='json')
+        response = fn(reverse("certificates-list"), params, format="json")
         data = json.loads(response.content.decode())
         return (response, data)
 
     def perform_basic_authentication(self, user):
-        basic_auth_header = b'Basic ' + b64encode(("username=%s:%s" % (user.username, user.actual_password)).encode())
+        basic_auth_header = b"Basic " + b64encode(
+            ("username=%s:%s" % (user.username, user.actual_password)).encode()
+        )
         self.client.credentials(HTTP_AUTHORIZATION=basic_auth_header)
 
     def create_syncsession(self, client_certificate=None, server_certificate=None):
@@ -170,7 +194,7 @@ class CertificateTestCaseMixin(object):
             server_certificate = self.root_cert1_with_key
 
         # fetch a nonce value to use in creating the syncsession
-        response = self.client.post(reverse('nonces-list'), {}, format='json')
+        response = self.client.post(reverse("nonces-list"), {}, format="json")
         nonce = json.loads(response.content.decode())["id"]
 
         # prepare the data to send in the syncsession creation request
@@ -179,9 +203,17 @@ class CertificateTestCaseMixin(object):
             "server_certificate_id": server_certificate.id,
             "client_certificate_id": client_certificate.id,
             "profile": client_certificate.profile,
-            "certificate_chain": json.dumps(CertificateSerializer(client_certificate.get_ancestors(include_self=True), many=True).data),
+            "certificate_chain": json.dumps(
+                CertificateSerializer(
+                    client_certificate.get_ancestors(include_self=True), many=True
+                ).data
+            ),
             "connection_path": "http://127.0.0.1:8000",
-            "instance": json.dumps(InstanceIDSerializer(InstanceIDModel.get_or_create_current_instance()[0]).data),
+            "instance": json.dumps(
+                InstanceIDSerializer(
+                    InstanceIDModel.get_or_create_current_instance()[0]
+                ).data
+            ),
             "nonce": nonce,
         }
 
@@ -189,12 +221,20 @@ class CertificateTestCaseMixin(object):
         data["signature"] = client_certificate.sign("{nonce}:{id}".format(**data))
 
         # make the API call to create the SyncSession
-        response = self.client.post(reverse('syncsessions-list'), data, format='json')
+        response = self.client.post(reverse("syncsessions-list"), data, format="json")
         self.assertEqual(response.status_code, 201)
 
         return SyncSession.objects.get(id=data["id"])
 
-    def make_transfersession_creation_request(self, filter, push, syncsession=None, expected_status=201, expected_message=None, **kwargs):
+    def make_transfersession_creation_request(
+        self,
+        filter,
+        push,
+        syncsession=None,
+        expected_status=201,
+        expected_message=None,
+        **kwargs
+    ):
 
         if not syncsession:
             syncsession = self.create_syncsession()
@@ -208,12 +248,16 @@ class CertificateTestCaseMixin(object):
         }
 
         # make the API call to attempt to create the TransferSession
-        response = self.client.post(reverse('transfersessions-list'), data, format='json')
+        response = self.client.post(
+            reverse("transfersessions-list"), data, format="json"
+        )
         self.assertEqual(response.status_code, expected_status)
 
         if expected_status == 201:
             # check that the syncsession was created
-            transfersession = TransferSession.objects.get(id=json.loads(response.content.decode())["id"])
+            transfersession = TransferSession.objects.get(
+                id=json.loads(response.content.decode())["id"]
+            )
             self.assertTrue(transfersession.active)
         else:
             # check that the syncsession was not created
@@ -226,55 +270,84 @@ class CertificateTestCaseMixin(object):
 
 
 class CertificateListingTestCase(CertificateTestCaseMixin, APITestCase):
-
     def test_certificate_filtering_by_primary_partition(self):
 
         # check that only the root cert and leaf cert are returned when they're the ones with a private key
-        _, data = self.make_cert_endpoint_request(params={'primary_partition': self.root_cert1_with_key.id})
+        _, data = self.make_cert_endpoint_request(
+            params={"primary_partition": self.root_cert1_with_key.id}
+        )
         self.assertEqual(len(data), 2)
         self.assertEqual(data[0]["id"], self.root_cert1_with_key.id)
         self.assertEqual(data[1]["id"], self.sub_subset_cert1_with_key.id)
 
         # check that only the subcert is returned when it's the one with a private key
-        _, data = self.make_cert_endpoint_request(params={'primary_partition': self.root_cert2_without_key.id})
+        _, data = self.make_cert_endpoint_request(
+            params={"primary_partition": self.root_cert2_without_key.id}
+        )
         self.assertEqual(len(data), 1)
         self.assertEqual(data[0]["id"], self.subset_cert2_with_key.id)
 
         # check that no certificates are returned when the partition doesn't exist
-        _, data = self.make_cert_endpoint_request(params={'primary_partition': "a" * 32})
+        _, data = self.make_cert_endpoint_request(
+            params={"primary_partition": "a" * 32}
+        )
         self.assertEqual(len(data), 0)
 
         # check that no certificates are returned when profile doesn't match
-        _, data = self.make_cert_endpoint_request(params={'primary_partition': self.root_cert2_without_key.id, "profile": "namelessone"})
+        _, data = self.make_cert_endpoint_request(
+            params={
+                "primary_partition": self.root_cert2_without_key.id,
+                "profile": "namelessone",
+            }
+        )
         self.assertEqual(len(data), 0)
 
         # check that certificates are returned when profile does match
-        _, data = self.make_cert_endpoint_request(params={'primary_partition': self.root_cert2_without_key.id, "profile": self.profile})
+        _, data = self.make_cert_endpoint_request(
+            params={
+                "primary_partition": self.root_cert2_without_key.id,
+                "profile": self.profile,
+            }
+        )
         self.assertEqual(len(data), 1)
 
     def test_certificate_filtering_by_ancestors_of(self):
 
         # check that only the root cert is returned when it's the one we're requesting ancestors of
-        _, data = self.make_cert_endpoint_request(params={'ancestors_of': self.root_cert1_with_key.id})
+        _, data = self.make_cert_endpoint_request(
+            params={"ancestors_of": self.root_cert1_with_key.id}
+        )
         self.assertEqual(len(data), 1)
         self.assertEqual(data[0]["id"], self.root_cert1_with_key.id)
 
         # check that both the subcert and root cert are returned when we request ancestors of subcert
-        _, data = self.make_cert_endpoint_request(params={'ancestors_of': self.subset_cert2_with_key.id})
+        _, data = self.make_cert_endpoint_request(
+            params={"ancestors_of": self.subset_cert2_with_key.id}
+        )
         self.assertEqual(len(data), 2)
         self.assertEqual(data[0]["id"], self.root_cert2_without_key.id)
         self.assertEqual(data[1]["id"], self.subset_cert2_with_key.id)
 
         # check that no certificates are returned when the certificate ID doesn't exist
-        _, data = self.make_cert_endpoint_request(params={'ancestors_of': "a" * 32})
+        _, data = self.make_cert_endpoint_request(params={"ancestors_of": "a" * 32})
         self.assertEqual(len(data), 0)
 
         # check that no certificates are returned when profile doesn't match
-        _, data = self.make_cert_endpoint_request(params={'ancestors_of': self.subset_cert2_with_key.id, "profile": "namelessone"})
+        _, data = self.make_cert_endpoint_request(
+            params={
+                "ancestors_of": self.subset_cert2_with_key.id,
+                "profile": "namelessone",
+            }
+        )
         self.assertEqual(len(data), 0)
 
         # check that certificates are returned when profile does match
-        _, data = self.make_cert_endpoint_request(params={'ancestors_of': self.subset_cert2_with_key.id, "profile": self.profile})
+        _, data = self.make_cert_endpoint_request(
+            params={
+                "ancestors_of": self.subset_cert2_with_key.id,
+                "profile": self.profile,
+            }
+        )
         self.assertEqual(len(data), 2)
 
     def test_certificate_full_list_request(self):
@@ -296,13 +369,14 @@ class CertificateListingTestCase(CertificateTestCaseMixin, APITestCase):
 
 
 class CertificateCreationTestCase(CertificateTestCaseMixin, APITestCase):
-
     def make_csr(self, parent, **kwargs):
         key = Key()
         params = {
             "parent": parent.id,
             "profile": kwargs.get("profile", self.profile),
-            "scope_definition": kwargs.get("scope_definition", parent.scope_definition_id),
+            "scope_definition": kwargs.get(
+                "scope_definition", parent.scope_definition_id
+            ),
             "scope_version": kwargs.get("scope_version", parent.scope_version),
             "scope_params": kwargs.get("scope_params", parent.scope_params),
             "public_key": kwargs.get("public_key", key.get_public_key_string()),
@@ -341,8 +415,7 @@ class CertificateCreationTestCase(CertificateTestCaseMixin, APITestCase):
 
     def test_certificate_creation_fails_for_wrong_profile(self):
         self.assert_certificate_creation_fails_with_bad_parameters(
-            parent=self.root_cert1_with_key,
-            profile="covfefe"
+            parent=self.root_cert1_with_key, profile="covfefe"
         )
 
     def test_certificate_creation_fails_for_parent_with_no_private_key(self):
@@ -366,17 +439,26 @@ class CertificateCreationTestCase(CertificateTestCaseMixin, APITestCase):
     @override_settings(ALLOW_CERTIFICATE_PUSHING=True)
     def test_certificate_chain_pushing(self):
         # attach nonce value to certificate salt
-        response = self.client.post(reverse('nonces-list'), format='json')
-        self.unsaved_subset_cert.salt = response.json()['id']
+        response = self.client.post(reverse("nonces-list"), format="json")
+        self.unsaved_subset_cert.salt = response.json()["id"]
         self.unsaved_subset_cert.id = self.unsaved_subset_cert.calculate_uuid()
         self.unsaved_root_cert.sign_certificate(self.unsaved_subset_cert)
 
         # push cert chain up to server
-        data = json.dumps(CertificateSerializer([self.unsaved_root_cert, self.unsaved_subset_cert], many=True).data)
-        response = self.client.post(reverse('certificatechain-list'), data=data, format='json')
+        data = json.dumps(
+            CertificateSerializer(
+                [self.unsaved_root_cert, self.unsaved_subset_cert], many=True
+            ).data
+        )
+        response = self.client.post(
+            reverse("certificatechain-list"), data=data, format="json"
+        )
         self.assertEqual(response.status_code, 201)
         saved_subset_cert = Certificate.objects.get(id=self.unsaved_subset_cert.id)
-        self.assertEqual(saved_subset_cert.private_key.get_private_key_string(), self.sharedkey.private_key.get_private_key_string())
+        self.assertEqual(
+            saved_subset_cert.private_key.get_private_key_string(),
+            self.sharedkey.private_key.get_private_key_string(),
+        )
 
     @override_settings(ALLOW_CERTIFICATE_PUSHING=True)
     def test_certificate_chain_pushing_fails_for_nonce(self):
@@ -386,8 +468,14 @@ class CertificateCreationTestCase(CertificateTestCaseMixin, APITestCase):
         self.unsaved_root_cert.sign_certificate(self.unsaved_subset_cert)
 
         # push cert chain up to server
-        data = json.dumps(CertificateSerializer([self.unsaved_root_cert, self.unsaved_subset_cert], many=True).data)
-        response = self.client.post(reverse('certificatechain-list'), data=data, format='json')
+        data = json.dumps(
+            CertificateSerializer(
+                [self.unsaved_root_cert, self.unsaved_subset_cert], many=True
+            ).data
+        )
+        response = self.client.post(
+            reverse("certificatechain-list"), data=data, format="json"
+        )
         self.assertEqual(response.status_code, 403)
 
     @override_settings(ALLOW_CERTIFICATE_PUSHING=True)
@@ -398,15 +486,20 @@ class CertificateCreationTestCase(CertificateTestCaseMixin, APITestCase):
         self.unsaved_root_cert.sign_certificate(self.unsaved_subset_cert)
 
         # push cert chain up to server
-        data = json.dumps(CertificateSerializer([self.unsaved_root_cert, self.unsaved_subset_cert], many=True).data)
-        response = self.client.post(reverse('certificatechain-list'), data=data, format='json')
+        data = json.dumps(
+            CertificateSerializer(
+                [self.unsaved_root_cert, self.unsaved_subset_cert], many=True
+            ).data
+        )
+        response = self.client.post(
+            reverse("certificatechain-list"), data=data, format="json"
+        )
         self.assertEqual(response.status_code, 400)
 
 
 class NonceCreationTestCase(APITestCase):
-
     def test_nonces_can_be_created(self):
-        response = self.client.post(reverse('nonces-list'), {}, format='json')
+        response = self.client.post(reverse("nonces-list"), {}, format="json")
         data = json.loads(response.content.decode())
         self.assertEqual(response.status_code, 201)
         nonces = Nonce.objects.all()
@@ -414,48 +507,63 @@ class NonceCreationTestCase(APITestCase):
         self.assertEqual(nonces[0].id, data["id"])
 
     def test_nonces_list_cannot_be_read(self):
-        response = self.client.get(reverse('nonces-list'), {}, format='json')
-        self.assertEqual(response.status_code, 403)
+        response = self.client.get(reverse("nonces-list"), {}, format="json")
+        self.assertEqual(response.status_code, 405)
         nonces = Nonce.objects.all()
         self.assertEqual(nonces.count(), 0)
 
     def test_nonces_item_cannot_be_read(self):
         # create the nonce
-        response = self.client.post(reverse('nonces-list'), {}, format='json')
+        response = self.client.post(reverse("nonces-list"), {}, format="json")
         data = json.loads(response.content.decode())
         # try to read the nonce
-        response = self.client.get(reverse('nonces-detail', kwargs={"pk": data["id"]}), {}, format='json')
-        self.assertEqual(response.status_code, 403)
+        with self.assertRaises(NoReverseMatch):
+            response = self.client.get(
+                reverse("nonces-detail", kwargs={"pk": data["id"]}), {}, format="json"
+            )
+            self.assertEqual(response.status_code, 403)
 
 
 class SyncSessionEndpointTestCase(CertificateTestCaseMixin, APITestCase):
+    def _get_nonce(self):
+        response = self.client.post(reverse("nonces-list"), {}, format="json")
+        return json.loads(response.content.decode())["id"]
 
     def get_initial_syncsession_data_for_request(self):
-
         # fetch a nonce value to use in creating the syncsession
-        response = self.client.post(reverse('nonces-list'), {}, format='json')
-        nonce = json.loads(response.content.decode())["id"]
+        nonce = self._get_nonce()
 
         # prepare the data to send in the syncsession creation request
         data = {
             "id": uuid.uuid4().hex,
             "server_certificate_id": self.root_cert1_with_key.id,
             "client_certificate_id": self.sub_subset_cert1_with_key.id,
-            "certificate_chain": json.dumps(CertificateSerializer(self.sub_subset_cert1_with_key.get_ancestors(include_self=True), many=True).data),
+            "certificate_chain": json.dumps(
+                CertificateSerializer(
+                    self.sub_subset_cert1_with_key.get_ancestors(include_self=True),
+                    many=True,
+                ).data
+            ),
             "connection_path": "http://127.0.0.1:8000",
-            "instance": json.dumps(InstanceIDSerializer(InstanceIDModel.get_or_create_current_instance()[0]).data),
+            "instance": json.dumps(
+                InstanceIDSerializer(
+                    InstanceIDModel.get_or_create_current_instance()[0]
+                ).data
+            ),
             "nonce": nonce,
         }
 
         # sign the nonce/ID combo to attach to the request
-        data["signature"] = self.sub_subset_cert1_with_key.sign("{nonce}:{id}".format(**data))
+        data["signature"] = self.sub_subset_cert1_with_key.sign(
+            "{nonce}:{id}".format(**data)
+        )
 
         return data
 
     def assertSyncSessionCreationFails(self, data, status_code=403):
 
         # make the API call to attempt to create the SyncSession, and make sure it was denied
-        response = self.client.post(reverse('syncsessions-list'), data, format='json')
+        response = self.client.post(reverse("syncsessions-list"), data, format="json")
         self.assertEqual(response.status_code, status_code)
 
         # check that the syncsession was not created
@@ -471,7 +579,7 @@ class SyncSessionEndpointTestCase(CertificateTestCaseMixin, APITestCase):
         self.assertEqual(Certificate.objects.count(), self.original_cert_count - 2)
 
         # make the API call to create the SyncSession
-        response = self.client.post(reverse('syncsessions-list'), data, format='json')
+        response = self.client.post(reverse("syncsessions-list"), data, format="json")
         self.assertEqual(response.status_code, 201)
 
         # check that the cert chain was deserialized
@@ -480,8 +588,12 @@ class SyncSessionEndpointTestCase(CertificateTestCaseMixin, APITestCase):
         # check that the syncsession was created
         syncsession = SyncSession.objects.get()
         self.assertEqual(syncsession.id, data["id"])
-        self.assertEqual(syncsession.server_certificate_id, data["server_certificate_id"])
-        self.assertEqual(syncsession.client_certificate_id, data["client_certificate_id"])
+        self.assertEqual(
+            syncsession.server_certificate_id, data["server_certificate_id"]
+        )
+        self.assertEqual(
+            syncsession.client_certificate_id, data["client_certificate_id"]
+        )
         self.assertTrue(syncsession.active)
 
     def test_syncsession_creation_fails_with_bad_signature(self):
@@ -496,7 +608,11 @@ class SyncSessionEndpointTestCase(CertificateTestCaseMixin, APITestCase):
 
         data = self.get_initial_syncsession_data_for_request()
 
-        data["certificate_chain"] = json.dumps(CertificateSerializer(self.subset_cert2_with_key.get_ancestors(include_self=True), many=True).data)
+        data["certificate_chain"] = json.dumps(
+            CertificateSerializer(
+                self.subset_cert2_with_key.get_ancestors(include_self=True), many=True
+            ).data
+        )
 
         self.assertSyncSessionCreationFails(data)
 
@@ -504,7 +620,11 @@ class SyncSessionEndpointTestCase(CertificateTestCaseMixin, APITestCase):
 
         data = self.get_initial_syncsession_data_for_request()
 
-        Nonce.objects.all().update(timestamp=timezone.datetime(2000, 1, 1, tzinfo=timezone.get_current_timezone()))
+        Nonce.objects.all().update(
+            timestamp=timezone.datetime(
+                2000, 1, 1, tzinfo=timezone.get_current_timezone()
+            )
+        )
 
         self.assertSyncSessionCreationFails(data)
 
@@ -531,7 +651,9 @@ class SyncSessionEndpointTestCase(CertificateTestCaseMixin, APITestCase):
         syncsession = SyncSession.objects.get()
         self.assertEqual(syncsession.active, True)
 
-        response = self.client.delete(reverse('syncsessions-detail', kwargs={"pk": syncsession.id}), format='json')
+        response = self.client.delete(
+            reverse("syncsessions-detail", kwargs={"pk": syncsession.id}), format="json"
+        )
         self.assertEqual(response.status_code, 204)
 
         # check that the syncsession was "deleted" but not _deleted_
@@ -546,12 +668,22 @@ class SyncSessionEndpointTestCase(CertificateTestCaseMixin, APITestCase):
         syncsession.active = False
         syncsession.save()
 
-        response = self.client.delete(reverse('syncsessions-detail', kwargs={"pk": syncsession.id}), format='json')
+        response = self.client.delete(
+            reverse("syncsessions-detail", kwargs={"pk": syncsession.id}), format="json"
+        )
         self.assertEqual(response.status_code, 404)
+
+    def test_get_sync_session(self):
+        data = self.get_initial_syncsession_data_for_request()
+        self.client.post(reverse("syncsessions-list"), data, format="json")
+
+        response = self.client.get(
+            reverse("syncsessions-detail", kwargs={"pk": data["id"]})
+        )
+        self.assertEqual(response.status_code, 200)
 
 
 class TransferSessionEndpointTestCase(CertificateTestCaseMixin, APITestCase):
-
     def test_transfersession_can_be_created(self):
 
         self.make_transfersession_creation_request(
@@ -562,11 +694,15 @@ class TransferSessionEndpointTestCase(CertificateTestCaseMixin, APITestCase):
     def test_transfersession_can_be_created_with_smaller_subset_filter(self):
 
         self.make_transfersession_creation_request(
-            filter=str(self.sub_subset_cert1_with_key.get_scope().read_filter).split()[0],
+            filter=str(self.sub_subset_cert1_with_key.get_scope().read_filter).split()[
+                0
+            ],
             push=False,
         )
 
-    def test_transfersession_creation_fails_for_push_when_filter_not_in_client_write_scope(self):
+    def test_transfersession_creation_fails_for_push_when_filter_not_in_client_write_scope(
+        self,
+    ):
 
         self.make_transfersession_creation_request(
             filter=str(self.root_cert1_with_key.get_scope().read_filter),
@@ -575,7 +711,9 @@ class TransferSessionEndpointTestCase(CertificateTestCaseMixin, APITestCase):
             expected_message="Client certificate scope does not permit pushing",
         )
 
-    def test_transfersession_creation_fails_for_push_when_filter_not_in_server_read_scope(self):
+    def test_transfersession_creation_fails_for_push_when_filter_not_in_server_read_scope(
+        self,
+    ):
 
         syncsession = self.create_syncsession(
             client_certificate=self.root_cert1_with_key,
@@ -590,7 +728,9 @@ class TransferSessionEndpointTestCase(CertificateTestCaseMixin, APITestCase):
             expected_message="Server certificate scope does not permit receiving pushes",
         )
 
-    def test_transfersession_creation_fails_for_pull_when_filter_not_in_client_read_scope(self):
+    def test_transfersession_creation_fails_for_pull_when_filter_not_in_client_read_scope(
+        self,
+    ):
 
         self.make_transfersession_creation_request(
             filter=str(self.root_cert1_with_key.get_scope().read_filter),
@@ -599,7 +739,9 @@ class TransferSessionEndpointTestCase(CertificateTestCaseMixin, APITestCase):
             expected_message="Client certificate scope does not permit pulling",
         )
 
-    def test_transfersession_creation_fails_for_pull_when_filter_not_in_server_write_scope(self):
+    def test_transfersession_creation_fails_for_pull_when_filter_not_in_server_write_scope(
+        self,
+    ):
 
         syncsession = self.create_syncsession(
             client_certificate=self.root_cert1_with_key,
@@ -648,6 +790,9 @@ class TransferSessionEndpointTestCase(CertificateTestCaseMixin, APITestCase):
         self.test_transfersession_can_be_created()
 
         transfersession = TransferSession.objects.get()
+        transfersession.update_state(
+            stage=transfer_stages.DESERIALIZING, stage_status=transfer_statuses.COMPLETED
+        )
         self.assertEqual(transfersession.active, True)
 
         self._delete_transfer_session(transfersession)
@@ -658,13 +803,18 @@ class TransferSessionEndpointTestCase(CertificateTestCaseMixin, APITestCase):
 
         transfersession = TransferSession.objects.get()
         transfersession.records_total = None
-        transfersession.save()
+        transfersession.update_state(
+            stage=transfer_stages.DESERIALIZING, stage_status=transfer_statuses.COMPLETED
+        )
 
         self._delete_transfer_session(transfersession)
 
     def _delete_transfer_session(self, transfersession):
 
-        response = self.client.delete(reverse('transfersessions-detail', kwargs={"pk": transfersession.id}), format='json')
+        response = self.client.delete(
+            reverse("transfersessions-detail", kwargs={"pk": transfersession.id}),
+            format="json",
+        )
         self.assertEqual(response.status_code, 204)
 
         # check that the transfersession was "deleted"
@@ -681,16 +831,22 @@ class TransferSessionEndpointTestCase(CertificateTestCaseMixin, APITestCase):
         transfersession.active = False
         transfersession.save()
 
-        response = self.client.delete(reverse('transfersessions-detail', kwargs={"pk": transfersession.id}), format='json')
+        response = self.client.delete(
+            reverse("transfersessions-detail", kwargs={"pk": transfersession.id}),
+            format="json",
+        )
         self.assertEqual(response.status_code, 404)
 
 
 class BufferEndpointTestCase(CertificateTestCaseMixin, APITestCase):
-
     def setUp(self):
         super(BufferEndpointTestCase, self).setUp()
-        self.default_push_filter = str(self.sub_subset_cert1_with_key.get_scope().write_filter)
-        self.default_pull_filter = str(self.sub_subset_cert1_with_key.get_scope().read_filter)
+        self.default_push_filter = str(
+            self.sub_subset_cert1_with_key.get_scope().write_filter
+        )
+        self.default_pull_filter = str(
+            self.sub_subset_cert1_with_key.get_scope().read_filter
+        )
 
     def build_buffer_item(self, **kwargs):
 
@@ -703,11 +859,17 @@ class BufferEndpointTestCase(CertificateTestCaseMixin, APITestCase):
         server_cert = kwargs["transfer_session"].sync_session.client_certificate
         push = kwargs["transfer_session"].push
 
-        filt = server_cert.get_scope().write_filter if push else server_cert.get_scope().read_filter
+        filt = (
+            server_cert.get_scope().write_filter
+            if push
+            else server_cert.get_scope().read_filter
+        )
         partition = filt._filter_tuple[0] + ":furthersubpart"
 
         data = {
-            "profile": kwargs.get("profile", kwargs["transfer_session"].sync_session.profile),
+            "profile": kwargs.get(
+                "profile", kwargs["transfer_session"].sync_session.profile
+            ),
             "serialized": kwargs.get("serialized", '{"test": 99}'),
             "deleted": kwargs.get("deleted", False),
             "last_saved_instance": kwargs.get("last_saved_instance", uuid.uuid4().hex),
@@ -715,14 +877,18 @@ class BufferEndpointTestCase(CertificateTestCaseMixin, APITestCase):
             "partition": kwargs.get("partition", partition),
             "source_id": kwargs.get("source_id", uuid.uuid4().hex),
             "model_name": kwargs.get("model_name", "contentsummarylog"),
-            "conflicting_serialized_data": kwargs.get("conflicting_serialized_data", ""),
+            "conflicting_serialized_data": kwargs.get(
+                "conflicting_serialized_data", ""
+            ),
             "model_uuid": kwargs.get("model_uuid", None),
             "transfer_session": kwargs["transfer_session"],
         }
 
         if not data["model_uuid"]:
             Model = syncable_models.get_model(data["profile"], data["model_name"])
-            data["model_uuid"] = Model.compute_namespaced_id(data["partition"], data["source_id"], data["model_name"])
+            data["model_uuid"] = Model.compute_namespaced_id(
+                data["partition"], data["source_id"], data["model_name"]
+            )
 
         buffermodel = Buffer.objects.create(**data)
 
@@ -741,22 +907,20 @@ class BufferEndpointTestCase(CertificateTestCaseMixin, APITestCase):
 
         # extract that data that is to be posted
         data = serialized_recs.data
-        headers = {
-            'format': 'json'
-        }
+        headers = {"format": "json"}
 
         # gzip the content before sending the request
         if gzip:
             new_data = json.dumps([dict(el) for el in data])
-            data = compress_string(bytes(new_data.encode('utf-8')))
-            headers['content_type'] = 'application/gzip'
-            headers['format'] = None
+            data = compress_string(bytes(new_data.encode("utf-8")))
+            headers["content_type"] = "application/gzip"
+            headers["format"] = None
 
         # delete the records from the DB so we don't conflict when we POST
         Buffer.objects.all().delete()
         RecordMaxCounterBuffer.objects.all().delete()
 
-        response = self.client.post(reverse('buffers-list'), data, **headers)
+        response = self.client.post(reverse("buffers-list"), data, **headers)
         self.assertEqual(response.status_code, expected_status)
         if expected_status == 201:
             # check that the buffer items were created
@@ -767,9 +931,13 @@ class BufferEndpointTestCase(CertificateTestCaseMixin, APITestCase):
 
     def test_push_valid_gzipped_buffer_chunk(self):
         rec_1 = self.build_buffer_item(push=True, filter=self.default_push_filter)
-        rec_2 = self.build_buffer_item(serialized=u'unicode', transfer_session=rec_1.transfer_session)
+        rec_2 = self.build_buffer_item(
+            serialized=u"unicode", transfer_session=rec_1.transfer_session
+        )
         rec_3 = self.build_buffer_item(transfer_session=rec_1.transfer_session)
-        self.make_buffer_post_request([rec_1, rec_2, rec_3], expected_status=201, gzip=True)
+        self.make_buffer_post_request(
+            [rec_1, rec_2, rec_3], expected_status=201, gzip=True
+        )
 
     def test_push_valid_buffer_chunk(self):
         rec_1 = self.build_buffer_item(push=True, filter=self.default_push_filter)
@@ -779,14 +947,20 @@ class BufferEndpointTestCase(CertificateTestCaseMixin, APITestCase):
 
     def test_push_with_invalid_model_uuid(self):
         rec_1 = self.build_buffer_item(push=True, filter=self.default_push_filter)
-        rec_2 = self.build_buffer_item(transfer_session=rec_1.transfer_session, model_uuid=uuid.uuid4().hex, model_name='facility')
+        rec_2 = self.build_buffer_item(
+            transfer_session=rec_1.transfer_session,
+            model_uuid=uuid.uuid4().hex,
+            model_name="facility",
+        )
         rec_3 = self.build_buffer_item(transfer_session=rec_1.transfer_session)
         self.make_buffer_post_request([rec_1, rec_2, rec_3], expected_status=400)
 
     def test_push_with_partition_not_in_filter(self):
         rec_1 = self.build_buffer_item(push=True, filter=self.default_push_filter)
         rec_2 = self.build_buffer_item(transfer_session=rec_1.transfer_session)
-        rec_3 = self.build_buffer_item(transfer_session=rec_1.transfer_session, partition=uuid.uuid4().hex)
+        rec_3 = self.build_buffer_item(
+            transfer_session=rec_1.transfer_session, partition=uuid.uuid4().hex
+        )
         self.make_buffer_post_request([rec_1, rec_2, rec_3], expected_status=400)
 
     def test_push_fails_for_pull_transfersession(self):
@@ -813,22 +987,24 @@ class BufferEndpointTestCase(CertificateTestCaseMixin, APITestCase):
             records.append(self.build_buffer_item(transfer_session=transfer_session))
 
         # also make some dummy records so we can make sure they don't get returned
-        records.append(self.build_buffer_item(push=False, filter=self.default_pull_filter))
-        records.append(self.build_buffer_item(transfer_session=records[-1].transfer_session))
+        records.append(
+            self.build_buffer_item(push=False, filter=self.default_pull_filter)
+        )
+        records.append(
+            self.build_buffer_item(transfer_session=records[-1].transfer_session)
+        )
 
         # save all the records to the database
         [rec.save() for rec in records]
 
         return records[0].transfer_session.id
 
-    def make_buffer_get_request(self, expected_status=200, expected_count=None, **get_params):
+    def make_buffer_get_request(
+        self, expected_status=200, expected_count=None, **get_params
+    ):
         """Make a GET request to the buffer endpoint. Warning: Deletes the local buffer instances before validating."""
 
-        response = self.client.get(
-            reverse('buffers-list'),
-            get_params,
-            format='json'
-        )
+        response = self.client.get(reverse("buffers-list"), get_params, format="json")
 
         self.assertEqual(response.status_code, expected_status)
 
@@ -850,14 +1026,23 @@ class BufferEndpointTestCase(CertificateTestCaseMixin, APITestCase):
             model_uuids = [d["model_uuid"] for d in data]
 
             # delete "local" buffer records to avoid uniqueness constraint failures in validation
-            Buffer.objects.filter(transfer_session_id=t_id, model_uuid__in=model_uuids).delete()
+            Buffer.objects.filter(
+                transfer_session_id=t_id, model_uuid__in=model_uuids
+            ).delete()
 
             # run the validation logic to ensure no errors were returned
-            errors = validate_and_create_buffer_data(data, TransferSession.objects.get(id=t_id))
+            errors = validate_and_create_buffer_data(
+                data, TransferSession.objects.get(id=t_id)
+            )
             self.assertFalse(errors)
 
             # check that the correct number of buffer items were created
-            self.assertEqual(expected_count, Buffer.objects.filter(transfer_session_id=t_id, model_uuid__in=model_uuids).count())
+            self.assertEqual(
+                expected_count,
+                Buffer.objects.filter(
+                    transfer_session_id=t_id, model_uuid__in=model_uuids
+                ).count(),
+            )
 
             # check that the correct number of buffer items was returned
             self.assertEqual(expected_count, len(data))
@@ -937,30 +1122,34 @@ class BufferEndpointTestCase(CertificateTestCaseMixin, APITestCase):
 
 
 class MorangoInfoTestCase(APITestCase):
-
     def setUp(self):
         InstanceIDModel.get_or_create_current_instance()
-        self.m_info = self.client.get(reverse('morangoinfo-detail', kwargs={"pk": 1}), format='json')
+        self.m_info = self.client.get(
+            reverse("morangoinfo-detail", kwargs={"pk": 1}), format="json"
+        )
 
     def test_id_changes_id_hash_changes(self):
-        old_id_hash = self.m_info.data['instance_hash']
+        old_id_hash = self.m_info.data["instance_hash"]
         with EnvironmentVarGuard() as env:
-            env['MORANGO_SYSTEM_ID'] = 'new_sys_id'
+            env["MORANGO_SYSTEM_ID"] = "new_sys_id"
             InstanceIDModel.get_or_create_current_instance(clear_cache=True)
-            m_info = self.client.get(reverse('morangoinfo-detail', kwargs={"pk": 1}), format='json')
-        self.assertNotEqual(m_info.data['instance_hash'], old_id_hash)
+            m_info = self.client.get(
+                reverse("morangoinfo-detail", kwargs={"pk": 1}), format="json"
+            )
+        self.assertNotEqual(m_info.data["instance_hash"], old_id_hash)
 
 
 class PublicKeyTestCase(APITestCase):
-
     def setUp(self):
         self.key = SharedKey.get_or_create_shared_key()
 
     @override_settings(ALLOW_CERTIFICATE_PUSHING=True)
     def test_get_public_key(self):
-        response = self.client.get(reverse('publickey-list'), format='json')
-        self.assertEqual(response.data[0]['public_key'], self.key.public_key.get_public_key_string())
+        response = self.client.get(reverse("publickey-list"), format="json")
+        self.assertEqual(
+            response.data[0]["public_key"], self.key.public_key.get_public_key_string()
+        )
 
     def test_can_not_get_public_key(self):
-        response = self.client.get(reverse('publickey-list'), format='json')
+        response = self.client.get(reverse("publickey-list"), format="json")
         self.assertEqual(response.status_code, 403)

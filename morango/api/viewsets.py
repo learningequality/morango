@@ -1,8 +1,8 @@
 import json
 import platform
 import uuid
+import logging
 
-from django.conf import settings
 from django.core.exceptions import ValidationError
 from django.utils import timezone
 from ipware.ip import get_ip
@@ -14,23 +14,24 @@ from rest_framework import viewsets
 from rest_framework.parsers import JSONParser
 
 import morango
-from . import permissions
-from . import serializers
-from .. import errors
-from ..models import certificates
-from ..models import core
+from morango import errors
+from morango.api import permissions
+from morango.api import serializers
+from morango.constants import transfer_stages
+from morango.constants import transfer_statuses
+from morango.constants.capabilities import ASYNC_OPERATIONS
 from morango.constants.capabilities import GZIP_BUFFER_POST
+from morango.models import certificates
 from morango.models.core import Buffer
-from morango.models.core import DatabaseMaxCounter
+from morango.models.core import Certificate
 from morango.models.core import InstanceIDModel
-from morango.models.core import RecordMaxCounterBuffer
+from morango.models.core import SyncSession
+from morango.models.core import TransferSession
 from morango.models.fields.crypto import SharedKey
-from morango.sync.operations import _dequeue_into_store
-from morango.sync.operations import _queue_into_buffer
-from morango.sync.operations import _serialize_into_store
-from morango.sync.operations import OperationLogger
-from morango.sync.utils import validate_and_create_buffer_data
+from morango.sync.context import LocalSessionContext
+from morango.sync.controller import SessionController
 from morango.utils import CAPABILITIES
+from morango.utils import parse_capabilities_from_server_request
 
 
 if GZIP_BUFFER_POST in CAPABILITIES:
@@ -39,6 +40,23 @@ if GZIP_BUFFER_POST in CAPABILITIES:
     parsers = (GzipParser, JSONParser)
 else:
     parsers = (JSONParser,)
+
+
+def controller_signal_logger(context=None):
+    assert context is not None
+
+    if context.stage_status == transfer_statuses.PENDING:
+        logging.info("Starting stage '{}'".format(context.stage))
+    elif context.stage_status == transfer_statuses.STARTED:
+        logging.info("Stage '{}' is in progress".format(context.stage))
+    elif context.stage_status == transfer_statuses.COMPLETED:
+        logging.info("Completed stage '{}'".format(context.stage))
+    elif context.stage_status == transfer_statuses.ERRORED:
+        logging.info("Encountered error during stage '{}'".format(context.stage))
+
+
+session_controller = SessionController.build()
+session_controller.signals.connect(controller_signal_logger)
 
 
 class CertificateChainViewSet(viewsets.ViewSet):
@@ -51,7 +69,7 @@ class CertificateChainViewSet(viewsets.ViewSet):
 
         # verify the rest of the cert chain
         try:
-            core.Certificate.save_certificate_chain(cert_chain)
+            Certificate.save_certificate_chain(cert_chain)
         except (AssertionError, errors.MorangoCertificateError) as e:
             return response.Response(
                 "Saving certificate chain has failed: {}".format(str(e)),
@@ -59,7 +77,7 @@ class CertificateChainViewSet(viewsets.ViewSet):
             )
 
         # create an in-memory instance of the cert from the serialized data and signature
-        certificate = core.Certificate.deserialize(
+        certificate = Certificate.deserialize(
             client_cert["serialized"], client_cert["signature"]
         )
 
@@ -105,7 +123,12 @@ class CertificateChainViewSet(viewsets.ViewSet):
         )
 
 
-class CertificateViewSet(viewsets.ModelViewSet):
+class CertificateViewSet(
+    viewsets.mixins.CreateModelMixin,
+    viewsets.mixins.RetrieveModelMixin,
+    viewsets.mixins.ListModelMixin,
+    viewsets.GenericViewSet,
+):
     permission_classes = (permissions.CertificatePermissions,)
     serializer_class = serializers.CertificateSerializer
     authentication_classes = (permissions.BasicMultiArgumentAuthentication,)
@@ -117,7 +140,7 @@ class CertificateViewSet(viewsets.ModelViewSet):
         if serialized_cert.is_valid():
 
             # inflate the provided data into an actual in-memory certificate
-            certificate = core.Certificate(**serialized_cert.validated_data)
+            certificate = Certificate(**serialized_cert.validated_data)
 
             # add a salt, ID and signature to the certificate
             certificate.salt = uuid.uuid4().hex
@@ -162,7 +185,7 @@ class CertificateViewSet(viewsets.ModelViewSet):
 
         params = self.request.query_params
 
-        base_queryset = core.Certificate.objects
+        base_queryset = Certificate.objects
 
         # filter by profile, if requested
         if "profile" in params:
@@ -184,7 +207,7 @@ class CertificateViewSet(viewsets.ModelViewSet):
                 )
                 return target_cert.get_ancestors(include_self=True)
 
-        except core.Certificate.DoesNotExist:
+        except Certificate.DoesNotExist:
             # if the target_cert can't be found, just return an empty queryset
             return base_queryset.none()
 
@@ -192,8 +215,7 @@ class CertificateViewSet(viewsets.ModelViewSet):
         return base_queryset.exclude(_private_key=None)
 
 
-class NonceViewSet(viewsets.ModelViewSet):
-    permission_classes = (permissions.NoncePermissions,)
+class NonceViewSet(viewsets.mixins.CreateModelMixin, viewsets.GenericViewSet):
     serializer_class = serializers.NonceSerializer
 
     def create(self, request):
@@ -204,17 +226,20 @@ class NonceViewSet(viewsets.ModelViewSet):
         )
 
 
-class SyncSessionViewSet(viewsets.ModelViewSet):
-    permission_classes = (permissions.SyncSessionPermissions,)
+class SyncSessionViewSet(
+    viewsets.mixins.DestroyModelMixin,
+    viewsets.mixins.RetrieveModelMixin,
+    viewsets.GenericViewSet,
+):
     serializer_class = serializers.SyncSessionSerializer
 
     def create(self, request):
 
-        instance_id, _ = core.InstanceIDModel.get_or_create_current_instance()
+        instance_id, _ = InstanceIDModel.get_or_create_current_instance()
 
         # verify and save the certificate chain to our cert store
         try:
-            core.Certificate.save_certificate_chain(
+            Certificate.save_certificate_chain(
                 request.data.get("certificate_chain"),
                 expected_last_id=request.data.get("client_certificate_id"),
             )
@@ -225,13 +250,13 @@ class SyncSessionViewSet(viewsets.ModelViewSet):
 
         # attempt to load the requested certificates
         try:
-            server_cert = core.Certificate.objects.get(
+            server_cert = Certificate.objects.get(
                 id=request.data.get("server_certificate_id")
             )
-            client_cert = core.Certificate.objects.get(
+            client_cert = Certificate.objects.get(
                 id=request.data.get("client_certificate_id")
             )
-        except core.Certificate.DoesNotExist:
+        except Certificate.DoesNotExist:
             return response.Response(
                 "Requested certificate does not exist!",
                 status=status.HTTP_400_BAD_REQUEST,
@@ -281,7 +306,7 @@ class SyncSessionViewSet(viewsets.ModelViewSet):
             ),
         }
 
-        syncsession = core.SyncSession(**data)
+        syncsession = SyncSession(**data)
         syncsession.full_clean()
         syncsession.save()
 
@@ -297,21 +322,25 @@ class SyncSessionViewSet(viewsets.ModelViewSet):
         syncsession.save()
 
     def get_queryset(self):
-        return core.SyncSession.objects.filter(active=True)
+        return SyncSession.objects.filter(active=True)
 
 
-class TransferSessionViewSet(viewsets.ModelViewSet):
-    permission_classes = (permissions.TransferSessionPermissions,)
+class TransferSessionViewSet(
+    viewsets.mixins.RetrieveModelMixin,
+    viewsets.mixins.UpdateModelMixin,
+    viewsets.mixins.DestroyModelMixin,
+    viewsets.GenericViewSet,
+):
     serializer_class = serializers.TransferSessionSerializer
 
     def create(self, request):  # noqa: C901
 
         # attempt to load the requested syncsession
         try:
-            syncsession = core.SyncSession.objects.filter(active=True).get(
+            syncsession = SyncSession.objects.filter(active=True).get(
                 id=request.data.get("sync_session_id")
             )
-        except core.SyncSession.DoesNotExist:
+        except SyncSession.DoesNotExist:
             return response.Response(
                 "Requested syncsession does not exist or is no longer active!",
                 status=status.HTTP_400_BAD_REQUEST,
@@ -338,83 +367,92 @@ class TransferSessionViewSet(viewsets.ModelViewSet):
         if scope_error_msg:
             return response.Response(scope_error_msg, status=status.HTTP_403_FORBIDDEN)
 
-        # build the data to be used for creating the transfersession
-        data = {
-            "id": request.data.get("id"),
-            "start_timestamp": timezone.now(),
-            "last_activity_timestamp": timezone.now(),
-            "active": True,
-            "filter": requested_filter,
-            "push": is_a_push,
-            "records_total": request.data.get("records_total") if is_a_push else None,
-            "sync_session": syncsession,
-            "client_fsic": request.data.get("client_fsic") or "{}",
-            "server_fsic": "{}",
-        }
-
-        transfersession = core.TransferSession(**data)
-        transfersession.full_clean()
-        transfersession.save()
-
-        # must update database max counters before calculating fsics
-        if not is_a_push:
-
-            if getattr(settings, "MORANGO_SERIALIZE_BEFORE_QUEUING", True):
-                with OperationLogger("Serializing records", "Serialization complete"):
-                    _serialize_into_store(
-                        transfersession.sync_session.profile, filter=requested_filter
-                    )
-
-        transfersession.server_fsic = json.dumps(
-            DatabaseMaxCounter.calculate_filter_max_counters(requested_filter)
+        context = LocalSessionContext(
+            request=request,
+            sync_session=syncsession,
+            sync_filter=requested_filter,
+            is_push=is_a_push,
         )
-        transfersession.save()
 
-        if not is_a_push:
+        # If both client and ourselves allow async, we just return accepted status, and the client
+        # should PATCH the transfer_session to the appropriate stage. If not async, we wait until
+        # queuing is complete
+        to_stage = (
+            transfer_stages.INITIALIZING
+            if self.async_allowed()
+            else transfer_stages.QUEUING
+        )
+        result = session_controller.proceed_to_and_wait_for(to_stage, context=context)
 
-            # queue records to get ready for pulling
-            with OperationLogger("Queueing records into buffer", "Queueing complete"):
-                _queue_into_buffer(transfersession)
-            # update records_total on transfer session object
-            records_total = Buffer.objects.filter(
-                transfer_session=transfersession
-            ).count()
-            transfersession.records_total = records_total
-            transfersession.save()
+        if result == transfer_statuses.ERRORED:
+            if context.error:
+                raise context.error
+
+            return response.Response(
+                "Failed to initialize session",
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            )
+
+        if result == transfer_statuses.COMPLETED:
+            response_status = status.HTTP_201_CREATED
+        else:
+            response_status = status.HTTP_202_ACCEPTED
 
         return response.Response(
-            serializers.TransferSessionSerializer(transfersession).data,
-            status=status.HTTP_201_CREATED,
+            self.get_serializer(context.transfer_session).data,
+            status=response_status,
         )
 
-    def perform_destroy(self, transfersession):
-        if transfersession.push:
-            # if no records were transferred, we can safely skip the next steps
-            if (
-                transfersession.records_total is not None
-                and transfersession.records_total > 0
-            ):
-                # dequeue into store and then delete records
-                with OperationLogger(
-                    "Dequeuing records into store", "Dequeuing complete"
-                ):
-                    _dequeue_into_store(transfersession)
-                # update database max counters but use latest fsics on server
-                DatabaseMaxCounter.update_fsics(
-                    json.loads(transfersession.client_fsic),
-                    certificates.Filter(transfersession.filter),
+    def update(self, request, *args, **kwargs):
+        if not kwargs.get("partial", False):
+            return response.Response(
+                "Only PATCH updates allowed", status=status.HTTP_405_METHOD_NOT_ALLOWED
+            )
+
+        update_stage = request.data.pop("transfer_stage", None)
+        if update_stage is not None:
+            # if client is trying to update `transfer_stage`, then we use the controller to proceed
+            # to the stage, but wait for completion if both do not support async
+            context = LocalSessionContext(
+                request=request,
+                transfer_session=self.get_object(),
+            )
+            # special case for transferring, not to wait since it's a chunked process
+            if self.async_allowed() or update_stage == transfer_stages.TRANSFERRING:
+                session_controller.proceed_to(update_stage, context=context)
+            else:
+                session_controller.proceed_to_and_wait_for(
+                    update_stage, context=context
                 )
+
+        return super(TransferSessionViewSet, self).update(request, *args, **kwargs)
+
+    def perform_destroy(self, transfer_session):
+        context = LocalSessionContext(
+            request=self.request,
+            transfer_session=transfer_session,
+        )
+        if self.async_allowed():
+            session_controller.proceed_to(transfer_stages.CLEANUP, context=context)
         else:
-            # if pull, then delete records that were queued
-            Buffer.objects.filter(transfer_session=transfersession).delete()
-            RecordMaxCounterBuffer.objects.filter(
-                transfer_session=transfersession
-            ).delete()
-        transfersession.active = False
-        transfersession.save()
+            result = session_controller.proceed_to_and_wait_for(
+                transfer_stages.CLEANUP, context=context
+            )
+            # raise an error for synchronous, if status is false
+            if result == transfer_statuses.ERRORED:
+                raise RuntimeError("Cleanup failed")
 
     def get_queryset(self):
-        return core.TransferSession.objects.filter(active=True)
+        return TransferSession.objects.filter(active=True)
+
+    def async_allowed(self):
+        """
+        :return: A boolean if async ops are allowed by client and self
+        """
+        client_capabilities = parse_capabilities_from_server_request(self.request)
+        return (
+            ASYNC_OPERATIONS in client_capabilities and ASYNC_OPERATIONS in CAPABILITIES
+        )
 
 
 class BufferViewSet(mixins.ListModelMixin, viewsets.GenericViewSet):
@@ -426,9 +464,7 @@ class BufferViewSet(mixins.ListModelMixin, viewsets.GenericViewSet):
     def create(self, request):
         data = request.data if isinstance(request.data, list) else [request.data]
         # ensure the transfer session allows pushes, and is same across records
-        transfer_session = core.TransferSession.objects.get(
-            id=data[0]["transfer_session"]
-        )
+        transfer_session = TransferSession.objects.get(id=data[0]["transfer_session"])
         if not transfer_session.push:
             return response.Response(
                 "Specified TransferSession does not allow pushes.",
@@ -439,15 +475,27 @@ class BufferViewSet(mixins.ListModelMixin, viewsets.GenericViewSet):
                 "All pushed records must be associated with the same TransferSession.",
                 status=status.HTTP_403_FORBIDDEN,
             )
-        validate_and_create_buffer_data(data, transfer_session)
 
-        return response.Response(status=status.HTTP_201_CREATED)
+        context = LocalSessionContext(
+            request=request, transfer_session=transfer_session
+        )
+        result = session_controller.proceed_to(
+            transfer_stages.TRANSFERRING, context=context
+        )
+
+        if result == transfer_statuses.ERRORED:
+            if context.error:
+                raise context.error
+            else:
+                response_status = status.HTTP_500_INTERNAL_SERVER_ERROR
+        else:
+            response_status = status.HTTP_201_CREATED
+
+        return response.Response(status=response_status)
 
     def get_queryset(self):
-
         session_id = self.request.query_params["transfer_session_id"]
-
-        return core.Buffer.objects.filter(transfer_session_id=session_id)
+        return Buffer.objects.filter(transfer_session_id=session_id)
 
 
 class MorangoInfoViewSet(viewsets.ViewSet):

@@ -39,3 +39,5 @@ DATABASES = {
         }
     }
 }
+
+MORANGO_TEST_POSTGRESQL = True

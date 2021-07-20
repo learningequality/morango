@@ -96,3 +96,4 @@ Pipfile
 .idea
 
 tests/testapp/testapp.db
+tests/testapp/testapp2.db

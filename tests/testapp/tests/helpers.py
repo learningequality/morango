@@ -2,9 +2,11 @@
 Helper functions for use across syncing related functionality.
 """
 import uuid
+import json
 
 import factory
 import mock
+from django.test.testcases import LiveServerTestCase
 from django.core.serializers.json import DjangoJSONEncoder
 from django.utils import timezone
 from facility_profile.models import Facility
@@ -13,6 +15,7 @@ from facility_profile.models import MyUser
 from facility_profile.models import SummaryLog
 from test.support import EnvironmentVarGuard
 
+from morango.api.serializers import BufferSerializer
 from morango.models.core import AbstractStore
 from morango.models.core import Buffer
 from morango.models.core import DatabaseIDModel
@@ -22,8 +25,12 @@ from morango.models.core import RecordMaxCounterBuffer
 from morango.models.core import Store
 from morango.models.core import SyncSession
 from morango.models.core import TransferSession
+from morango.sync.context import SessionContext
 from morango.sync.controller import MorangoProfileController
-from morango.sync.syncsession import BaseSyncClient
+from morango.sync.controller import SessionController
+from morango.sync.syncsession import NetworkSyncConnection
+from morango.sync.syncsession import TransferClient
+from morango.sync.syncsession import SyncSessionClient
 
 
 class FacilityFactory(factory.DjangoModelFactory):
@@ -74,8 +81,10 @@ def create_dummy_store_data():
     ]  # counter is at 0
 
     # create controllers for app/store/buffer operations
+    conn = mock.Mock(spec='morango.sync.syncsession.NetworkSyncConnection')
+    conn.server_info = dict(capabilities=[])
     data["mc"] = MorangoProfileController("facilitydata")
-    data["sc"] = BaseSyncClient(None, "host")
+    data["sc"] = TransferClient(conn, "host", SessionController.build())
     session = SyncSession.objects.create(
         id=uuid.uuid4().hex,
         profile="facilitydata",
@@ -338,3 +347,98 @@ def create_buffer_and_store_dummy_data(transfer_session_id):
     )
 
     return data
+
+
+class BaseClientTestCase(LiveServerTestCase):
+    profile = "facilitydata"
+
+    def setUp(self):
+        super(BaseClientTestCase, self).setUp()
+        DatabaseIDModel.objects.create()
+        self.session = SyncSession.objects.create(
+            id=uuid.uuid4().hex,
+            profile=self.profile,
+            last_activity_timestamp=timezone.now(),
+        )
+        self.conn = NetworkSyncConnection(base_url=self.live_server_url)
+        self.conn.chunk_size = 3
+        self.transfer_session = None
+        self.client = self.build_client()
+        self.instance = InstanceIDModel.get_or_create_current_instance(clear_cache=True)[0]
+
+    def build_client(self, client_class=SyncSessionClient, controller=None):
+        client = client_class(self.conn, self.session, controller)
+        self.transferring_mock = mock.Mock()
+        client.signals.transferring.connect(self.transferring_mock)
+        return client
+
+    def build_buffer_items(self, transfer_session, **kwargs):
+        data = {
+            "profile": kwargs.get("profile", self.profile),
+            "serialized": kwargs.get("serialized", '{"test": 99}'),
+            "deleted": kwargs.get("deleted", False),
+            "last_saved_instance": kwargs.get("last_saved_instance", uuid.uuid4().hex),
+            "last_saved_counter": kwargs.get("last_saved_counter", 179),
+            "partition": kwargs.get("partition", "partition"),
+            "source_id": kwargs.get("source_id", uuid.uuid4().hex),
+            "model_name": kwargs.get("model_name", "contentsummarylog"),
+            "conflicting_serialized_data": kwargs.get(
+                "conflicting_serialized_data", ""
+            ),
+            "model_uuid": kwargs.get("model_uuid", None),
+            "transfer_session": transfer_session,
+        }
+
+        for i in range(self.conn.chunk_size):
+            data["source_id"] = uuid.uuid4().hex
+            data["model_uuid"] = SummaryLog.compute_namespaced_id(
+                data["partition"], data["source_id"], data["model_name"]
+            )
+            Buffer.objects.create(**data)
+
+        buffered_items = Buffer.objects.filter(
+            transfer_session=transfer_session
+        )
+        serialized_records = BufferSerializer(buffered_items, many=True)
+        return json.dumps(serialized_records.data)
+
+
+class BaseTransferClientTestCase(BaseClientTestCase):
+    def build_client(self, client_class=TransferClient, controller=None, update_context=False):
+        if not self.transfer_session:
+            self.transfer_session = TransferSession.objects.create(
+                id=uuid.uuid4().hex,
+                sync_session=self.session,
+                filter="partition",
+                push=True,
+                last_activity_timestamp=timezone.now(),
+                records_total=3,
+            )
+
+        client = super(BaseTransferClientTestCase, self).build_client(client_class=client_class, controller=controller)
+        client.current_transfer_session = self.transfer_session
+        if client.local_context.is_push is None:
+            client.local_context.update(is_push=self.transfer_session.push)
+            client.remote_context.update(is_push=self.transfer_session.push)
+        if update_context:
+            client.local_context.update(transfer_session=self.transfer_session)
+            client.remote_context.update(transfer_session=self.transfer_session)
+        return client
+
+
+class TestSessionContext(SessionContext):
+    __test__ = False
+    _stage = None
+    _stage_status = None
+
+    @property
+    def stage(self):
+        return self._stage
+
+    @property
+    def stage_status(self):
+        return self._stage_status
+
+    def update_state(self, stage=None, stage_status=None):
+        self._stage = stage or self._stage
+        self._stage_status = stage_status or self._stage_status

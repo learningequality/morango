@@ -70,7 +70,9 @@ class mute_signals(object):
         return wrapper
 
 
-def validate_and_create_buffer_data(data, transfer_session, connection=None):  # noqa: C901
+def validate_and_create_buffer_data(  # noqa: C901
+    data, transfer_session, connection=None
+):
     data = copy.deepcopy(data)
     rmcb_list = []
     buffer_list = []
@@ -151,6 +153,8 @@ class SyncSignal(object):
     """
     Helper class for firing signals from the sync client
     """
+
+    __slots__ = ("_handlers", "_defaults")
 
     def __init__(self, **kwargs_defaults):
         """
