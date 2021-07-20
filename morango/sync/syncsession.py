@@ -120,6 +120,8 @@ class NetworkSyncConnection(Connection):
         The underlying network connection with a syncing peer. Any network requests
         (such as certificate querying or syncing related) will be done through this class.
         """
+        if base_url == "":
+            raise AssertionError("Network connection `base_url` cannot be empty")
 
         self.base_url = base_url
         self.compresslevel = compresslevel

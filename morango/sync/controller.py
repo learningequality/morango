@@ -48,10 +48,10 @@ class MorangoProfileController(object):
                 self.profile, filter=filter, skip_erroring=skip_erroring
             )
 
-    def create_network_connection(self, base_url):
+    def create_network_connection(self, base_url, **kwargs):
         from morango.sync.syncsession import NetworkSyncConnection
-
-        return NetworkSyncConnection(base_url=base_url)
+        kwargs.update(base_url=base_url)
+        return NetworkSyncConnection(**kwargs)
 
     def create_disk_connection(path):
         raise NotImplementedError("Coming soon...")
