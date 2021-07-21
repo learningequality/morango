@@ -2,6 +2,14 @@
 
 List of the most important changes for each release.
 
+## 0.6.0
+
+- Track the `TransferSession` that last modified a `Store` record
+- Add state attributes to `TransferSession` for persisting its stage and status during a sync
+- Update the timestamp of the last activity for a `SyncSession` and `TransferSession` during a sync
+- Add support for resuming a sync
+- Add support for configuring custom handling of transfer operations
+- Add support for handling transfer operations asynchronously
 
 ## 0.5.6
 
