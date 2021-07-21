@@ -47,20 +47,41 @@ class SessionContextTestCase(SimpleTestCase):
 
     def test_init__with_transfer_session(self):
         sync_session = mock.Mock(spec=SyncSession)
-        sync_filter = mock.Mock(spec=Filter)
+        sync_filter = Filter("before_filter")
         transfer_session = mock.Mock(
             spec=TransferSession,
             sync_session=sync_session,
             push=False,
+            filter="after_filter",
             transfer_stage=transfer_stages.TRANSFERRING,
             transfer_stage_status=transfer_statuses.STARTED,
         )
-        transfer_session.get_filter.return_value = sync_filter
+        transfer_session.get_filter.return_value = Filter(transfer_session.filter)
 
-        context = TestSessionContext(transfer_session=transfer_session)
+        context = TestSessionContext(transfer_session=transfer_session, sync_filter=sync_filter)
         self.assertEqual(transfer_session, context.transfer_session)
         self.assertEqual(sync_session, context.sync_session)
-        self.assertEqual(sync_filter, context.filter)
+        self.assertEqual("after_filter", str(context.filter))
+        self.assertFalse(context.is_push)
+        self.assertTrue(context.is_pull)
+
+    def test_init__with_transfer_session__no_filter(self):
+        sync_session = mock.Mock(spec=SyncSession)
+        sync_filter = Filter("before_filter")
+        transfer_session = mock.Mock(
+            spec=TransferSession,
+            sync_session=sync_session,
+            push=False,
+            filter=None,
+            transfer_stage=transfer_stages.TRANSFERRING,
+            transfer_stage_status=transfer_statuses.STARTED,
+        )
+        self.assertIsNone(transfer_session.filter)
+
+        context = TestSessionContext(transfer_session=transfer_session, sync_filter=sync_filter)
+        self.assertEqual(transfer_session, context.transfer_session)
+        self.assertEqual(sync_session, context.sync_session)
+        self.assertEqual("before_filter", str(context.filter))
         self.assertFalse(context.is_push)
         self.assertTrue(context.is_pull)
 
