@@ -351,9 +351,22 @@ class TransferClientTestCase(BaseTransferClientTestCase):
         self.assertEqual(self.session, self.client.remote_context.sync_session)
         self.assertEqual(self.conn, self.client.remote_context.connection)
 
-    def test_proceed_to_and_wait_for(self):
+    def test_proceed_to_and_wait_for__push(self):
         mock_proceed = self.controller.proceed_to_and_wait_for
         mock_proceed.return_value = transfer_statuses.COMPLETED
+        self.client.local_context.is_push = True
+        self.client.proceed_to_and_wait_for(transfer_stages.QUEUING)
+        mock_proceed_calls = mock_proceed.call_args_list
+        self.assertEqual(2, len(mock_proceed_calls))
+        self.assertEqual(transfer_stages.QUEUING, mock_proceed_calls[0][0][0])
+        self.assertEqual(self.client.local_context, mock_proceed_calls[0][1].get("context"))
+        self.assertEqual(transfer_stages.QUEUING, mock_proceed_calls[1][0][0])
+        self.assertEqual(self.client.remote_context, mock_proceed_calls[1][1].get("context"))
+
+    def test_proceed_to_and_wait_for__pull(self):
+        mock_proceed = self.controller.proceed_to_and_wait_for
+        mock_proceed.return_value = transfer_statuses.COMPLETED
+        self.client.local_context.is_push = False
         self.client.proceed_to_and_wait_for(transfer_stages.QUEUING)
         mock_proceed_calls = mock_proceed.call_args_list
         self.assertEqual(2, len(mock_proceed_calls))
@@ -363,6 +376,7 @@ class TransferClientTestCase(BaseTransferClientTestCase):
         self.assertEqual(self.client.local_context, mock_proceed_calls[1][1].get("context"))
 
     def test_proceed_to_and_wait_for__error(self):
+        self.client.local_context.is_push = False
         self.controller.last_error = Exception("Oops")
         self.controller.proceed_to_and_wait_for.return_value = transfer_statuses.ERRORED
         with self.assertRaises(MorangoError):

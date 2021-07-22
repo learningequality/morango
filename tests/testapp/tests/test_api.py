@@ -858,6 +858,9 @@ class BufferEndpointTestCase(CertificateTestCaseMixin, APITestCase):
 
         server_cert = kwargs["transfer_session"].sync_session.client_certificate
         push = kwargs["transfer_session"].push
+        records_total = kwargs["transfer_session"].records_total or 0
+        kwargs["transfer_session"].records_total = records_total + 1
+        kwargs["transfer_session"].save()
 
         filt = (
             server_cert.get_scope().write_filter
