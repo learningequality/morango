@@ -2,6 +2,14 @@
 
 List of the most important changes for each release.
 
+## 0.6.1
+
+- Fix to set counters on `TransferSession` *after* serialization
+- Fix capabilities request header as it should be prefixed with `HTTP`
+- Fix issues with flow of transfer operations
+- Logging and error handling improvements
+
+
 ## 0.6.0
 
 - Track the `TransferSession` that last modified a `Store` record
