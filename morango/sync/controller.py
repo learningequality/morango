@@ -242,7 +242,7 @@ class SessionController(object):
             return result
         except Exception as e:
             # always log the error itself
-            logging.error(e)
+            logger.error(e)
             context.update(stage_status=transfer_statuses.ERRORED, error=e)
             # fire completed signal, after context update. handlers can use context to detect error
             signal.completed.fire(context=context)

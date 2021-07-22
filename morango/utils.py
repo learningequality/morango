@@ -46,7 +46,7 @@ def get_capabilities():
 
 CAPABILITIES = get_capabilities()
 CAPABILITIES_CLIENT_HEADER = "X-Morango-Capabilities"
-CAPABILITIES_SERVER_HEADER = CAPABILITIES_CLIENT_HEADER.upper().replace("-", "_")
+CAPABILITIES_SERVER_HEADER = "HTTP_{}".format(CAPABILITIES_CLIENT_HEADER.upper().replace("-", "_"))
 
 
 def serialize_capabilities_to_client_request(request):

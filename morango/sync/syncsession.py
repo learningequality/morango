@@ -600,7 +600,12 @@ class TransferClient(object):
         )
 
     def proceed_to_and_wait_for(self, stage):
-        for context in (self.remote_context, self.local_context):
+        contexts = (self.remote_context, self.local_context)
+        if self.local_context.is_push:
+            # reverse contexts if a push to operate on local first
+            contexts = reversed(contexts)
+
+        for context in contexts:
             result = self.controller.proceed_to_and_wait_for(stage, context=context)
             if result == transfer_statuses.ERRORED:
                 raise_from(
@@ -634,8 +639,11 @@ class TransferClient(object):
             transfer_session=self.current_transfer_session
         )
 
-        # create transfer session on server side and proceed to queuing
+        # backwards compatibility for the queuing signal as it included both serialization
+        # and queuing originally
         with self.signals.queuing.send(transfer_session=self.current_transfer_session):
+            # proceeding to serialization on remote will trigger initialization as well
+            self.proceed_to_and_wait_for(transfer_stages.SERIALIZING)
             self.proceed_to_and_wait_for(transfer_stages.QUEUING)
 
     def run(self):
@@ -689,17 +697,6 @@ class PushClient(TransferClient):
         super(PushClient, self).__init__(*args, **kwargs)
         self.local_context.update(is_push=True)
         self.remote_context.update(is_push=True)
-
-    def initialize(self, sync_filter):
-        """
-        :param sync_filter: Filter
-        """
-        super(PushClient, self).initialize(sync_filter)
-
-        self.sync_connection._update_transfer_session(
-            {"records_total": self.current_transfer_session.records_total},
-            self.current_transfer_session,
-        )
 
 
 class PullClient(TransferClient):

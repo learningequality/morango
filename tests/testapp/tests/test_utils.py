@@ -10,6 +10,7 @@ from morango.constants.capabilities import ASYNC_OPERATIONS
 from morango.constants import transfer_stages
 from morango.utils import SETTINGS
 from morango.utils import CAPABILITIES_CLIENT_HEADER
+from morango.utils import CAPABILITIES_SERVER_HEADER
 from morango.utils import get_capabilities
 from morango.utils import serialize_capabilities_to_client_request
 from morango.utils import parse_capabilities_from_server_request
@@ -67,7 +68,7 @@ class CapabilitiesTestCase(SimpleTestCase):
 
     def test_parse(self):
         req = HttpRequest()
-        req.META.update(X_MORANGO_CAPABILITIES="TEST PARSE")
+        req.META.update(HTTP_X_MORANGO_CAPABILITIES="TEST PARSE")
         result = parse_capabilities_from_server_request(req)
         self.assertEqual({"PARSE", "TEST"}, result)
 
