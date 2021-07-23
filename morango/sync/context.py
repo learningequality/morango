@@ -51,8 +51,9 @@ class SessionContext(object):
 
         if self.transfer_session:
             self.sync_session = transfer_session.sync_session or self.sync_session
-            self.filter = transfer_session.get_filter() or self.filter
             self.is_push = transfer_session.push or self.is_push
+            if transfer_session.filter:
+                self.filter = transfer_session.get_filter()
 
     def update(
         self,
@@ -99,8 +100,9 @@ class SessionContext(object):
         # if transfer session was passed in, that takes precedence
         if transfer_session:
             self.sync_session = transfer_session.sync_session
-            self.filter = transfer_session.get_filter() or self.filter
             self.is_push = transfer_session.push
+            if transfer_session.filter:
+                self.filter = transfer_session.get_filter()
 
     @property
     def is_pull(self):

@@ -154,7 +154,6 @@ class PushPullClientTestCase(LiveServerTestCase):
         for _ in range(5):
             SummaryLog.objects.create(user=self.local_user)
             InteractionLog.objects.create(user=self.local_user)
-        self.profile_controller.serialize_into_store(self.filter)
 
         with second_environment():
             self.assertEqual(
@@ -199,7 +198,6 @@ class PushPullClientTestCase(LiveServerTestCase):
             for _ in range(5):
                 SummaryLog.objects.create(user=self.remote_user)
                 InteractionLog.objects.create(user=self.remote_user)
-            self.profile_controller.serialize_into_store(self.filter)
 
         self.assertEqual(0, SummaryLog.objects.filter(user=self.local_user).count())
         self.assertEqual(0, InteractionLog.objects.filter(user=self.local_user).count())
@@ -234,7 +232,6 @@ class PushPullClientTestCase(LiveServerTestCase):
         for _ in range(5):
             SummaryLog.objects.create(user=self.local_user)
             InteractionLog.objects.create(user=self.local_user)
-        self.profile_controller.serialize_into_store(self.filter)
 
         with second_environment():
             self.assertEqual(0, SummaryLog.objects.filter(user=self.remote_user).count())

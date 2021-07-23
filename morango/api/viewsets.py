@@ -440,7 +440,10 @@ class TransferSessionViewSet(
             )
             # raise an error for synchronous, if status is false
             if result == transfer_statuses.ERRORED:
-                raise RuntimeError("Cleanup failed")
+                if context.error:
+                    raise context.error
+                else:
+                    raise RuntimeError("Cleanup failed")
 
     def get_queryset(self):
         return TransferSession.objects.filter(active=True)

@@ -527,24 +527,31 @@ class BaseOperation(object):
         """
         :type context: morango.sync.controller.SessionContext
         """
+        debug_msg = "[morango:{}] {} -> {}".format(
+            "pull" if context.is_pull else "push",
+            context.__class__.__name__,
+            self.__class__.__name__
+        )
+        result = False
         try:
             # verify context object matches what the operation expects
-            result = False
             if self.expects_context is None or isinstance(
                 context, self.expects_context
             ):
+                logger.debug("{} = ?".format(debug_msg))
                 result = self.handle(context)
 
             if result is not False and result not in transfer_statuses.ALL:
                 raise NotImplementedError(
                     "Transfer operation must return False, or a transfer status"
                 )
-            return result
         except AssertionError:
             # if the operation raises an AssertionError, we equate that to returning False, which
             # means that this operation did not handle it and so other operation instances should
             # be tried to handle it
-            return False
+            result = False
+        logger.debug("{} = {}".format(debug_msg, result))
+        return result
 
     def handle(self, context):
         """
@@ -594,11 +601,9 @@ class InitializeOperation(LocalOperation):
                 start_timestamp=timezone.now(),
                 last_activity_timestamp=timezone.now(),
                 active=True,
+                transfer_stage=transfer_stages.INITIALIZING,
             )
-            fsic = json.dumps(
-                DatabaseMaxCounter.calculate_filter_max_counters(context.filter)
-            )
-            # if in request context,
+            # if in server context, we'll have request
             if context.request:
                 data.update(
                     id=context.request.data.get("id"),
@@ -606,16 +611,8 @@ class InitializeOperation(LocalOperation):
                     if context.is_push
                     else None,
                     client_fsic=context.request.data.get("client_fsic") or "{}",
-                    server_fsic=fsic,
                 )
-            elif not context.is_server:
-                data.update(
-                    client_fsic=fsic,
-                    # server_fsic is set after remote initialization, as that should hit the
-                    # previous if-block, and this `client_fsic` should end up in the request
-                    # above too
-                )
-            else:
+            elif context.is_server:
                 raise MorangoResumeSyncError(
                     "Cannot create transfer session without request as server"
                 )
@@ -651,6 +648,14 @@ class ProducerSerializeOperation(LocalOperation):
                 filter=context.filter,
             )
 
+        fsic = json.dumps(
+            DatabaseMaxCounter.calculate_filter_max_counters(context.filter)
+        )
+        if context.is_server:
+            context.transfer_session.server_fsic = fsic
+        else:
+            context.transfer_session.client_fsic = fsic
+        context.transfer_session.save()
         return transfer_statuses.COMPLETED
 
 
@@ -664,6 +669,7 @@ class ReceiverSerializeOperation(LocalOperation):
         :type context: LocalSessionContext
         """
         assert context.is_receiver
+        # TODO: move updating fsic from request to here instead of viewset serializer
         return transfer_statuses.COMPLETED
 
 
@@ -687,6 +693,7 @@ class ProducerQueueOperation(LocalOperation):
             transfer_session=context.transfer_session
         ).count()
 
+        logger.debug("[morango] Queued {} records".format(records_total))
         context.transfer_session.records_total = records_total
         context.transfer_session.save()
         return transfer_statuses.COMPLETED
@@ -702,6 +709,7 @@ class ReceiverQueueOperation(LocalOperation):
         :type context: LocalSessionContext
         """
         assert context.is_receiver
+        # TODO: move updating record counts from request to here instead of viewset serializer
         return transfer_statuses.COMPLETED
 
 
@@ -740,11 +748,13 @@ class PushReceiverOperation(LocalOperation):
         assert context.is_receiver
         assert context.request is not None
 
-        data = context.request.data
-        if not isinstance(context.request.data, list):
-            data = [context.request.data]
+        # operation can be invoked even though there's nothing to transfer
+        if context.transfer_session.records_total > 0:
+            data = context.request.data
+            if not isinstance(context.request.data, list):
+                data = [context.request.data]
 
-        validate_and_create_buffer_data(data, context.transfer_session)
+            validate_and_create_buffer_data(data, context.transfer_session)
 
         if (
             context.transfer_session.records_transferred
@@ -950,13 +960,14 @@ class NetworkOperation(BaseOperation):
             )
         return data
 
-    def remote_proceed_to(self, context, stage):
+    def remote_proceed_to(self, context, stage, **kwargs):
         """
         Uses server API's to push updates to a remote `TransferSession`, which triggers the
         controller's `.proceed_to()` for the stage
 
         :type context: NetworkSessionContext
         :param stage: A transfer_stage.*
+        :param kwargs: Other kwargs to send
         :return: A tuple of the remote's status, and the server response JSON
         """
         stage = transfer_stages.stage(stage)
@@ -966,14 +977,15 @@ class NetworkOperation(BaseOperation):
 
         if remote_stage < stage:
             # if current stage is not yet at `stage`, push it to that stage through update
-            data = self.update_transfer_session(context, transfer_stage=stage)
+            kwargs.update(transfer_stage=stage)
+            data = self.update_transfer_session(context, **kwargs)
             remote_status = data.get("transfer_stage_status")
         elif remote_stage > stage:
             # if past this stage, then we just make sure returned status is completed
             remote_status = transfer_statuses.COMPLETED
 
         if not remote_status:
-            raise MorangoResumeSyncError("Error")
+            raise MorangoResumeSyncError("Remote failed to proceed to {}".format(stage))
 
         # if still in progress, then we return PENDING which will cause controller
         # to again call the middleware that contains this operation, and check the server status
@@ -1027,7 +1039,7 @@ class NetworkInitializeOperation(NetworkOperation):
         assert ASYNC_OPERATIONS in context.capabilities
 
         # if local stage is transferring or beyond, we definitely don't need to initialize
-        if transfer_stages.stage(context.stage) < transfer_stages.stage(
+        if context.stage is not None and transfer_stages.stage(context.stage) < transfer_stages.stage(
             transfer_stages.TRANSFERRING
         ):
             self.create_transfer_session(context)
@@ -1069,12 +1081,16 @@ class NetworkSerializeOperation(NetworkOperation):
         assert context.transfer_session is not None
         assert ASYNC_OPERATIONS in context.capabilities
 
+        update_kwargs = {}
+        if context.is_push:
+            update_kwargs.update(client_fsic=context.transfer_session.client_fsic)
+
         remote_status, data = self.remote_proceed_to(
-            context, transfer_stages.SERIALIZING
+            context, transfer_stages.SERIALIZING, **update_kwargs
         )
 
-        if remote_status == transfer_statuses.COMPLETED:
-            context.transfer_session.server_fsic = data.get("server_fsic") or "{}"
+        if context.is_pull and remote_status == transfer_statuses.COMPLETED:
+            context.transfer_session.server_fsic = data.get("server_fsic")
             context.transfer_session.save()
 
         return remote_status
@@ -1100,9 +1116,15 @@ class NetworkQueueOperation(NetworkOperation):
         assert context.transfer_session is not None
         assert ASYNC_OPERATIONS in context.capabilities
 
-        remote_status, data = self.remote_proceed_to(context, transfer_stages.QUEUING)
+        update_kwargs = {}
+        if context.is_push:
+            update_kwargs.update(records_total=context.transfer_session.records_total)
 
-        if remote_status == transfer_statuses.COMPLETED:
+        remote_status, data = self.remote_proceed_to(
+            context, transfer_stages.QUEUING, **update_kwargs
+        )
+
+        if context.is_pull and remote_status == transfer_statuses.COMPLETED:
             context.transfer_session.records_total = data.get("records_total", 0)
             context.transfer_session.save()
 
@@ -1117,6 +1139,10 @@ class NetworkPushTransferOperation(NetworkOperation):
         assert context.transfer_session is not None
         assert context.is_push
 
+        if context.transfer_session.records_total == 0:
+            # since we won't be transferring anything, we can say we're done
+            return transfer_statuses.COMPLETED
+
         offset = context.transfer_session.records_transferred
         chunk_size = context.connection.chunk_size
 
@@ -1129,8 +1155,7 @@ class NetworkPushTransferOperation(NetworkOperation):
         ).data
 
         # push buffers chunk to server
-        if len(data) > 0:
-            self.put_buffers(context, data)
+        self.put_buffers(context, data)
 
         context.transfer_session.records_transferred = min(
             offset + chunk_size, context.transfer_session.records_total
@@ -1158,20 +1183,19 @@ class NetworkPullTransferOperation(NetworkOperation):
         assert context.transfer_session is not None
         assert context.is_pull
 
-        # grab buffers chunk
-        data = self.get_buffers(context)
         transfer_session = context.transfer_session
 
-        validate_and_create_buffer_data(
-            data, transfer_session, connection=context.connection
-        )
+        if transfer_session.records_total > 0:
+            # grab buffers, just one chunk
+            data = self.get_buffers(context)
+
+            validate_and_create_buffer_data(
+                data, transfer_session, connection=context.connection
+            )
 
         # if we've transferred all records, return a completed status
         op_status = transfer_statuses.PENDING
-        if (
-            context.transfer_session.records_transferred
-            >= context.transfer_session.records_total
-        ):
+        if transfer_session.records_transferred >= transfer_session.records_total:
             op_status = transfer_statuses.COMPLETED
 
         # update the records transferred so client and server are in agreement
