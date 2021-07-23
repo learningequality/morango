@@ -693,7 +693,7 @@ class ProducerQueueOperation(LocalOperation):
             transfer_session=context.transfer_session
         ).count()
 
-        logger.info("[morango] Queued {} records".format(records_total))
+        logger.debug("[morango] Queued {} records".format(records_total))
         context.transfer_session.records_total = records_total
         context.transfer_session.save()
         return transfer_statuses.COMPLETED
