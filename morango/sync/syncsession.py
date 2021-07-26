@@ -606,7 +606,8 @@ class TransferClient(object):
             contexts = reversed(contexts)
 
         for context in contexts:
-            result = self.controller.proceed_to_and_wait_for(stage, context=context)
+            max_interval = 1 if context is self.local_context else 5
+            result = self.controller.proceed_to_and_wait_for(stage, context=context, max_interval=max_interval)
             if result == transfer_statuses.ERRORED:
                 raise_from(
                     MorangoError("Stage `{}` failed".format(stage)),
@@ -623,7 +624,7 @@ class TransferClient(object):
 
         # initialize the transfer session locally
         status = self.controller.proceed_to_and_wait_for(
-            transfer_stages.INITIALIZING, context=self.local_context
+            transfer_stages.INITIALIZING, context=self.local_context, max_interval=1
         )
         if status == transfer_statuses.ERRORED:
             raise_from(

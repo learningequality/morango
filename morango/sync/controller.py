@@ -185,7 +185,7 @@ class SessionController(object):
         # should always be a non-False status
         return result
 
-    def proceed_to_and_wait_for(self, target_stage, context=None, interval=5):
+    def proceed_to_and_wait_for(self, target_stage, context=None, max_interval=5):
         """
         Same as `proceed_to` but waits for a finished status to be returned by sleeping between
         calls to `proceed_to` if status is not complete
@@ -194,15 +194,19 @@ class SessionController(object):
         :type target_stage: str
         :param context: Override controller context, or provide it if missing
         :type context: morango.sync.context.SessionContext|None
-        :param interval: The time, in seconds, between repeat calls to `.proceed_to`
+        :param max_interval: The max time, in seconds, between repeat calls to `.proceed_to`
         :return: transfer_status.* - The status of proceeding to that stage,
             which should be `ERRORED` or `COMPLETE`
         :rtype: str
         """
         result = transfer_statuses.PENDING
+        tries = 0
         while result not in transfer_statuses.FINISHED_STATES:
+            if tries > 0:
+                # exponential backoff up to max_interval
+                sleep(min(0.3 * (2 ** tries - 1), max_interval))
             result = self.proceed_to(target_stage, context=context)
-            sleep(interval)
+            tries += 1
         return result
 
     def _invoke_middleware(self, context, middleware):
