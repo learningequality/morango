@@ -382,7 +382,9 @@ class TransferSessionViewSet(
             if self.async_allowed()
             else transfer_stages.QUEUING
         )
-        result = session_controller.proceed_to_and_wait_for(to_stage, context=context)
+        result = session_controller.proceed_to_and_wait_for(
+            to_stage, context=context, max_interval=2
+        )
 
         if result == transfer_statuses.ERRORED:
             if context.error:
@@ -422,7 +424,7 @@ class TransferSessionViewSet(
                 session_controller.proceed_to(update_stage, context=context)
             else:
                 session_controller.proceed_to_and_wait_for(
-                    update_stage, context=context
+                    update_stage, context=context, max_interval=2
                 )
 
         return super(TransferSessionViewSet, self).update(request, *args, **kwargs)
@@ -436,7 +438,7 @@ class TransferSessionViewSet(
             session_controller.proceed_to(transfer_stages.CLEANUP, context=context)
         else:
             result = session_controller.proceed_to_and_wait_for(
-                transfer_stages.CLEANUP, context=context
+                transfer_stages.CLEANUP, context=context, max_interval=2
             )
             # raise an error for synchronous, if status is false
             if result == transfer_statuses.ERRORED:
