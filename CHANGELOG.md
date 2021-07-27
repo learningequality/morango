@@ -2,6 +2,10 @@
 
 List of the most important changes for each release.
 
+## 0.6.2
+
+- Fixes slow performance due to excessive use of `sleep`
+
 ## 0.6.1
 
 - Fix to set counters on `TransferSession` *after* serialization

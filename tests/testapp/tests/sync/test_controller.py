@@ -713,7 +713,7 @@ class SessionControllerTestCase(SimpleTestCase):
                 transfer_statuses.PENDING,
                 transfer_statuses.COMPLETED
             ]
-            result = self.controller.proceed_to_and_wait_for(transfer_stages.CLEANUP, interval=0.1)
+            result = self.controller.proceed_to_and_wait_for(transfer_stages.CLEANUP, max_interval=0.1)
             self.assertEqual(result, transfer_statuses.COMPLETED)
 
     def test_proceed_to_and_wait_for__errored(self):
@@ -722,7 +722,7 @@ class SessionControllerTestCase(SimpleTestCase):
                 transfer_statuses.PENDING,
                 transfer_statuses.ERRORED
             ]
-            result = self.controller.proceed_to_and_wait_for(transfer_stages.CLEANUP, interval=0.1)
+            result = self.controller.proceed_to_and_wait_for(transfer_stages.CLEANUP, max_interval=0.1)
             self.assertEqual(result, transfer_statuses.ERRORED)
 
     def test_invoke_middleware(self):
