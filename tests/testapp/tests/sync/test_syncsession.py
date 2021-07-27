@@ -371,9 +371,9 @@ class TransferClientTestCase(BaseTransferClientTestCase):
         mock_proceed_calls = mock_proceed.call_args_list
         self.assertEqual(2, len(mock_proceed_calls))
         self.assertEqual(transfer_stages.QUEUING, mock_proceed_calls[0][0][0])
-        self.assertEqual(self.client.remote_context, mock_proceed_calls[0][1].get("context"))
+        self.assertEqual(self.client.local_context, mock_proceed_calls[0][1].get("context"))
         self.assertEqual(transfer_stages.QUEUING, mock_proceed_calls[1][0][0])
-        self.assertEqual(self.client.local_context, mock_proceed_calls[1][1].get("context"))
+        self.assertEqual(self.client.remote_context, mock_proceed_calls[1][1].get("context"))
 
     def test_proceed_to_and_wait_for__error(self):
         self.client.local_context.is_push = False
@@ -382,7 +382,7 @@ class TransferClientTestCase(BaseTransferClientTestCase):
         with self.assertRaises(MorangoError):
             self.client.proceed_to_and_wait_for(transfer_stages.QUEUING)
         self.controller.proceed_to_and_wait_for.assert_called_once_with(
-            transfer_stages.QUEUING, context=self.client.remote_context, max_interval=5
+            transfer_stages.QUEUING, context=self.client.local_context, max_interval=1
         )
 
     @mock.patch("morango.sync.syncsession.TransferClient.proceed_to_and_wait_for")

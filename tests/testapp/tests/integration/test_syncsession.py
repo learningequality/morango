@@ -227,6 +227,45 @@ class PushPullClientTestCase(LiveServerTestCase):
         self.assertEqual(5, SummaryLog.objects.filter(user=self.local_user).count())
         self.assertEqual(5, InteractionLog.objects.filter(user=self.local_user).count())
 
+    def test_full_flow_and_repeat(self):
+        with second_environment():
+            for _ in range(5):
+                SummaryLog.objects.create(user=self.remote_user)
+                InteractionLog.objects.create(user=self.remote_user)
+
+        self.assertEqual(0, SummaryLog.objects.filter(user=self.local_user).count())
+        self.assertEqual(0, InteractionLog.objects.filter(user=self.local_user).count())
+
+        # first pull
+        pull_client = self.client.get_pull_client()
+        pull_client.initialize(self.filter)
+        transfer_session = pull_client.local_context.transfer_session
+        self.assertNotEqual(0, transfer_session.records_total)
+        self.assertEqual(0, transfer_session.records_transferred)
+        pull_client.run()
+        self.assertNotEqual(0, transfer_session.records_transferred)
+        pull_client.finalize()
+
+        # sanity check pull worked
+        self.assertEqual(5, SummaryLog.objects.filter(user=self.local_user).count())
+        self.assertEqual(5, InteractionLog.objects.filter(user=self.local_user).count())
+
+        # now do a push after pull, but nothing to actually transfer
+        push_client = self.client.get_push_client()
+        push_client.initialize(self.filter)
+        transfer_session = push_client.local_context.transfer_session
+        self.assertEqual(0, transfer_session.records_total)
+        self.assertEqual(0, transfer_session.records_transferred)
+        push_client.run()
+        self.assertEqual(0, transfer_session.records_transferred)
+        push_client.finalize()
+
+        # second pass for pull, only do initialize to make sure nothing gets queued for sync
+        second_pull_client = self.client.get_pull_client()
+        second_pull_client.initialize(self.filter)
+        transfer_session = second_pull_client.local_context.transfer_session
+        self.assertEqual(0, transfer_session.records_total)
+
     def test_resume(self):
         # create data
         for _ in range(5):
