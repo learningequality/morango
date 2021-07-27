@@ -2,6 +2,10 @@
 
 List of the most important changes for each release.
 
+## 0.6.3
+
+- Fixes issue handling database counters which caused repeat syncing of unchanged data
+
 ## 0.6.2
 
 - Fixes slow performance due to excessive use of `sleep`
