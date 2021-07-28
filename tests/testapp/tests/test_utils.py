@@ -30,7 +30,7 @@ class SettingsTestCase(SimpleTestCase):
         self.assertEqual(SETTINGS.MORANGO_DESERIALIZE_AFTER_DEQUEUING, True)
         self.assertEqual(SETTINGS.MORANGO_DISALLOW_ASYNC_OPERATIONS, False)
         self.assertLength(3, SETTINGS.MORANGO_INITIALIZE_OPERATIONS)
-        self.assertLength(4, SETTINGS.MORANGO_SERIALIZE_OPERATIONS)
+        self.assertLength(3, SETTINGS.MORANGO_SERIALIZE_OPERATIONS)
         self.assertLength(4, SETTINGS.MORANGO_QUEUE_OPERATIONS)
         self.assertLength(4, SETTINGS.MORANGO_DEQUEUE_OPERATIONS)
         self.assertLength(4, SETTINGS.MORANGO_DESERIALIZE_OPERATIONS)

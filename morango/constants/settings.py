@@ -8,8 +8,7 @@ MORANGO_INITIALIZE_OPERATIONS = (
     "morango.sync.operations:NetworkInitializeOperation",
 )
 MORANGO_SERIALIZE_OPERATIONS = (
-    "morango.sync.operations:ProducerSerializeOperation",
-    "morango.sync.operations:ReceiverSerializeOperation",
+    "morango.sync.operations:SerializeOperation",
     "morango.sync.operations:LegacyNetworkSerializeOperation",
     "morango.sync.operations:NetworkSerializeOperation",
 )

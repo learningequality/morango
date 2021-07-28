@@ -600,14 +600,12 @@ class TransferClient(object):
         )
 
     def proceed_to_and_wait_for(self, stage):
-        contexts = (self.remote_context, self.local_context)
-        if self.local_context.is_push:
-            # reverse contexts if a push to operate on local first
-            contexts = reversed(contexts)
-
+        contexts = (self.local_context, self.remote_context)
         for context in contexts:
             max_interval = 1 if context is self.local_context else 5
-            result = self.controller.proceed_to_and_wait_for(stage, context=context, max_interval=max_interval)
+            result = self.controller.proceed_to_and_wait_for(
+                stage, context=context, max_interval=max_interval
+            )
             if result == transfer_statuses.ERRORED:
                 raise_from(
                     MorangoError("Stage `{}` failed".format(stage)),

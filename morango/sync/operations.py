@@ -530,7 +530,7 @@ class BaseOperation(object):
         debug_msg = "[morango:{}] {} -> {}".format(
             "pull" if context.is_pull else "push",
             context.__class__.__name__,
-            self.__class__.__name__
+            self.__class__.__name__,
         )
         result = False
         try:
@@ -628,21 +628,20 @@ class InitializeOperation(LocalOperation):
         return transfer_statuses.COMPLETED
 
 
-class ProducerSerializeOperation(LocalOperation):
+class SerializeOperation(LocalOperation):
     """
-    Performs serialization if enabled through configuration, for contexts that are producing
-    transfer data
+    Performs serialization related steps which affect the counters involved in the sync, including
+    serialization of data if enabled through configuration
     """
 
     def handle(self, context):
         """
         :type context: LocalSessionContext
         """
-        assert context.is_producer
         assert context.sync_session is not None
         assert context.filter is not None
 
-        if SETTINGS.MORANGO_SERIALIZE_BEFORE_QUEUING:
+        if context.is_producer and SETTINGS.MORANGO_SERIALIZE_BEFORE_QUEUING:
             _serialize_into_store(
                 context.sync_session.profile,
                 filter=context.filter,
@@ -653,23 +652,12 @@ class ProducerSerializeOperation(LocalOperation):
         )
         if context.is_server:
             context.transfer_session.server_fsic = fsic
+            context.transfer_session.client_fsic = context.request.data.get(
+                "client_fsic", "{}"
+            )
         else:
             context.transfer_session.client_fsic = fsic
         context.transfer_session.save()
-        return transfer_statuses.COMPLETED
-
-
-class ReceiverSerializeOperation(LocalOperation):
-    """
-    Receivers of transfer data do not need serialize any data
-    """
-
-    def handle(self, context):
-        """
-        :type context: LocalSessionContext
-        """
-        assert context.is_receiver
-        # TODO: move updating fsic from request to here instead of viewset serializer
         return transfer_statuses.COMPLETED
 
 
@@ -837,15 +825,14 @@ class ReceiverDeserializeOperation(LocalOperation):
                 filter=context.filter,
             )
 
-        # update database max counters but use latest fsics on client
-        fsic = (
-            context.transfer_session.client_fsic
-            if context.is_server
-            else context.transfer_session.server_fsic
-        )
-
-        # update database max counters but use latest fsics on client
-        DatabaseMaxCounter.update_fsics(json.loads(fsic), context.filter)
+        # update database max counters but use latest fsics from client/server
+        if context.is_receiver:
+            fsic = (
+                context.transfer_session.client_fsic
+                if context.is_server
+                else context.transfer_session.server_fsic
+            )
+            DatabaseMaxCounter.update_fsics(json.loads(fsic), context.filter)
 
         return transfer_statuses.COMPLETED
 
@@ -1039,9 +1026,9 @@ class NetworkInitializeOperation(NetworkOperation):
         assert ASYNC_OPERATIONS in context.capabilities
 
         # if local stage is transferring or beyond, we definitely don't need to initialize
-        if context.stage is not None and transfer_stages.stage(context.stage) < transfer_stages.stage(
-            transfer_stages.TRANSFERRING
-        ):
+        if context.stage is not None and transfer_stages.stage(
+            context.stage
+        ) < transfer_stages.stage(transfer_stages.TRANSFERRING):
             self.create_transfer_session(context)
 
         return transfer_statuses.COMPLETED
@@ -1081,15 +1068,13 @@ class NetworkSerializeOperation(NetworkOperation):
         assert context.transfer_session is not None
         assert ASYNC_OPERATIONS in context.capabilities
 
-        update_kwargs = {}
-        if context.is_push:
-            update_kwargs.update(client_fsic=context.transfer_session.client_fsic)
-
         remote_status, data = self.remote_proceed_to(
-            context, transfer_stages.SERIALIZING, **update_kwargs
+            context,
+            transfer_stages.SERIALIZING,
+            client_fsic=context.transfer_session.client_fsic,
         )
 
-        if context.is_pull and remote_status == transfer_statuses.COMPLETED:
+        if remote_status == transfer_statuses.COMPLETED:
             context.transfer_session.server_fsic = data.get("server_fsic")
             context.transfer_session.save()
 
