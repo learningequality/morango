@@ -4,12 +4,16 @@ from django.test import TestCase
 from django.utils import timezone
 from django.utils.six import iteritems
 
+from facility_profile.models import MyUser
+
 from morango.constants import transfer_stages
 from morango.constants import transfer_statuses
+from morango.sync.controller import MorangoProfileController
 from morango.models.certificates import Filter
 from morango.models.core import DatabaseMaxCounter
 from morango.models.core import TransferSession
 from morango.models.core import SyncSession
+from morango.models.core import Store
 
 
 class DatabaseMaxCounterFactory(factory.DjangoModelFactory):
@@ -204,3 +208,35 @@ class TransferSessionTestCase(TestCase):
         self.assertEqual(
             previous_sync_activity, self.sync_session.last_activity_timestamp
         )
+
+
+class TransferSessionAndStoreTestCase(TestCase):
+    def setUp(self):
+        super(TransferSessionAndStoreTestCase, self).setUp()
+        self.sync_session = SyncSession.objects.create(
+            id=uuid.uuid4().hex,
+            profile="facilitydata",
+            last_activity_timestamp=timezone.now(),
+        )
+        self.instance = TransferSession.objects.create(
+            id=uuid.uuid4().hex,
+            sync_session=self.sync_session,
+            push=True,
+            last_activity_timestamp=timezone.now(),
+        )
+        self.controller = MorangoProfileController(MyUser.morango_profile)
+        self.user = MyUser(username="tester")
+        self.user.save()
+        self.controller.serialize_into_store()
+        stores = Store.objects.filter(model_name=MyUser.morango_model_name)
+        self.assertEqual(1, stores.count())
+        stores.update(last_transfer_session_id=self.instance.id)
+
+    def test_get_touched_record_ids_for_model__instance(self):
+        self.assertEqual([self.user.id], list(self.instance.get_touched_record_ids_for_model(self.user)))
+
+    def test_get_touched_record_ids_for_model__class(self):
+        self.assertEqual([self.user.id], list(self.instance.get_touched_record_ids_for_model(MyUser)))
+
+    def test_get_touched_record_ids_for_model__string(self):
+        self.assertEqual([self.user.id], list(self.instance.get_touched_record_ids_for_model(MyUser.morango_model_name)))

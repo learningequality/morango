@@ -318,7 +318,9 @@ class TransferSession(models.Model):
             )
 
     def get_touched_record_ids_for_model(self, model):
-        if isinstance(model, SyncableModel) or issubclass(model, SyncableModel):
+        if isinstance(model, SyncableModel) or (
+            isinstance(model, six.class_types) and issubclass(model, SyncableModel)
+        ):
             model = model.morango_model_name
         _assert(isinstance(model, six.string_types), "Model must resolve to string")
         return Store.objects.filter(
