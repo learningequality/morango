@@ -46,7 +46,9 @@ def get_capabilities():
 
 CAPABILITIES = get_capabilities()
 CAPABILITIES_CLIENT_HEADER = "X-Morango-Capabilities"
-CAPABILITIES_SERVER_HEADER = "HTTP_{}".format(CAPABILITIES_CLIENT_HEADER.upper().replace("-", "_"))
+CAPABILITIES_SERVER_HEADER = "HTTP_{}".format(
+    CAPABILITIES_CLIENT_HEADER.upper().replace("-", "_")
+)
 
 
 def serialize_capabilities_to_client_request(request):
@@ -99,3 +101,12 @@ if os.name == "posix":
     pid_exists = _posix_pid_exists
 else:
     pid_exists = _windows_pid_exists
+
+
+def _assert(condition, message):
+    """
+    :param condition: A bool condition that if false will raise an AssertionError
+    :param message: assertion error detail message
+    """
+    if not condition:
+        raise AssertionError(message)

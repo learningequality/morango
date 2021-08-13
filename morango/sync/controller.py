@@ -9,6 +9,7 @@ from morango.sync.operations import _deserialize_from_store
 from morango.sync.operations import _serialize_into_store
 from morango.sync.operations import OperationLogger
 from morango.sync.utils import SyncSignalGroup
+from morango.utils import _assert
 
 
 logger = logging.getLogger(__name__)
@@ -27,7 +28,7 @@ def _self_referential_fk(klass_model):
 
 class MorangoProfileController(object):
     def __init__(self, profile):
-        assert profile, "profile needs to be defined."
+        _assert(profile, "profile needs to be defined.")
         self.profile = profile
 
     def serialize_into_store(self, filter=None):
@@ -50,6 +51,7 @@ class MorangoProfileController(object):
 
     def create_network_connection(self, base_url, **kwargs):
         from morango.sync.syncsession import NetworkSyncConnection
+
         kwargs.update(base_url=base_url)
         return NetworkSyncConnection(**kwargs)
 
