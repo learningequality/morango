@@ -2,6 +2,9 @@
 
 List of the most important changes for each release.
 
+## 0.6.4
+- Fixes issue with `assert` statement removal during python optimization
+
 ## 0.6.3
 
 - Fixes issue handling database counters which caused repeat syncing of unchanged data

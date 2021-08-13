@@ -31,6 +31,7 @@ from morango.models.fields.crypto import SharedKey
 from morango.sync.context import LocalSessionContext
 from morango.sync.controller import SessionController
 from morango.utils import CAPABILITIES
+from morango.utils import _assert
 from morango.utils import parse_capabilities_from_server_request
 
 
@@ -43,7 +44,7 @@ else:
 
 
 def controller_signal_logger(context=None):
-    assert context is not None
+    _assert(context is not None, "Missing context")
 
     if context.stage_status == transfer_statuses.PENDING:
         logging.info("Starting stage '{}'".format(context.stage))

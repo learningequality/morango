@@ -33,6 +33,7 @@ from morango.models.utils import get_0_5_system_id
 from morango.models.utils import get_0_5_mac_address
 from morango.constants import transfer_stages
 from morango.constants import transfer_statuses
+from morango.utils import _assert
 
 logger = logging.getLogger(__name__)
 
@@ -317,9 +318,11 @@ class TransferSession(models.Model):
             )
 
     def get_touched_record_ids_for_model(self, model):
-        if isinstance(model, SyncableModel):
+        if isinstance(model, SyncableModel) or (
+            isinstance(model, six.class_types) and issubclass(model, SyncableModel)
+        ):
             model = model.morango_model_name
-        assert isinstance(model, six.string_types)
+        _assert(isinstance(model, six.string_types), "Model must resolve to string")
         return Store.objects.filter(
             model_name=model, last_transfer_session_id=self.id
         ).values_list("id", flat=True)
@@ -643,11 +646,13 @@ class SyncableModel(UUIDModelMixin):
         self, using=None, keep_parents=False, hard_delete=False, *args, **kwargs
     ):
         using = using or router.db_for_write(self.__class__, instance=self)
-        assert (
-            self._get_pk_val() is not None
-        ), "%s object can't be deleted because its %s attribute is set to None." % (
-            self._meta.object_name,
-            self._meta.pk.attname,
+        _assert(
+            self._get_pk_val() is not None,
+            "%s object can't be deleted because its %s attribute is set to None."
+            % (
+                self._meta.object_name,
+                self._meta.pk.attname,
+            ),
         )
         collector = Collector(using=using)
         collector.collect([self], keep_parents=keep_parents)

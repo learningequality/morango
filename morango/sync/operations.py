@@ -36,6 +36,7 @@ from morango.sync.context import LocalSessionContext
 from morango.sync.context import NetworkSessionContext
 from morango.sync.utils import mute_signals
 from morango.sync.utils import validate_and_create_buffer_data
+from morango.utils import _assert
 from morango.utils import SETTINGS
 
 
@@ -48,10 +49,11 @@ db_name = router.db_for_write(Store)
 USING_DB = db_name
 if "postgresql" in transaction.get_connection(USING_DB).vendor:
     USING_DB = db_name + "-serializable"
-    assert (
-        USING_DB in connections
-    ), "Please add a `default-serializable` database connection in your django settings file, \
-                                     which copies all the configuration settings of the `default` db connection"
+    _assert(
+        USING_DB in connections,
+        "Please add a `default-serializable` database connection in your django settings file, \
+            which copies all the configuration settings of the `default` db connection",
+    )
 
 
 class OperationLogger(object):
@@ -560,6 +562,12 @@ class BaseOperation(object):
         """
         raise NotImplementedError("Transfer operation handler not implemented")
 
+    def _assert(self, condition, message="Operation does not handle this condition"):
+        """
+        :param condition: a bool condition, if false will raise assertion error
+        """
+        _assert(condition, message)
+
 
 class LocalOperation(BaseOperation):
     """
@@ -578,7 +586,7 @@ class InitializeOperation(LocalOperation):
         """
         :type context: LocalSessionContext
         """
-        assert context.transfer_session is None
+        self._assert(context.transfer_session is None)
 
         # attributes that we'll use to identify existing sessions. we really only want there to
         # be one of these at a time
@@ -638,8 +646,8 @@ class SerializeOperation(LocalOperation):
         """
         :type context: LocalSessionContext
         """
-        assert context.sync_session is not None
-        assert context.filter is not None
+        self._assert(context.sync_session is not None)
+        self._assert(context.filter is not None)
 
         if context.is_producer and SETTINGS.MORANGO_SERIALIZE_BEFORE_QUEUING:
             _serialize_into_store(
@@ -670,9 +678,9 @@ class ProducerQueueOperation(LocalOperation):
         """
         :type context: LocalSessionContext
         """
-        assert context.is_producer
-        assert context.sync_session is not None
-        assert context.transfer_session is not None
+        self._assert(context.is_producer)
+        self._assert(context.sync_session is not None)
+        self._assert(context.transfer_session is not None)
 
         _queue_into_buffer(context.transfer_session)
 
@@ -696,7 +704,7 @@ class ReceiverQueueOperation(LocalOperation):
         """
         :type context: LocalSessionContext
         """
-        assert context.is_receiver
+        self._assert(context.is_receiver)
         # TODO: move updating record counts from request to here instead of viewset serializer
         return transfer_statuses.COMPLETED
 
@@ -710,9 +718,9 @@ class PullProducerOperation(LocalOperation):
         """
         :type context: LocalSessionContext
         """
-        assert context.is_pull
-        assert context.is_producer
-        assert context.request is not None
+        self._assert(context.is_pull)
+        self._assert(context.is_producer)
+        self._assert(context.request is not None)
 
         records_transferred = context.request.data.get(
             "records_transferred", context.transfer_session.records_transferred
@@ -732,9 +740,9 @@ class PushReceiverOperation(LocalOperation):
         """
         :type context: LocalSessionContext
         """
-        assert context.is_push
-        assert context.is_receiver
-        assert context.request is not None
+        self._assert(context.is_push)
+        self._assert(context.is_receiver)
+        self._assert(context.request is not None)
 
         # operation can be invoked even though there's nothing to transfer
         if context.transfer_session.records_total > 0:
@@ -761,7 +769,7 @@ class ProducerDequeueOperation(LocalOperation):
         """
         :type context: LocalSessionContext
         """
-        assert context.is_producer
+        self._assert(context.is_producer)
         return transfer_statuses.COMPLETED
 
 
@@ -774,9 +782,9 @@ class ReceiverDequeueOperation(LocalOperation):
         """
         :type context: LocalSessionContext
         """
-        assert context.is_receiver
-        assert context.transfer_session is not None
-        assert context.filter is not None
+        self._assert(context.is_receiver)
+        self._assert(context.transfer_session is not None)
+        self._assert(context.filter is not None)
 
         # if no records were transferred, we can safely skip
         records_transferred = context.transfer_session.records_transferred or 0
@@ -795,7 +803,7 @@ class ProducerDeserializeOperation(LocalOperation):
         """
         :type context: LocalSessionContext
         """
-        assert context.is_producer
+        self._assert(context.is_producer)
         return transfer_statuses.COMPLETED
 
 
@@ -809,9 +817,9 @@ class ReceiverDeserializeOperation(LocalOperation):
         """
         :type context: LocalSessionContext
         """
-        assert context.sync_session is not None
-        assert context.transfer_session is not None
-        assert context.filter is not None
+        self._assert(context.sync_session is not None)
+        self._assert(context.transfer_session is not None)
+        self._assert(context.filter is not None)
 
         records_transferred = context.transfer_session.records_transferred or 0
         if SETTINGS.MORANGO_DESERIALIZE_AFTER_DEQUEUING and records_transferred > 0:
@@ -846,7 +854,7 @@ class CleanupOperation(LocalOperation):
         """
         :type context: LocalSessionContext
         """
-        assert context.transfer_session is not None
+        self._assert(context.transfer_session is not None)
 
         if context.is_producer:
             context.transfer_session.delete_buffers()
@@ -992,8 +1000,8 @@ class LegacyNetworkInitializeOperation(NetworkOperation):
         """
         :type context: NetworkSessionContext
         """
-        assert context.transfer_session is not None
-        assert ASYNC_OPERATIONS not in context.capabilities
+        self._assert(context.transfer_session is not None)
+        self._assert(ASYNC_OPERATIONS not in context.capabilities)
 
         # if local stage is transferring or beyond, we definitely don't need to initialize
         local_stage = context.stage
@@ -1022,8 +1030,8 @@ class NetworkInitializeOperation(NetworkOperation):
         """
         :type context: NetworkSessionContext
         """
-        assert context.transfer_session is not None
-        assert ASYNC_OPERATIONS in context.capabilities
+        self._assert(context.transfer_session is not None)
+        self._assert(ASYNC_OPERATIONS in context.capabilities)
 
         # if local stage is transferring or beyond, we definitely don't need to initialize
         if context.stage is not None and transfer_stages.stage(
@@ -1044,7 +1052,7 @@ class NetworkLegacyNoOpMixin(object):
         """
         :type context: NetworkSessionContext
         """
-        assert ASYNC_OPERATIONS not in context.capabilities
+        self._assert(ASYNC_OPERATIONS not in context.capabilities)
         return transfer_statuses.COMPLETED
 
 
@@ -1065,8 +1073,8 @@ class NetworkSerializeOperation(NetworkOperation):
         """
         :type context: NetworkSessionContext
         """
-        assert context.transfer_session is not None
-        assert ASYNC_OPERATIONS in context.capabilities
+        self._assert(context.transfer_session is not None)
+        self._assert(ASYNC_OPERATIONS in context.capabilities)
 
         remote_status, data = self.remote_proceed_to(
             context,
@@ -1098,8 +1106,8 @@ class NetworkQueueOperation(NetworkOperation):
         """
         :type context: NetworkSessionContext
         """
-        assert context.transfer_session is not None
-        assert ASYNC_OPERATIONS in context.capabilities
+        self._assert(context.transfer_session is not None)
+        self._assert(ASYNC_OPERATIONS in context.capabilities)
 
         update_kwargs = {}
         if context.is_push:
@@ -1121,8 +1129,8 @@ class NetworkPushTransferOperation(NetworkOperation):
         """
         :type context: NetworkSessionContext
         """
-        assert context.transfer_session is not None
-        assert context.is_push
+        self._assert(context.transfer_session is not None)
+        self._assert(context.is_push)
 
         if context.transfer_session.records_total == 0:
             # since we won't be transferring anything, we can say we're done
@@ -1165,8 +1173,8 @@ class NetworkPullTransferOperation(NetworkOperation):
         """
         :type context: NetworkSessionContext
         """
-        assert context.transfer_session is not None
-        assert context.is_pull
+        self._assert(context.transfer_session is not None)
+        self._assert(context.is_pull)
 
         transfer_session = context.transfer_session
 
@@ -1213,7 +1221,7 @@ class NetworkDequeueOperation(NetworkOperation):
         """
         :type context: NetworkSessionContext
         """
-        assert ASYNC_OPERATIONS in context.capabilities
+        self._assert(ASYNC_OPERATIONS in context.capabilities)
 
         remote_status, _ = self.remote_proceed_to(context, transfer_stages.DEQUEUING)
         return remote_status
@@ -1236,8 +1244,8 @@ class NetworkDeserializeOperation(NetworkOperation):
         """
         :type context: NetworkSessionContext
         """
-        assert context.transfer_session is not None
-        assert ASYNC_OPERATIONS in context.capabilities
+        self._assert(context.transfer_session is not None)
+        self._assert(ASYNC_OPERATIONS in context.capabilities)
 
         remote_status, _ = self.remote_proceed_to(
             context, transfer_stages.DESERIALIZING

@@ -2,6 +2,7 @@ import hashlib
 import uuid
 
 from django.db import models
+from morango.utils import _assert
 
 
 def sha2_uuid(*args):
@@ -96,9 +97,10 @@ class UUIDModelMixin(models.Model):
             return uuid.uuid4().hex
 
         # if we got this far, uuid_input_fields should be a tuple
-        assert isinstance(
-            self.uuid_input_fields, tuple
-        ), "'uuid_input_fields' must either be a tuple or the string 'RANDOM'"
+        _assert(
+            isinstance(self.uuid_input_fields, tuple),
+            "'uuid_input_fields' must either be a tuple or the string 'RANDOM'",
+        )
 
         # calculate the input to the UUID function
         hashable_input_vals = []
