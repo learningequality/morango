@@ -86,6 +86,22 @@ class QueueStoreIntoBufferTestCase(TestCase):
         self.assertRecordsBuffered(self.data["group1_c2"])
         self.assertRecordsBuffered(self.data["group2_c1"])
 
+    def test_very_many_fsics(self):
+        """
+        Regression test against 'Expression tree is too large (maximum depth 1000)' error with many fsics
+        """
+        fsics = {self.data["group1_id"].id: 1, self.data["group2_id"].id: 1}
+        fsics.update({
+            uuid.uuid4().hex: i
+            for i in range(2000)
+        })
+        self.transfer_session.client_fsic = json.dumps(fsics)
+        _queue_into_buffer(self.transfer_session)
+        # ensure all store and buffer records are buffered
+        self.assertRecordsBuffered(self.data["group1_c1"])
+        self.assertRecordsBuffered(self.data["group1_c2"])
+        self.assertRecordsBuffered(self.data["group2_c1"])
+
     def test_fsic_specific_id(self):
         fsics = {self.data["group2_id"].id: 1}
         self.transfer_session.client_fsic = json.dumps(fsics)
