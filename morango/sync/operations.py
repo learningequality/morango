@@ -442,6 +442,9 @@ def _queue_into_buffer(transfersession):
     chunk = fsics[:chunk_size]
     select_buffers = []
     select_rmc_buffers = []
+    transfersession_pk_field = next(
+        f for f in TransferSession._meta.fields if f.primary_key
+    )
 
     while chunk:
         # create condition for all push FSICs where instance_ids are equal, but internal counters are higher than
@@ -467,22 +470,29 @@ def _queue_into_buffer(transfersession):
         select_buffers.append(
             """SELECT
                    id, serialized, deleted, last_saved_instance, last_saved_counter, hard_deleted, model_name, profile,
-                   partition, source_id, conflicting_serialized_data, '{transfer_session_id}', _self_ref_fk
+                   partition, source_id, conflicting_serialized_data,
+                   CAST ('{transfer_session_id}' AS {transfer_session_id_type}), _self_ref_fk
                FROM {store} WHERE {condition}
             """.format(
                 transfer_session_id=transfersession.id,
+                transfer_session_id_type=transfersession_pk_field.rel_db_type(
+                    connection
+                ),
                 condition=where_condition,
                 store=Store._meta.db_table,
             )
         )
         # take all record max counters that are foreign keyed onto store models, which were queued into the buffer
         select_rmc_buffers.append(
-            """SELECT instance_id, counter, '{transfer_session_id}', store_model_id
+            """SELECT instance_id, counter, CAST ('{transfer_session_id}' AS {transfer_session_id_type}), store_model_id
                FROM {record_max_counter} AS rmc
                INNER JOIN {outgoing_buffer} AS buffer ON rmc.store_model_id = buffer.model_uuid
                WHERE buffer.transfer_session_id = '{transfer_session_id}'
             """.format(
                 transfer_session_id=transfersession.id,
+                transfer_session_id_type=transfersession_pk_field.rel_db_type(
+                    connection
+                ),
                 record_max_counter=RecordMaxCounter._meta.db_table,
                 outgoing_buffer=Buffer._meta.db_table,
             )
