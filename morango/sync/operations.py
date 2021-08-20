@@ -442,9 +442,6 @@ def _queue_into_buffer(transfersession):
     chunk = fsics[:chunk_size]
     select_buffers = []
     select_rmc_buffers = []
-    transfersession_pk_field = next(
-        f for f in TransferSession._meta.fields if f.primary_key
-    )
 
     while chunk:
         # create condition for all push FSICs where instance_ids are equal, but internal counters are higher than
@@ -475,7 +472,7 @@ def _queue_into_buffer(transfersession):
                FROM {store} WHERE {condition}
             """.format(
                 transfer_session_id=transfersession.id,
-                transfer_session_id_type=transfersession_pk_field.rel_db_type(
+                transfer_session_id_type=TransferSession._meta.pk.rel_db_type(
                     connection
                 ),
                 condition=where_condition,
@@ -490,7 +487,7 @@ def _queue_into_buffer(transfersession):
                WHERE buffer.transfer_session_id = '{transfer_session_id}'
             """.format(
                 transfer_session_id=transfersession.id,
-                transfer_session_id_type=transfersession_pk_field.rel_db_type(
+                transfer_session_id_type=TransferSession._meta.pk.rel_db_type(
                     connection
                 ),
                 record_max_counter=RecordMaxCounter._meta.db_table,
