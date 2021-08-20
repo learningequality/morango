@@ -20,6 +20,7 @@ from morango.constants.capabilities import ASYNC_OPERATIONS
 from morango.constants import transfer_stages
 from morango.constants import transfer_statuses
 from morango.errors import MorangoResumeSyncError
+from morango.errors import MorangoLimitExceeded
 from morango.models.certificates import Filter
 from morango.models.core import Buffer
 from morango.models.core import DatabaseMaxCounter
@@ -54,6 +55,8 @@ if "postgresql" in transaction.get_connection(USING_DB).vendor:
         "Please add a `default-serializable` database connection in your django settings file, \
             which copies all the configuration settings of the `default` db connection",
     )
+
+SQL_UNION_MAX = 500
 
 
 class OperationLogger(object):
@@ -434,11 +437,21 @@ def _queue_into_buffer(transfersession):
     if filter_prefixes:
         partition_conditions = [_join_with_logical_operator(partition_conditions, "OR")]
 
+    chunk_size = 200
     fsics = list(fsics.items())
+    fsics_len = len(fsics)
+    fsics_limit = chunk_size * SQL_UNION_MAX
+
+    if fsics_len >= fsics_limit:
+        raise MorangoLimitExceeded(
+            "Limit of {limit} instance counters exceeded with {actual}".format(
+                limit=fsics_limit,
+                actual=fsics_len,
+            )
+        )
 
     # chunk fsics creating multiple SQL selects which will be unioned before insert
     i = 0
-    chunk_size = 200
     chunk = fsics[:chunk_size]
     select_buffers = []
     select_rmc_buffers = []

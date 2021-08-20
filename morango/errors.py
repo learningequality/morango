@@ -60,3 +60,7 @@ class MorangoResumeSyncError(MorangoError):
 
 class MorangoContextUpdateError(MorangoError):
     pass
+
+
+class MorangoLimitExceeded(MorangoError):
+    pass
