@@ -7,4 +7,4 @@ steps:
 
   - label: Build python package
     command:
-     - make dist
+     - .buildkite/build.sh
