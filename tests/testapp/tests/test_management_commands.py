@@ -72,3 +72,8 @@ class CleanupSyncsTestCase(TestCase):
         call_command("cleanupsyncs", expiration=1)
         assert_session_is_cleared(self.transfersession_old)
         assert_session_is_cleared(self.transfersession_new)
+
+    def test_filtering_sessions_cleared(self):
+        call_command("cleanupsyncs", ids=self.syncsession_old.id, expiration=0)
+        assert_session_is_cleared(self.transfersession_old)
+        assert_session_is_not_cleared(self.transfersession_new)

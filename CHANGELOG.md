@@ -5,6 +5,7 @@ List of the most important changes for each release.
 ## 0.6.5
 - Sets queuing limit of 100k combined FSICs between client and server
 - Fixes SQL expression tree error when there are many FSICs, up to 100k limit
+- Adds additional `ids` argument to `cleanupsyncs` management command
 
 ## 0.6.4
 - Fixes issue with `assert` statement removal during python optimization
