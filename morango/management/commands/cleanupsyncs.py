@@ -12,6 +12,12 @@ class Command(BaseCommand):
 
     def add_arguments(self, parser):
         parser.add_argument(
+            "--ids",
+            type=lambda ids: ids.split(","),
+            default=None,
+            help="Comma separated list of SyncSession IDs to filter against"
+        )
+        parser.add_argument(
             "--expiration",
             action="store",
             type=int,
@@ -28,6 +34,11 @@ class Command(BaseCommand):
         oldsessions = TransferSession.objects.filter(
             last_activity_timestamp__lt=cutoff, active=True
         )
+
+        # if ids arg was passed, filter down sessions to only those IDs if included by expiration filter
+        if options["ids"]:
+            oldsessions = oldsessions.filter(sync_session_id__in=options["ids"])
+
         sesscount = oldsessions.count()
 
         # loop over the stale sessions one by one to close them out

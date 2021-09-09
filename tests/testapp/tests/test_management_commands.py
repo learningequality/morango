@@ -6,8 +6,6 @@ from django.test import TestCase
 from django.utils import timezone
 
 from .helpers import create_buffer_and_store_dummy_data
-from morango.models.core import Buffer
-from morango.models.core import RecordMaxCounterBuffer
 from morango.models.core import SyncSession
 from morango.models.core import TransferSession
 
@@ -70,5 +68,16 @@ class CleanupSyncsTestCase(TestCase):
 
     def test_all_sessions_cleared(self):
         call_command("cleanupsyncs", expiration=1)
+        assert_session_is_cleared(self.transfersession_old)
+        assert_session_is_cleared(self.transfersession_new)
+
+    def test_filtering_sessions_cleared(self):
+        call_command("cleanupsyncs", ids=[self.syncsession_old.id], expiration=0)
+        assert_session_is_cleared(self.transfersession_old)
+        assert_session_is_not_cleared(self.transfersession_new)
+
+    def test_multiple_ids_as_list(self):
+        ids = [self.syncsession_old.id, self.syncsession_new.id]
+        call_command("cleanupsyncs", ids=ids, expiration=0)
         assert_session_is_cleared(self.transfersession_old)
         assert_session_is_cleared(self.transfersession_new)
