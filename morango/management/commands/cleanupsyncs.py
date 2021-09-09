@@ -13,7 +13,8 @@ class Command(BaseCommand):
     def add_arguments(self, parser):
         parser.add_argument(
             "--ids",
-            type=str,
+            type=lambda ids: ids.split(","),
+            default=None,
             help="Comma separated list of SyncSession IDs to filter against"
         )
         parser.add_argument(
@@ -36,7 +37,7 @@ class Command(BaseCommand):
 
         # if ids arg was passed, filter down sessions to only those IDs if included by expiration filter
         if options["ids"]:
-            oldsessions = oldsessions.filter(sync_session_id__in=options["ids"].split(","))
+            oldsessions = oldsessions.filter(sync_session_id__in=options["ids"])
 
         sesscount = oldsessions.count()
 
