@@ -2,6 +2,38 @@
 
 List of the most important changes for each release.
 
+## 0.6.5
+- Sets queuing limit of 100k combined FSICs between client and server
+- Fixes SQL expression tree error when there are many FSICs, up to 100k limit
+- Adds additional `ids` argument to `cleanupsyncs` management command
+
+## 0.6.4
+- Fixes issue with `assert` statement removal during python optimization
+
+## 0.6.3
+
+- Fixes issue handling database counters which caused repeat syncing of unchanged data
+
+## 0.6.2
+
+- Fixes slow performance due to excessive use of `sleep`
+
+## 0.6.1
+
+- Fix to set counters on `TransferSession` *after* serialization
+- Fix capabilities request header as it should be prefixed with `HTTP`
+- Fix issues with flow of transfer operations
+- Logging and error handling improvements
+
+
+## 0.6.0
+
+- Track the `TransferSession` that last modified a `Store` record
+- Add state attributes to `TransferSession` for persisting its stage and status during a sync
+- Update the timestamp of the last activity for a `SyncSession` and `TransferSession` during a sync
+- Add support for resuming a sync
+- Add support for configuring custom handling of transfer operations
+- Add support for handling transfer operations asynchronously
 
 ## 0.5.6
 

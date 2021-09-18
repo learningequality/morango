@@ -27,6 +27,7 @@ from morango.errors import CertificateScopeNotSubset
 from morango.errors import CertificateSignatureInvalid
 from morango.errors import NonceDoesNotExist
 from morango.errors import NonceExpired
+from morango.utils import _assert
 
 
 @python_2_unicode_compatible
@@ -87,9 +88,10 @@ class Certificate(mptt.models.MPTTModel, UUIDModelMixin):
         cert.scope_version = scope_def.version
         cert.profile = scope_def.profile
         primary_scope_param_key = scope_def.primary_scope_param_key
-        assert (
-            primary_scope_param_key
-        ), "Root cert can only be created for ScopeDefinition that has primary_scope_param_key defined"
+        _assert(
+            primary_scope_param_key,
+            "Root cert can only be created for ScopeDefinition that has primary_scope_param_key defined",
+        )
 
         # generate a key and extract the public key component
         cert.private_key = Key()
@@ -207,11 +209,11 @@ class Certificate(mptt.models.MPTTModel, UUIDModelMixin):
         cert = cls.deserialize(cert_data["serialized"], cert_data["signature"])
 
         # verify the id of the cert matches the id of the outer serialized data
-        assert cert_data["id"] == cert.id
+        _assert(cert_data["id"] == cert.id, "Serialized ID does not match")
 
         # check that the expected ID matches, if specified
         if expected_last_id:
-            assert cert.id == expected_last_id
+            _assert(cert.id == expected_last_id, "ID does not match expected value")
 
         # if cert already exists locally, it's already been verified, so no need to continue
         # (this also means we have the full cert chain for it, given the `parent` relations)
@@ -224,9 +226,10 @@ class Certificate(mptt.models.MPTTModel, UUIDModelMixin):
         if len(cert_chain) > 1:
             cls.save_certificate_chain(cert_chain[:-1], expected_last_id=cert.parent_id)
         else:
-            assert (
-                not cert.parent_id
-            ), "First cert in chain must be a root cert (no parent)"
+            _assert(
+                not cert.parent_id,
+                "First cert in chain must be a root cert (no parent)",
+            )
 
         # ensure the certificate checks out (now that we know its parent, if any, is saved)
         cert.check_certificate()
@@ -237,9 +240,9 @@ class Certificate(mptt.models.MPTTModel, UUIDModelMixin):
         return cert
 
     def sign(self, value):
-        assert (
-            self.private_key
-        ), "Can only sign using certificates that have private keys"
+        _assert(
+            self.private_key, "Can only sign using certificates that have private keys"
+        )
         return self.private_key.sign(value)
 
     def verify(self, value, signature):
@@ -350,6 +353,8 @@ class Filter(object):
         return self.is_subset_of(other)
 
     def __eq__(self, other):
+        if other is None:
+            return False
         for partition in self._filter_tuple:
             if partition not in other._filter_tuple:
                 return False

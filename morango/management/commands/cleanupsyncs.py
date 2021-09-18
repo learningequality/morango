@@ -1,7 +1,6 @@
 import datetime
 
 from django.core.management.base import BaseCommand
-from django.db import connection
 from django.db import transaction
 from django.utils import timezone
 
@@ -12,6 +11,12 @@ class Command(BaseCommand):
     help = "Closes and cleans up the data for any incomplete sync sessions older than a certain number of hours."
 
     def add_arguments(self, parser):
+        parser.add_argument(
+            "--ids",
+            type=lambda ids: ids.split(","),
+            default=None,
+            help="Comma separated list of SyncSession IDs to filter against"
+        )
         parser.add_argument(
             "--expiration",
             action="store",
@@ -29,6 +34,11 @@ class Command(BaseCommand):
         oldsessions = TransferSession.objects.filter(
             last_activity_timestamp__lt=cutoff, active=True
         )
+
+        # if ids arg was passed, filter down sessions to only those IDs if included by expiration filter
+        if options["ids"]:
+            oldsessions = oldsessions.filter(sync_session_id__in=options["ids"])
+
         sesscount = oldsessions.count()
 
         # loop over the stale sessions one by one to close them out
@@ -45,15 +55,7 @@ class Command(BaseCommand):
 
             # delete buffer data and mark session as inactive
             with transaction.atomic():
-                with connection.cursor() as cursor:
-                    cursor.execute(
-                        "DELETE FROM morango_buffer WHERE transfer_session_id = %s",
-                        (sess.id,),
-                    )
-                    cursor.execute(
-                        "DELETE FROM morango_recordmaxcounterbuffer WHERE transfer_session_id = %s",
-                        (sess.id,),
-                    )
+                sess.delete_buffers()
                 sess.active = False
                 sess.save()
                 sess.sync_session.active = False

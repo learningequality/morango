@@ -75,16 +75,8 @@ class SyncSessionSerializer(serializers.ModelSerializer):
             "client_instance",
             "server_instance",
         )
-        read_only_fields = (
-            "start_timestamp",
-            "last_activity_timestamp",
-            "active",
-            "client_certificate",
-            "connection_kind",
-            "client_ip",
-            "server_ip",
-            "client_instance",
-        )
+        # serializer is not used for creates, so these fields are not allowed updates
+        read_only_fields = fields
 
 
 class TransferSessionSerializer(serializers.ModelSerializer):
@@ -99,11 +91,28 @@ class TransferSessionSerializer(serializers.ModelSerializer):
             "push",
             "records_transferred",
             "records_total",
+            "bytes_received",
+            "bytes_sent",
             "sync_session",
             "server_fsic",
             "client_fsic",
+            "transfer_stage",
+            "transfer_stage_status",
         )
-        read_only_fields = ("start_timestamp", "last_activity_timestamp", "active")
+        # serializer is not used for creates, so these fields are not allowed updates
+        read_only_fields = (
+            "id",
+            "start_timestamp",
+            "last_activity_timestamp",
+            "active",
+            "filter",
+            "push",
+            "sync_session",
+            "server_fsic",
+            "client_fsic",
+            "transfer_stage",
+            "transfer_stage_status",
+        )
 
 
 class InstanceIDSerializer(serializers.ModelSerializer):

@@ -56,6 +56,9 @@ clean-test: ## remove test and coverage artifacts
 lint:
 	flake8 morango
 
+migrations:
+	python tests/testapp/manage.py makemigrations
+
 test:
 	pytest tests/testapp/tests/
 

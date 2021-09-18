@@ -1,0 +1,10 @@
+steps:
+  - label: Install build packages
+    command:
+     - pip install setuptools wheel
+
+  - wait
+
+  - label: Build python package
+    command:
+     - .buildkite/build.sh

@@ -130,3 +130,16 @@ It should be cautioned that there is currently no mechanism for revoking certifi
 In Kolibri, on the ``FacilityDataset`` model, we generate the certificate as a function of the ``calculate_source_id`` method. Note that we currently set the ID of the certificate to be the same as the ID of the facility model. This allows queries on the certificate hierarchy tree to find certificates that are associated with the facility.
 
 There's flexibility in the application layer for determining the validity of a root certificate, and it's specified on a per-profile basis. For the ``facilitydata`` profile, Kolibri leverages its ``auth`` models for this.
+
+
+Session controller, contexts, and operations
+--------------------------------------------
+
+.. image:: ./session-controller.png
+
+A unidirectional sync has several stages: ``INITIALIZING``, ``SERIALIZING``, ``QUEUING``, ``TRANSFERRING``, ``DEQUEUING``, ``DESERIALIZING``, and ``CLEANUP``. Each stage requires callable objects, referred to here simply as *operations*. Operations handle the necessary operational aspects of the transfer for each stage. The ``SessionController`` class establishes an internal API for invoking those operations through a Chain-of-responsibility software design pattern. Provided with a *context*, either a ``LocalSessionContext`` or a ``NetworkSessionContext``, the controller will iterate through each incomplete stage and invoke the operations for stage, passing along the context object. An operation isn't required to handle the context, which is analogous to a request object, but can defer responsibility to the next operation in the stage's list of operations by returning ``False``. At least one operation must handle the context, which is communicated by returning a ``transfer_statuses`` constant of either ``PENDING``, ``STARTED``, ``ERRORED``, or ``COMPLETED``.
+
+.. image:: ./session-controller-seq.png
+
+The list of operations for each stage are configured through Django settings. The configuration key for each stage follows the pattern ``MORANGO_%STAGE%_OPERATIONS``, so the list/tuple of operations for the ``QUEUING`` stage access the ``MORANGO_QUEUING_OPERATIONS`` configuration value. Built-in operations implement a callable ``BaseOperation`` class by overriding a ``handle`` method. The ``BaseOperation`` class supports raising an ``AssertionError`` to defer responsibility to the next operation.
+
