@@ -595,8 +595,8 @@ class DatabaseMaxCounter(AbstractCounter):
         for filt in filters:
             qs = queryset.annotate(filt=Value(filt, output_field=models.CharField()))
             qs = qs.filter(filt__startswith=F("partition"))
-            maxes = qs.values("instance_id").annotate(maxval=Max("counter"))
-            per_filter_max.append({dmc["instance_id"]: dmc["maxval"] for dmc in maxes})
+            filt_maxes = qs.values("instance_id").annotate(maxval=Max("counter"))
+            per_filter_max.append({dmc["instance_id"]: dmc["maxval"] for dmc in filt_maxes})
 
         instance_id_lists = [maxes.keys() for maxes in per_filter_max]
         all_instance_ids = reduce(set.union, instance_id_lists, set())
@@ -634,7 +634,7 @@ class RecordMaxCounter(AbstractCounter):
 class RecordMaxCounterBuffer(AbstractCounter):
     """
     ``RecordMaxCounterBuffer`` is where combinations of instance ID and counters (from ``RecordMaxCounter``) are stored temporarily,
-    until they are sent or recieved by another morango instance.
+    until they are sent or received by another morango instance.
     """
 
     transfer_session = models.ForeignKey(TransferSession)
