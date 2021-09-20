@@ -532,8 +532,10 @@ class ValueStartsWithField(CombinedExpression):
         super(ValueStartsWithField, self).__init__(
             Value(value, output_field=models.CharField()),
             "LIKE",
-            CombinedExpression(F(field), '||', Value("%", output_field=models.CharField())),
-            output_field=models.BooleanField()
+            CombinedExpression(
+                F(field), "||", Value("%", output_field=models.CharField())
+            ),
+            output_field=models.BooleanField(),
         )
 
 
@@ -617,7 +619,9 @@ class DatabaseMaxCounter(AbstractCounter):
 
         for filt in filters:
             # {filt} LIKE partition || '%'
-            qs = queryset.annotate(filter_matches=ValueStartsWithField(filt, "partition"))
+            qs = queryset.annotate(
+                filter_matches=ValueStartsWithField(filt, "partition")
+            )
             qs = qs.filter(filter_matches=True)
             maxes = qs.values("instance_id").annotate(maxval=Max("counter"))
             per_filter_max.append({dmc["instance_id"]: dmc["maxval"] for dmc in maxes})
