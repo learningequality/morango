@@ -15,6 +15,7 @@ from django.db.models import Max
 from django.db.models import TextField
 from django.db.models import Value
 from django.db.models.deletion import Collector
+from django.db.models.expressions import CombinedExpression
 from django.db.models.fields.related import ForeignKey
 from django.db.models.functions import Cast
 from django.utils import six
@@ -514,6 +515,28 @@ class AbstractCounter(models.Model):
         abstract = True
 
 
+class ValueStartsWithField(CombinedExpression):
+    """
+    Django expression that's essentially a `startswith` comparison but comparing that a parameter value starts with a
+    table field. This also prevents Django from adding unnecessary SQL for the expression
+    """
+
+    def __init__(self, value, field):
+        """
+        {value} LIKE {field} || '%'
+
+        :param value: A str of the value LIKE field
+        :param field: A str of the field name comparing with
+        """
+        # we don't use `Concat` for appending the `%` because it also adds unnecessary SQL
+        super(ValueStartsWithField, self).__init__(
+            Value(value, output_field=models.CharField()),
+            "LIKE",
+            CombinedExpression(F(field), '||', Value("%", output_field=models.CharField())),
+            output_field=models.BooleanField()
+        )
+
+
 class DatabaseMaxCounter(AbstractCounter):
     """
     ``DatabaseMaxCounter`` is used to keep track of what data this database already has across all
@@ -593,8 +616,9 @@ class DatabaseMaxCounter(AbstractCounter):
         per_filter_max = []
 
         for filt in filters:
-            qs = queryset.annotate(filt=Value(filt, output_field=models.CharField()))
-            qs = qs.filter(filt__startswith=F("partition"))
+            # {filt} LIKE partition || '%'
+            qs = queryset.annotate(filter_matches=ValueStartsWithField(filt, "partition"))
+            qs = qs.filter(filter_matches=True)
             maxes = qs.values("instance_id").annotate(maxval=Max("counter"))
             per_filter_max.append({dmc["instance_id"]: dmc["maxval"] for dmc in maxes})
 
