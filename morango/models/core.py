@@ -566,7 +566,7 @@ class DatabaseMaxCounter(AbstractCounter):
         FSIC and thereby lead to the data not being sent, as showed up in:
         https://github.com/learningequality/kolibri/issues/8439
 
-        The solution was to add an assymetry in how FSICs are calculated, with the sending side
+        The solution was to add an asymmetry in how FSICs are calculated, with the sending side
         using a "max" instead of a "min" to ensure everything is included, and then the receiving
         side still using a "min" (though after it has completed a sync, it updates its counters
         such that the min and max should then be equivalent).
