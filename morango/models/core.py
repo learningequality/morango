@@ -623,8 +623,8 @@ class DatabaseMaxCounter(AbstractCounter):
                 filter_matches=ValueStartsWithField(filt, "partition")
             )
             qs = qs.filter(filter_matches=True)
-            maxes = qs.values("instance_id").annotate(maxval=Max("counter"))
-            per_filter_max.append({dmc["instance_id"]: dmc["maxval"] for dmc in maxes})
+            filt_maxes = qs.values("instance_id").annotate(maxval=Max("counter"))
+            per_filter_max.append({dmc["instance_id"]: dmc["maxval"] for dmc in filt_maxes})
 
         instance_id_lists = [maxes.keys() for maxes in per_filter_max]
         all_instance_ids = reduce(set.union, instance_id_lists, set())
