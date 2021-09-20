@@ -11,6 +11,7 @@ from django.db import router
 from django.db import transaction
 from django.db.models import F
 from django.db.models import Func
+from django.db.models import Max
 from django.db.models import TextField
 from django.db.models import Value
 from django.db.models.deletion import Collector
@@ -19,6 +20,7 @@ from django.db.models.functions import Cast
 from django.utils import six
 from django.utils import timezone
 
+from functools import reduce
 from morango import proquint
 from morango.registry import syncable_models
 from morango.models.certificates import Certificate
@@ -527,7 +529,7 @@ class DatabaseMaxCounter(AbstractCounter):
     @classmethod
     @transaction.atomic
     def update_fsics(cls, fsics, sync_filter):
-        internal_fsic = DatabaseMaxCounter.calculate_filter_max_counters(sync_filter)
+        internal_fsic = DatabaseMaxCounter.calculate_filter_specific_instance_counters(sync_filter)
         updated_fsic = {}
         for key, value in six.iteritems(fsics):
             if key in internal_fsic:
@@ -546,32 +548,70 @@ class DatabaseMaxCounter(AbstractCounter):
                 )
 
     @classmethod
-    def calculate_filter_max_counters(cls, filters):
+    def calculate_filter_specific_instance_counters(cls, filters, is_producer=False):
+        """
+        Returns a dict that maps instance_ids to their respective "high-water level" counters with
+        respect to the provided list of filter partitions, based on what the local database contains.
 
-        # create string of prefixes to place into sql statement
-        condition = " UNION ".join(
-            ["SELECT CAST('{}' as TEXT) AS a".format(prefix) for prefix in filters]
-        )
+        First, for each partition in the filter, it calculates the maximum values the database has
+        received through any filters containing that partition.
 
-        filter_max_calculation = """
-        SELECT PMC.instance, MIN(PMC.counter)
-        FROM
-            (
-            SELECT dmc.instance_id as instance, MAX(dmc.counter) as counter, filter as filter_partition
-            FROM {dmc_table} as dmc, (SELECT T.a as filter FROM ({filter_list}) as T) as foo
-            WHERE filter LIKE dmc.partition || '%'
-            GROUP BY instance, filter_partition
-            ) as PMC
-        GROUP BY PMC.instance
-        HAVING {count} = COUNT(PMC.filter_partition)
-        """.format(
-            dmc_table=cls._meta.db_table, filter_list=condition, count=len(filters)
-        )
+        Then, it combines these dicts into a single dict, collapsing across the filter partitions.
+        In Morango 0.6.5 and below, this was always calculated based on the "minimum" values for
+        each instance_id, and with instance_ids that didn't exist in *each* of the partitions being
+        excluded entirely. When the producing side had records needing to be sent for an instance
+        under one of the filter partitions, but not under another, it would not be included in the
+        FSIC and thereby lead to the data not being sent, as showed up in:
+        https://github.com/learningequality/kolibri/issues/8439
 
-        with connection.cursor() as cursor:
-            cursor.execute(filter_max_calculation)
-            # try to get hex value because postgres returns values as uuid
-            return {getattr(tup[0], "hex", tup[0]): tup[1] for tup in cursor.fetchall()}
+        The solution was to add an assymetry in how FSICs are calculated, with the sending side
+        using a "max" instead of a "min" to ensure everything is included, and then the receiving
+        side still using a "min" (though after it has completed a sync, it updates its counters
+        such that the min and max should then be equivalent).
+
+        One potential issue remains, but it is an edge case that can be worked around:
+        - We now take the maxes across the filter partitions and use those as the producer FSICs.
+        - When the receiver finishes integrating the received data, it updates its counters to match.
+        - If the sender had actually done a sync with just a subset of those filters in the past, it
+          might not actually have received everything available for the other filters, and hence the
+          receiver may not be correct in assuming it now has everything up to the levels of the
+          producer's FSICs (as it does by taking the "max" across the filter partition FSICs).
+        There are two ways to avoid this:
+        - Don't sync with differing subsets of the same partitions across multiple syncs. For
+          example, if you do syncs with filters "AB" and "AC", don't also do syncs with filters
+          "AC" and "AD". This is the approach that makes this work in Kolibri, for now.
+        - OR: Don't do syncs with more than one filter partition at a time. Do each one in sequence.
+          For example, rather than pushing "AB" and "AC" in a single transfer session, do one pull
+          for AB and then another one for AC. This has the disadvantage of a bit of extra overhead,
+          but would likely be the most robust option, and the easiest to enforce and reason about.
+        """
+
+        queryset = cls.objects.all()
+
+        per_filter_max = []
+
+        for filt in filters:
+            qs = queryset.annotate(filt=Value(filt, output_field=models.CharField()))
+            qs = qs.filter(filt__startswith=F("partition"))
+            maxes = qs.values("instance_id").annotate(maxval=Max("counter"))
+            per_filter_max.append({dmc["instance_id"]: dmc["maxval"] for dmc in maxes})
+
+        instance_id_lists = [maxes.keys() for maxes in per_filter_max]
+        all_instance_ids = reduce(set.union, instance_id_lists, set())
+        if is_producer:
+            # when we're sending, we want to make sure we include everything
+            result = {
+                instance_id: max([d.get(instance_id, 0) for d in per_filter_max])
+                for instance_id in all_instance_ids
+            }
+        else:
+            # when we're receiving, we don't want to overpromise on what we have
+            result = {
+                instance_id: min([d.get(instance_id, 0) for d in per_filter_max])
+                for instance_id in reduce(set.intersection, instance_id_lists, all_instance_ids)
+            }
+
+        return result
 
 
 class RecordMaxCounter(AbstractCounter):

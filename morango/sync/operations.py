@@ -700,7 +700,9 @@ class SerializeOperation(LocalOperation):
             )
 
         fsic = json.dumps(
-            DatabaseMaxCounter.calculate_filter_max_counters(context.filter)
+            DatabaseMaxCounter.calculate_filter_specific_instance_counters(
+                context.filter, is_producer=context.is_producer
+            )
         )
         if context.is_server:
             context.transfer_session.server_fsic = fsic
