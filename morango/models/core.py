@@ -658,7 +658,7 @@ class RecordMaxCounter(AbstractCounter):
 class RecordMaxCounterBuffer(AbstractCounter):
     """
     ``RecordMaxCounterBuffer`` is where combinations of instance ID and counters (from ``RecordMaxCounter``) are stored temporarily,
-    until they are sent or recieved by another morango instance.
+    until they are sent or received by another morango instance.
     """
 
     transfer_session = models.ForeignKey(TransferSession)
