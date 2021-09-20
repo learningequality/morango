@@ -445,8 +445,7 @@ def _queue_into_buffer(transfersession):
     if fsics_len >= fsics_limit:
         raise MorangoLimitExceeded(
             "Limit of {limit} instance counters exceeded with {actual}".format(
-                limit=fsics_limit,
-                actual=fsics_len,
+                limit=fsics_limit, actual=fsics_len
             )
         )
 
@@ -472,8 +471,7 @@ def _queue_into_buffer(transfersession):
 
         # combine conditions and filter by profile
         where_condition = _join_with_logical_operator(
-            profile_condition + last_saved_by_conditions + partition_conditions,
-            "AND",
+            profile_condition + last_saved_by_conditions + partition_conditions, "AND"
         )
 
         # execute raw sql to take all records that match condition, to be put into buffer for transfer
@@ -635,9 +633,7 @@ class InitializeOperation(LocalOperation):
         # attributes that we'll use to identify existing sessions. we really only want there to
         # be one of these at a time
         data = dict(
-            push=context.is_push,
-            sync_session_id=context.sync_session.id,
-            active=True,
+            push=context.is_push, sync_session_id=context.sync_session.id, active=True
         )
 
         # get the most recent transfer session
@@ -694,13 +690,12 @@ class SerializeOperation(LocalOperation):
         self._assert(context.filter is not None)
 
         if context.is_producer and SETTINGS.MORANGO_SERIALIZE_BEFORE_QUEUING:
-            _serialize_into_store(
-                context.sync_session.profile,
-                filter=context.filter,
-            )
+            _serialize_into_store(context.sync_session.profile, filter=context.filter)
 
         fsic = json.dumps(
-            DatabaseMaxCounter.calculate_filter_max_counters(context.filter)
+            DatabaseMaxCounter.calculate_filter_specific_instance_counters(
+                context.filter, is_producer=context.is_producer
+            )
         )
         if context.is_server:
             context.transfer_session.server_fsic = fsic
@@ -868,14 +863,8 @@ class ReceiverDeserializeOperation(LocalOperation):
         records_transferred = context.transfer_session.records_transferred or 0
         if SETTINGS.MORANGO_DESERIALIZE_AFTER_DEQUEUING and records_transferred > 0:
             # we first serialize to avoid deserialization merge conflicts
-            _serialize_into_store(
-                context.sync_session.profile,
-                filter=context.filter,
-            )
-            _deserialize_from_store(
-                context.sync_session.profile,
-                filter=context.filter,
-            )
+            _serialize_into_store(context.sync_session.profile, filter=context.filter)
+            _deserialize_from_store(context.sync_session.profile, filter=context.filter)
 
         # update database max counters but use latest fsics from client/server
         if context.is_receiver:
