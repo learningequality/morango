@@ -58,7 +58,9 @@ class FilterMaxCounterTestCase(TestCase):
         )
 
     def test_filter_not_in_dmc(self):
-        fmcs = DatabaseMaxCounter.calculate_filter_specific_instance_counters(Filter("ZZZ"))
+        fmcs = DatabaseMaxCounter.calculate_filter_specific_instance_counters(
+            Filter("ZZZ")
+        )
         self.assertEqual(fmcs, {})
 
     def test_instances_for_one_partition_but_not_other(self):
@@ -245,10 +247,22 @@ class TransferSessionAndStoreTestCase(TestCase):
         stores.update(last_transfer_session_id=self.instance.id)
 
     def test_get_touched_record_ids_for_model__instance(self):
-        self.assertEqual([self.user.id], list(self.instance.get_touched_record_ids_for_model(self.user)))
+        self.assertEqual(
+            [self.user.id],
+            list(self.instance.get_touched_record_ids_for_model(self.user)),
+        )
 
     def test_get_touched_record_ids_for_model__class(self):
-        self.assertEqual([self.user.id], list(self.instance.get_touched_record_ids_for_model(MyUser)))
+        self.assertEqual(
+            [self.user.id], list(self.instance.get_touched_record_ids_for_model(MyUser))
+        )
 
     def test_get_touched_record_ids_for_model__string(self):
-        self.assertEqual([self.user.id], list(self.instance.get_touched_record_ids_for_model(MyUser.morango_model_name)))
+        self.assertEqual(
+            [self.user.id],
+            list(
+                self.instance.get_touched_record_ids_for_model(
+                    MyUser.morango_model_name
+                )
+            ),
+        )

@@ -21,6 +21,7 @@ from django.utils import six
 from django.utils import timezone
 
 from functools import reduce
+
 from morango import proquint
 from morango.registry import syncable_models
 from morango.models.certificates import Certificate
@@ -311,8 +312,7 @@ class TransferSession(models.Model):
         """
         with connection.cursor() as cursor:
             cursor.execute(
-                "DELETE FROM morango_buffer WHERE transfer_session_id = %s",
-                (self.id,),
+                "DELETE FROM morango_buffer WHERE transfer_session_id = %s", (self.id,)
             )
             cursor.execute(
                 "DELETE FROM morango_recordmaxcounterbuffer WHERE transfer_session_id = %s",
@@ -529,7 +529,9 @@ class DatabaseMaxCounter(AbstractCounter):
     @classmethod
     @transaction.atomic
     def update_fsics(cls, fsics, sync_filter):
-        internal_fsic = DatabaseMaxCounter.calculate_filter_specific_instance_counters(sync_filter)
+        internal_fsic = DatabaseMaxCounter.calculate_filter_specific_instance_counters(
+            sync_filter
+        )
         updated_fsic = {}
         for key, value in six.iteritems(fsics):
             if key in internal_fsic:
@@ -608,7 +610,9 @@ class DatabaseMaxCounter(AbstractCounter):
             # when we're receiving, we don't want to overpromise on what we have
             result = {
                 instance_id: min([d.get(instance_id, 0) for d in per_filter_max])
-                for instance_id in reduce(set.intersection, instance_id_lists, all_instance_ids)
+                for instance_id in reduce(
+                    set.intersection, instance_id_lists, all_instance_ids
+                )
             }
 
         return result
@@ -689,10 +693,7 @@ class SyncableModel(UUIDModelMixin):
         _assert(
             self._get_pk_val() is not None,
             "%s object can't be deleted because its %s attribute is set to None."
-            % (
-                self._meta.object_name,
-                self._meta.pk.attname,
-            ),
+            % (self._meta.object_name, self._meta.pk.attname),
         )
         collector = Collector(using=using)
         collector.collect([self], keep_parents=keep_parents)
