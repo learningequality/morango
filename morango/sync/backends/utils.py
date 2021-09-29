@@ -18,29 +18,31 @@ def load_backend(conn):
 @lru_cache(maxsize=1)
 def calculate_max_sqlite_variables():
     """
-    SQLite has a limit on the max number of variables allowed for parameter substitution. This limit is usually 999, but
-    can be compiled to a different number. This function calculates what the max is for the sqlite version running on the device.
-    We use the calculated value to chunk our SQL bulk insert statements when deserializing from the store to the app layer.
-    Source: https://stackoverflow.com/questions/17872665/determine-maximum-number-of-columns-from-sqlite3
+    SQLite has a limit on the max number of variables allowed for parameter substitution. This limit used to be 999, but
+    can be compiled to a different number, and is now often much larger. This function reads the value from the compile options.
+    We use this value to chunk our SQL bulk insert statements when deserializing from the store to the app layer.
     """
     conn = sqlite3.connect(":memory:")
-    low = 1
-    high = 1000  # hard limit for SQLITE_MAX_VARIABLE_NUMBER <http://www.sqlite.org/limits.html>
-    conn.execute("CREATE TABLE T1 (id C1)")
-    while low < high - 1:
-        guess = (low + high) // 2
-        try:
-            statement = "select * from T1 where id in (%s)" % ",".join(
-                ["?" for _ in range(guess)]
-            )
-            values = [i for i in range(guess)]
-            conn.execute(statement, values)
-        except sqlite3.DatabaseError as ex:
-            if "too many SQL variables" in str(ex):
-                high = guess
-            else:
-                raise
-        else:
-            low = guess
-    conn.close()
-    return low
+
+    # default to 999, in case we can't read the compilation option
+    MAX_VARIABLE_NUMBER = 999
+
+    # check that target compilation option is specified, before we start looping through
+    is_defined = list(
+        conn.execute("SELECT sqlite_compileoption_used('MAX_VARIABLE_NUMBER');")
+    )[0][0]
+
+    if is_defined:
+        for i in range(500):
+            option_str = list(conn.execute("SELECT sqlite_compileoption_get(?);", [i]))[
+                0
+            ][0]
+            if option_str is None:
+                # we've hit the end of the compilation options, so we can stop
+                break
+            if option_str.startswith("MAX_VARIABLE_NUMBER="):
+                # we found the target option, so just read it and stop
+                MAX_VARIABLE_NUMBER = int(option_str.split("=")[1])
+                break
+
+    return MAX_VARIABLE_NUMBER
