@@ -1127,7 +1127,18 @@ class LegacyNetworkQueueOperation(NetworkLegacyNoOpMixin, NetworkOperation):
     Without ASYNC_OPERATIONS capability, the server will perform queuing during initialization
     """
 
-    pass
+    def handle(self, context):
+        """
+        :type context: NetworkSessionContext
+        """
+        self._assert(ASYNC_OPERATIONS not in context.capabilities)
+
+        # When pushing, this should occur after queuing locally, so we need to update the server
+        # with how many records we've queued for the push
+        if context.is_push:
+            self.update_transfer_session(context, records_total=context.transfer_session.records_total)
+
+        return transfer_statuses.COMPLETED
 
 
 class NetworkQueueOperation(NetworkOperation):
@@ -1237,7 +1248,7 @@ class NetworkPullTransferOperation(NetworkOperation):
         return op_status
 
 
-class LegacyDequeueOperation(NetworkLegacyNoOpMixin, NetworkOperation):
+class LegacyNetworkDequeueOperation(NetworkLegacyNoOpMixin, NetworkOperation):
     """
     Without ASYNC_OPERATIONS capability, the server will perform dequeuing during cleanup
     """

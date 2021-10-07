@@ -27,7 +27,7 @@ MORANGO_TRANSFERRING_OPERATIONS = (
 MORANGO_DEQUEUE_OPERATIONS = (
     "morango.sync.operations:ProducerDequeueOperation",
     "morango.sync.operations:ReceiverDequeueOperation",
-    "morango.sync.operations:LegacyDequeueOperation",
+    "morango.sync.operations:LegacyNetworkDequeueOperation",
     "morango.sync.operations:NetworkDequeueOperation",
 )
 MORANGO_DESERIALIZE_OPERATIONS = (
