@@ -1046,6 +1046,10 @@ class LegacyNetworkInitializeOperation(NetworkOperation):
         data = self.create_transfer_session(context)
         context.transfer_session.server_fsic = data.get("server_fsic") or "{}"
 
+        # A legacy instance performs queuing during the creation of the transfer session, so since we use a new
+        # workflow we need to update the network server when pushing to say how many records we've queued. For pull,
+        # we handle that here in the initialization/creation of the transfer session,
+        # since that's when it's first available.
         if context.transfer_session.pull:
             context.transfer_session.records_total = data.get("records_total", 0)
 
@@ -1133,8 +1137,9 @@ class LegacyNetworkQueueOperation(NetworkLegacyNoOpMixin, NetworkOperation):
         """
         self._assert(ASYNC_OPERATIONS not in context.capabilities)
 
-        # When pushing, this should occur after queuing locally, so we need to update the server
-        # with how many records we've queued for the push
+        # A legacy instance performs queuing during the creation of the transfer session, so since we use a new
+        # workflow we need to update the network server when pushing to say how many records we've queued. For pull,
+        # we handle that in the initialization/creation of the transfer session, since that's when it's first available.
         if context.is_push:
             self.update_transfer_session(context, records_total=context.transfer_session.records_total)
 
