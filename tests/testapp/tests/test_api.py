@@ -569,6 +569,7 @@ class SyncSessionEndpointTestCase(CertificateTestCaseMixin, APITestCase):
         # check that the syncsession was not created
         self.assertEqual(SyncSession.objects.count(), 0)
 
+    @override_settings(MORANGO_INSTANCE_INFO={"this_is_a_test": "yes"})
     def test_syncsession_can_be_created(self):
 
         data = self.get_initial_syncsession_data_for_request()
@@ -581,6 +582,9 @@ class SyncSessionEndpointTestCase(CertificateTestCaseMixin, APITestCase):
         # make the API call to create the SyncSession
         response = self.client.post(reverse("syncsessions-list"), data, format="json")
         self.assertEqual(response.status_code, 201)
+        server_instance_data = json.loads(response.data["server_instance"])
+        self.assertIn("this_is_a_test", server_instance_data)
+        self.assertEqual("yes", server_instance_data["this_is_a_test"])
 
         # check that the cert chain was deserialized
         self.assertEqual(Certificate.objects.count(), self.original_cert_count)
@@ -1140,6 +1144,14 @@ class MorangoInfoTestCase(APITestCase):
                 reverse("morangoinfo-detail", kwargs={"pk": 1}), format="json"
             )
         self.assertNotEqual(m_info.data["instance_hash"], old_id_hash)
+
+    @override_settings(MORANGO_INSTANCE_INFO={"this_is_a_test": "yes"})
+    def test_custom_instance_info(self):
+        self.m_info = self.client.get(
+            reverse("morangoinfo-detail", kwargs={"pk": 1}), format="json"
+        )
+        self.assertIn("this_is_a_test", self.m_info.data)
+        self.assertEqual(self.m_info.data["this_is_a_test"], "yes")
 
 
 class PublicKeyTestCase(APITestCase):

@@ -20,6 +20,7 @@ from django.db.models.fields.related import ForeignKey
 from django.db.models.functions import Cast
 from django.utils import six
 from django.utils import timezone
+from django.utils.functional import cached_property
 
 from functools import reduce
 
@@ -38,6 +39,7 @@ from morango.models.utils import get_0_5_mac_address
 from morango.constants import transfer_stages
 from morango.constants import transfer_statuses
 from morango.utils import _assert
+from morango.utils import SETTINGS
 
 logger = logging.getLogger(__name__)
 
@@ -120,6 +122,14 @@ class InstanceIDModel(models.Model):
     current = models.BooleanField(default=True)
     db_path = models.CharField(max_length=1000)
     system_id = models.CharField(max_length=100, blank=True)
+
+    @property
+    def instance_info(self):
+        """
+        Getter to access custom instance info defined in settings
+        :return: dict
+        """
+        return SETTINGS.MORANGO_INSTANCE_INFO
 
     @classmethod
     @transaction.atomic
@@ -234,6 +244,14 @@ class SyncSession(models.Model):
 
     # system process ID for ensuring same sync session does not run in parallel
     process_id = models.IntegerField(blank=True, null=True)
+
+    @cached_property
+    def client_instance_data(self):
+        return json.loads(self.client_instance)
+
+    @cached_property
+    def server_instance_data(self):
+        return json.loads(self.server_instance)
 
 
 class TransferSession(models.Model):

@@ -507,13 +507,15 @@ class BufferViewSet(mixins.ListModelMixin, viewsets.GenericViewSet):
 class MorangoInfoViewSet(viewsets.ViewSet):
     def retrieve(self, request, pk=None):
         (id_model, _) = InstanceIDModel.get_or_create_current_instance()
-        m_info = {
+        # include custom instance info as well
+        m_info = id_model.instance_info.copy()
+        m_info.update({
             "instance_hash": id_model.get_proquint(),
             "instance_id": id_model.id,
             "system_os": platform.system(),
             "version": morango.__version__,
             "capabilities": CAPABILITIES,
-        }
+        })
         return response.Response(m_info)
 
 

@@ -108,11 +108,15 @@ class NetworkSyncConnectionTestCase(LiveServerTestCase):
         )
         self.key = SharedKey.get_or_create_shared_key()
 
+    @override_settings(MORANGO_INSTANCE_INFO={"this_is_a_test": "yes"})
     @mock.patch.object(SyncSession.objects, "create", return_value=None)
     def test_creating_sync_session_successful(self, mock_object):
         self.assertEqual(SyncSession.objects.filter(active=True).count(), 0)
         self.network_connection.create_sync_session(self.subset_cert, self.root_cert)
         self.assertEqual(SyncSession.objects.filter(active=True).count(), 1)
+        sync_session = SyncSession.objects.get(active=True)
+        self.assertIn("this_is_a_test", sync_session.client_instance_data)
+        self.assertEqual("yes", sync_session.client_instance_data["this_is_a_test"])
 
     @mock.patch.object(NetworkSyncConnection, "_create_sync_session")
     @mock.patch.object(Certificate, "verify", return_value=False)
