@@ -5,7 +5,6 @@ This class is registered at app load time for morango in `apps.py`.
 import sys
 import inspect
 from collections import OrderedDict
-from importlib import import_module
 
 from django.db.models.fields.related import ForeignKey
 from django.utils import six
@@ -14,6 +13,7 @@ from morango.constants import transfer_stages
 from morango.errors import InvalidMorangoModelConfiguration
 from morango.errors import ModelRegistryNotReady
 from morango.errors import UnsupportedFieldType
+from morango.utils import do_import
 from morango.utils import SETTINGS
 
 
@@ -211,8 +211,7 @@ class SessionMiddlewareOperations(list):
         :type callable_imports: str[]
         """
         for callable_import in callable_imports:
-            callable_module, callable_name = callable_import.rsplit(":", 1)
-            middleware_callable = getattr(import_module(callable_module), callable_name)
+            middleware_callable = do_import(callable_import)
             if inspect.isclass(middleware_callable):
                 self.append(middleware_callable())
             else:

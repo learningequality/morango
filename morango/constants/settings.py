@@ -2,6 +2,7 @@ ALLOW_CERTIFICATE_PUSHING = False
 MORANGO_SERIALIZE_BEFORE_QUEUING = True
 MORANGO_DESERIALIZE_AFTER_DEQUEUING = True
 MORANGO_DISALLOW_ASYNC_OPERATIONS = False
+MORANGO_INSTANCE_INFO = {}
 MORANGO_INITIALIZE_OPERATIONS = (
     "morango.sync.operations:InitializeOperation",
     "morango.sync.operations:LegacyNetworkInitializeOperation",

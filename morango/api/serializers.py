@@ -1,5 +1,6 @@
 from rest_framework import exceptions
 from rest_framework import serializers
+from rest_framework.fields import ReadOnlyField
 
 from ..models.certificates import Nonce
 from ..models.core import Buffer
@@ -9,6 +10,7 @@ from ..models.core import RecordMaxCounterBuffer
 from ..models.core import SyncSession
 from ..models.core import TransferSession
 from ..models.fields.crypto import SharedKey
+from ..utils import SETTINGS
 from .fields import PublicKeyField
 
 
@@ -116,6 +118,21 @@ class TransferSessionSerializer(serializers.ModelSerializer):
 
 
 class InstanceIDSerializer(serializers.ModelSerializer):
+    def get_fields(self):
+        """
+        Override method that prepares what fields will be serialized, to include dynamic fields from
+        custom instance info configured through settings
+        """
+        fields = super(InstanceIDSerializer, self).get_fields()
+        # add read-only fields for custom instance info from settings
+        for field_name, value in SETTINGS.MORANGO_INSTANCE_INFO.items():
+            # we do not allow overwriting Morango instance info
+            if field_name not in fields:
+                custom_field = ReadOnlyField(source="instance_info.{}".format(field_name))
+                custom_field.bind(field_name, self)
+                fields[field_name] = custom_field
+        return fields
+
     class Meta:
         model = InstanceIDModel
         fields = (
