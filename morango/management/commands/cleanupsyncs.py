@@ -1,10 +1,15 @@
 import datetime
+import logging
 
 from django.core.management.base import BaseCommand
 from django.db import transaction
 from django.utils import timezone
 
+from morango.models import SyncSession
 from morango.models import TransferSession
+
+
+logger = logging.getLogger(__name__)
 
 
 class Command(BaseCommand):
@@ -30,33 +35,51 @@ class Command(BaseCommand):
         # establish the cutoff time and date for stale sessions
         cutoff = timezone.now() - datetime.timedelta(hours=options["expiration"])
 
-        # retrieve all sessions still marked as active but with no activity since the cutoff
-        oldsessions = TransferSession.objects.filter(
-            last_activity_timestamp__lt=cutoff, active=True
-        )
+        sync_sessions = SyncSession.objects.filter(active=True)
 
         # if ids arg was passed, filter down sessions to only those IDs if included by expiration filter
         if options["ids"]:
-            oldsessions = oldsessions.filter(sync_session_id__in=options["ids"])
+            sync_sessions = sync_sessions.filter(id__in=options["ids"])
 
-        sesscount = oldsessions.count()
+        # retrieve all sessions still marked as active but with no activity since the cutoff
+        transfer_sessions = TransferSession.objects.filter(
+            sync_session_id__in=sync_sessions.values("id"),
+            active=True,
+            last_activity_timestamp__lt=cutoff,
+        )
+
+        transfer_count = transfer_sessions.count()
 
         # loop over the stale sessions one by one to close them out
-        for i in range(sesscount):
-            sess = oldsessions[0]
-            print(
-                "Session {} of {}: deleting {} Buffers and {} RMC Buffers...".format(
+        for i in range(transfer_count):
+            transfer_session = transfer_sessions[0]
+            logger.info(
+                "TransferSession {} of {}: deleting {} Buffers and {} RMC Buffers...".format(
                     i + 1,
-                    sesscount,
-                    sess.buffer_set.all().count(),
-                    sess.recordmaxcounterbuffer_set.all().count(),
+                    transfer_count,
+                    transfer_session.buffer_set.all().count(),
+                    transfer_session.recordmaxcounterbuffer_set.all().count(),
                 )
             )
 
-            # delete buffer data and mark session as inactive
+            # delete buffer data and mark as inactive
             with transaction.atomic():
-                sess.delete_buffers()
-                sess.active = False
-                sess.save()
-                sess.sync_session.active = False
-                sess.sync_session.save()
+                transfer_session.delete_buffers()
+                transfer_session.active = False
+                transfer_session.save()
+
+        sync_count = sync_sessions.count()
+
+        # finally loop over sync sessions and close out if there are no other active transfer sessions
+        for i in range(sync_count):
+            sync_session = sync_sessions[0]
+            if not sync_session.transfersession_set.filter(active=True).exists():
+                logger.info(
+                    "Closing SyncSession {} of {}".format(
+                        i + 1,
+                        sync_count,
+                    )
+                )
+                sync_session.active = False
+                sync_session.save()
+
