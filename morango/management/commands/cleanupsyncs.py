@@ -82,4 +82,3 @@ class Command(BaseCommand):
                 )
                 sync_session.active = False
                 sync_session.save()
-
