@@ -4,6 +4,8 @@ List of the most important changes for each release.
 
 ## 0.6.6
 - Adds an asymmetry to FSIC calculation to ensure all matching data is synced.
+- Adds support for defining custom instance info returned from info API and during sync session creation
+- Updates `cleanupsyncs` management command to only close sync sessions if there are no other related transfer sessions active
 - Fixes issue syncing with Morangos pre-0.6.0 causing pushed records to not be dequeued
 
 ## 0.6.5
