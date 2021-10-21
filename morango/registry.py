@@ -5,7 +5,6 @@ This class is registered at app load time for morango in `apps.py`.
 import sys
 import inspect
 from collections import OrderedDict
-from importlib import import_module
 
 from django.db.models.fields.related import ForeignKey
 from django.utils import six
