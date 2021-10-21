@@ -1,13 +1,12 @@
-import base64
 import json
 import sys
 import uuid
 
-import mock
 from django.core.urlresolvers import reverse
 from django.test.utils import override_settings
 from django.urls.exceptions import NoReverseMatch
 from django.utils import timezone
+from django.utils.functional import SimpleLazyObject
 from facility_profile.models import MyUser
 from rest_framework.test import APITestCase as BaseTestCase
 from test.support import EnvironmentVarGuard
@@ -1128,6 +1127,13 @@ class BufferEndpointTestCase(CertificateTestCaseMixin, APITestCase):
         )
 
 
+def _lazy_settings():
+    return {"this_is_a_test": "lazy"}
+
+
+lazy_settings = SimpleLazyObject(_lazy_settings)
+
+
 class MorangoInfoTestCase(APITestCase):
     def setUp(self):
         InstanceIDModel.get_or_create_current_instance()
@@ -1152,6 +1158,22 @@ class MorangoInfoTestCase(APITestCase):
         )
         self.assertIn("this_is_a_test", self.m_info.data)
         self.assertEqual(self.m_info.data["this_is_a_test"], "yes")
+
+    @override_settings(MORANGO_INSTANCE_INFO="facility_profile.custom:CUSTOM_INSTANCE_INFO")
+    def test_custom_instance_info__import_path(self):
+        self.m_info = self.client.get(
+            reverse("morangoinfo-detail", kwargs={"pk": 1}), format="json"
+        )
+        self.assertIn("this_is_a_test", self.m_info.data)
+        self.assertEqual(self.m_info.data["this_is_a_test"], "import")
+
+    @override_settings(MORANGO_INSTANCE_INFO=lazy_settings)
+    def test_custom_instance_info__lazy(self):
+        self.m_info = self.client.get(
+            reverse("morangoinfo-detail", kwargs={"pk": 1}), format="json"
+        )
+        self.assertIn("this_is_a_test", self.m_info.data)
+        self.assertEqual(self.m_info.data["this_is_a_test"], "lazy")
 
 
 class PublicKeyTestCase(APITestCase):
