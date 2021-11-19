@@ -473,7 +473,7 @@ class Store(AbstractStore):
 
             except (exceptions.ValidationError, exceptions.ObjectDoesNotExist) as e:
 
-                logger.warn(
+                logger.warning(
                     "Error deserializing instance of {model} with id {id}: {error}".format(
                         model=klass_model.__name__, id=app_model.id, error=e
                     )

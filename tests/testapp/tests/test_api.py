@@ -2,7 +2,7 @@ import json
 import sys
 import uuid
 
-from django.core.urlresolvers import reverse
+from django.urls import reverse
 from django.test.utils import override_settings
 from django.urls.exceptions import NoReverseMatch
 from django.utils import timezone

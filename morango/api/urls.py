@@ -10,16 +10,16 @@ from .viewsets import SyncSessionViewSet
 from .viewsets import TransferSessionViewSet
 
 router = routers.SimpleRouter()
-router.register(r"certificates", CertificateViewSet, base_name="certificates")
+router.register(r"certificates", CertificateViewSet, basename="certificates")
 router.register(
-    r"certificatechain", CertificateChainViewSet, base_name="certificatechain"
+    r"certificatechain", CertificateChainViewSet, basename="certificatechain"
 )
-router.register(r"nonces", NonceViewSet, base_name="nonces")
-router.register(r"syncsessions", SyncSessionViewSet, base_name="syncsessions")
+router.register(r"nonces", NonceViewSet, basename="nonces")
+router.register(r"syncsessions", SyncSessionViewSet, basename="syncsessions")
 router.register(
-    r"transfersessions", TransferSessionViewSet, base_name="transfersessions"
+    r"transfersessions", TransferSessionViewSet, basename="transfersessions"
 )
-router.register(r"buffers", BufferViewSet, base_name="buffers")
-router.register(r"morangoinfo", MorangoInfoViewSet, base_name="morangoinfo")
-router.register(r"publickey", PublicKeyViewSet, base_name="publickey")
+router.register(r"buffers", BufferViewSet, basename="buffers")
+router.register(r"morangoinfo", MorangoInfoViewSet, basename="morangoinfo")
+router.register(r"publickey", PublicKeyViewSet, basename="publickey")
 urlpatterns = router.urls
