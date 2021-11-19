@@ -3,7 +3,7 @@ factory-boy==2.7.0
 fake-factory==0.5.7
 coverage==4.5.1
 mock==2.0.0
-pytest==3.7.1
-pytest-cov==2.5.1
-pytest-django==3.3.3
-typing
+pytest==3.10.1
+pytest-cov==2.8.1
+pytest-django==3.10.0
+more-itertools<=8.10.0
