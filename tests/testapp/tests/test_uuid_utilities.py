@@ -1,16 +1,15 @@
 import hashlib
 import mock
-import os
 import sys
 import uuid
 
-from django.conf import settings
 from django.test import TestCase
 from facility_profile.models import Facility
 from facility_profile.models import InteractionLog
 from facility_profile.models import MyUser
 from test.support import EnvironmentVarGuard
 
+from morango.errors import InvalidMorangoSourceId
 from morango.models.core import DatabaseIDModel
 from morango.models.core import InstanceIDModel
 from morango.models.fields.uuids import sha2_uuid
@@ -25,7 +24,7 @@ class UUIDModelMixinTestCase(TestCase):
         self.fac = Facility(name="bob")
 
     def test_calculate_uuid(self):
-        log_with_random_id = InteractionLog(user=MyUser.objects.create())
+        log_with_random_id = InteractionLog(user=MyUser.objects.create(username="Test"))
         with mock.patch(
             "uuid.uuid4", return_value=uuid.UUID("12345678123456781234567812345678")
         ):
@@ -35,6 +34,11 @@ class UUIDModelMixinTestCase(TestCase):
                 log_with_random_id.morango_model_name,
             )
             self.assertEqual(log_with_random_id.calculate_uuid(), target_uuid)
+
+    def test_calculate_uuid__empty_source_id(self):
+        with self.assertRaises(InvalidMorangoSourceId):
+            # facility source calculated from name
+            Facility.objects.create(name="")
 
     def test_save_with_id(self):
         ID = "11111111111111111111111111111111"

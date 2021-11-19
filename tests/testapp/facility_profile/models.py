@@ -110,7 +110,7 @@ class ProxyParent(MorangoMPTTModel):
             self.kind = self._KIND
 
     def calculate_source_id(self, *args, **kwargs):
-        return ''
+        return None
 
     def calculate_partition(self, *args, **kwargs):
         return ''
@@ -131,7 +131,7 @@ class ProxyModel(ProxyParent):
         proxy = True
 
     def calculate_source_id(self, *args, **kwargs):
-        return ''
+        return None
 
     def calculate_partition(self, *args, **kwargs):
         return ''

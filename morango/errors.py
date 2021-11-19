@@ -64,3 +64,7 @@ class MorangoContextUpdateError(MorangoError):
 
 class MorangoLimitExceeded(MorangoError):
     pass
+
+
+class InvalidMorangoSourceId(MorangoError):
+    pass
