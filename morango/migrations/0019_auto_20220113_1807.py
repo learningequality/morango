@@ -11,18 +11,41 @@ class Migration(migrations.Migration):
     """
 
     dependencies = [
-        ('morango', '0018_auto_20210714_2216'),
+        ("morango", "0018_auto_20210714_2216"),
     ]
 
     operations = [
         migrations.AlterField(
-            model_name='transfersession',
-            name='transfer_stage',
-            field=models.CharField(blank=True, max_length=20, null=True, choices=[('initializing', 'Initializing'), ('serializing', 'Serializing'), ('queuing', 'Queuing'), ('transferring', 'Transferring'), ('dequeuing', 'Dequeuing'), ('deserializing', 'Deserializing'), ('cleanup', 'Cleanup')]),
+            model_name="transfersession",
+            name="transfer_stage",
+            field=models.CharField(
+                blank=True,
+                max_length=20,
+                null=True,
+                choices=[
+                    ("initializing", "Initializing"),
+                    ("serializing", "Serializing"),
+                    ("queuing", "Queuing"),
+                    ("transferring", "Transferring"),
+                    ("dequeuing", "Dequeuing"),
+                    ("deserializing", "Deserializing"),
+                    ("cleanup", "Cleanup"),
+                ],
+            ),
         ),
         migrations.AlterField(
-            model_name='transfersession',
-            name='transfer_stage_status',
-            field=models.CharField(blank=True, max_length=20, null=True, choices=[('pending', 'Pending'), ('started', 'Started'), ('completed', 'Completed'), ('errored', 'Errored')]),
+            model_name="transfersession",
+            name="transfer_stage_status",
+            field=models.CharField(
+                blank=True,
+                max_length=20,
+                null=True,
+                choices=[
+                    ("pending", "Pending"),
+                    ("started", "Started"),
+                    ("completed", "Completed"),
+                    ("errored", "Errored"),
+                ],
+            ),
         ),
     ]
