@@ -162,8 +162,8 @@ class TransferSessionTestCase(TestCase):
         )
 
     def test_update_state(self):
-        self.assertEqual("", self.instance.transfer_stage)
-        self.assertEqual("", self.instance.transfer_stage_status)
+        self.assertIsNone(self.instance.transfer_stage)
+        self.assertIsNone(self.instance.transfer_stage_status)
         previous_activity = self.instance.last_activity_timestamp
         previous_sync_activity = self.sync_session.last_activity_timestamp
 
@@ -179,29 +179,29 @@ class TransferSessionTestCase(TestCase):
         )
 
     def test_update_state__only_stage(self):
-        self.assertEqual("", self.instance.transfer_stage)
-        self.assertEqual("", self.instance.transfer_stage_status)
+        self.assertIsNone(self.instance.transfer_stage)
+        self.assertIsNone(self.instance.transfer_stage_status)
         previous_activity = self.instance.last_activity_timestamp
         previous_sync_activity = self.sync_session.last_activity_timestamp
 
         self.instance.update_state(stage=transfer_stages.QUEUING)
 
         self.assertEqual(transfer_stages.QUEUING, self.instance.transfer_stage)
-        self.assertEqual("", self.instance.transfer_stage_status)
+        self.assertIsNone(self.instance.transfer_stage_status)
         self.assertLess(previous_activity, self.instance.last_activity_timestamp)
         self.assertLess(
             previous_sync_activity, self.sync_session.last_activity_timestamp
         )
 
     def test_update_state__only_status(self):
-        self.assertEqual("", self.instance.transfer_stage)
-        self.assertEqual("", self.instance.transfer_stage_status)
+        self.assertIsNone(self.instance.transfer_stage)
+        self.assertIsNone(self.instance.transfer_stage_status)
         previous_activity = self.instance.last_activity_timestamp
         previous_sync_activity = self.sync_session.last_activity_timestamp
 
         self.instance.update_state(stage_status=transfer_statuses.PENDING)
 
-        self.assertEqual("", self.instance.transfer_stage)
+        self.assertIsNone(self.instance.transfer_stage)
         self.assertEqual(transfer_statuses.PENDING, self.instance.transfer_stage_status)
         self.assertLess(previous_activity, self.instance.last_activity_timestamp)
         self.assertLess(
@@ -209,15 +209,15 @@ class TransferSessionTestCase(TestCase):
         )
 
     def test_update_state__none(self):
-        self.assertEqual("", self.instance.transfer_stage)
-        self.assertEqual("", self.instance.transfer_stage_status)
+        self.assertIsNone(self.instance.transfer_stage)
+        self.assertIsNone(self.instance.transfer_stage_status)
         previous_activity = self.instance.last_activity_timestamp
         previous_sync_activity = self.sync_session.last_activity_timestamp
 
         self.instance.update_state()
 
-        self.assertEqual("", self.instance.transfer_stage)
-        self.assertEqual("", self.instance.transfer_stage_status)
+        self.assertIsNone(self.instance.transfer_stage)
+        self.assertIsNone(self.instance.transfer_stage_status)
         self.assertEqual(previous_activity, self.instance.last_activity_timestamp)
         self.assertEqual(
             previous_sync_activity, self.sync_session.last_activity_timestamp

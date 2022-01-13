@@ -288,10 +288,10 @@ class TransferSession(models.Model):
 
     # stages and stage status of transfer session
     transfer_stage = models.CharField(
-        max_length=20, choices=transfer_stages.CHOICES, blank=True
+        max_length=20, choices=transfer_stages.CHOICES, blank=True, null=True,
     )
     transfer_stage_status = models.CharField(
-        max_length=20, choices=transfer_statuses.CHOICES, blank=True
+        max_length=20, choices=transfer_statuses.CHOICES, blank=True, null=True,
     )
 
     @property
