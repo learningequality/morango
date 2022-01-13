@@ -25,6 +25,7 @@ from django.utils.functional import cached_property
 from functools import reduce
 
 from morango import proquint
+from morango.errors import InvalidMorangoSourceId
 from morango.registry import syncable_models
 from morango.models.certificates import Certificate
 from morango.models.certificates import Filter
@@ -472,7 +473,7 @@ class Store(AbstractStore):
 
             except (exceptions.ValidationError, exceptions.ObjectDoesNotExist) as e:
 
-                logger.warn(
+                logger.warning(
                     "Error deserializing instance of {model} with id {id}: {error}".format(
                         model=klass_model.__name__, id=app_model.id, error=e
                     )
@@ -642,7 +643,9 @@ class DatabaseMaxCounter(AbstractCounter):
             )
             qs = qs.filter(filter_matches=True)
             filt_maxes = qs.values("instance_id").annotate(maxval=Max("counter"))
-            per_filter_max.append({dmc["instance_id"]: dmc["maxval"] for dmc in filt_maxes})
+            per_filter_max.append(
+                {dmc["instance_id"]: dmc["maxval"] for dmc in filt_maxes}
+            )
 
         instance_id_lists = [maxes.keys() for maxes in per_filter_max]
         all_instance_ids = reduce(set.union, instance_id_lists, set())
@@ -831,9 +834,18 @@ class SyncableModel(UUIDModelMixin):
         return sha2_uuid(partition_value, source_id_value, model_name)
 
     def calculate_uuid(self):
-        self._morango_source_id = self.calculate_source_id()
-        if self._morango_source_id is None:
-            self._morango_source_id = uuid.uuid4().hex
+        if not self._morango_source_id:
+            self._morango_source_id = self.calculate_source_id()
+            if self._morango_source_id is None:
+                self._morango_source_id = uuid.uuid4().hex
+            elif self._morango_source_id == "":
+                # undefined behavior, which due to dynamic nature of calculating it, this could be an unintentional bug
+                # so we raise an error to strictly enforce this
+                raise InvalidMorangoSourceId(
+                    "{}.calculate_source_id() returned empty string".format(
+                        self.__class__.__name__
+                    )
+                )
 
         namespaced_id = self.compute_namespaced_id(
             self.calculate_partition(), self._morango_source_id, self.morango_model_name
