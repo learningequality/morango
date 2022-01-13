@@ -2,6 +2,9 @@
 
 List of the most important changes for each release.
 
+## 0.6.7
+- Updates transfer status fields to be nullable and corrects prior migration
+
 ## 0.6.6
 - Adds an asymmetry to FSIC calculation to ensure all matching data is synced.
 - Adds support for defining custom instance info returned from info API and during sync session creation
