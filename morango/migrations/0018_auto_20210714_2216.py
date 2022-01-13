@@ -22,6 +22,7 @@ class Migration(migrations.Migration):
             name="transfer_stage",
             field=models.CharField(
                 blank=True,
+                null=True,
                 choices=[
                     ("initializing", "Initializing"),
                     ("serializing", "Serializing"),
@@ -39,6 +40,7 @@ class Migration(migrations.Migration):
             name="transfer_stage_status",
             field=models.CharField(
                 blank=True,
+                null=True,
                 choices=[
                     ("pending", "Pending"),
                     ("started", "Started"),
