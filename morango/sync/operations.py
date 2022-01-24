@@ -1,4 +1,6 @@
+from curses import raw
 import functools
+import itertools
 import json
 import logging
 import uuid
@@ -11,7 +13,6 @@ from django.db import router
 from django.db import transaction
 from django.db.models import Q
 from django.db.models import signals
-from django.utils import six
 from django.utils import timezone
 from rest_framework.exceptions import ValidationError
 
@@ -31,6 +32,11 @@ from morango.models.core import RecordMaxCounter
 from morango.models.core import RecordMaxCounterBuffer
 from morango.models.core import Store
 from morango.models.core import TransferSession
+from morango.models.fsic_utils import (
+    calculate_directional_fsic_diff,
+    calculate_directional_fsic_diff_v2,
+    expand_fsic_for_use,
+)
 from morango.registry import syncable_models
 from morango.sync.backends.utils import load_backend
 from morango.sync.context import LocalSessionContext
@@ -88,22 +94,6 @@ def _self_referential_fk(model):
             if issubclass(model, f.related_model):
                 return f.attname
     return None
-
-
-def _fsic_queuing_calc(fsic1, fsic2):
-    """
-    We set the lower counter between two same instance ids.
-    If an instance_id exists in one fsic but not the other we want to give that counter a value of 0.
-
-    :param fsic1: dictionary containing (instance_id, counter) pairs
-    :param fsic2: dictionary containing (instance_id, counter) pairs
-    :return ``dict`` of fsics to be used in queueing the correct records to the buffer
-    """
-    return {
-        instance: fsic2.get(instance, 0)
-        for instance, counter in six.iteritems(fsic1)
-        if fsic2.get(instance, 0) < counter
-    }
 
 
 def _serialize_into_store(profile, filter=None):
@@ -420,10 +410,13 @@ def _queue_into_buffer(transfersession):
     server_fsic = json.loads(transfersession.server_fsic)
     client_fsic = json.loads(transfersession.client_fsic)
 
+    if "sub" in server_fsic:
+        return _queue_into_buffer_v2(transfersession)
+
     if transfersession.push:
-        fsics = _fsic_queuing_calc(client_fsic, server_fsic)
+        fsics = calculate_directional_fsic_diff(client_fsic, server_fsic)
     else:
-        fsics = _fsic_queuing_calc(server_fsic, client_fsic)
+        fsics = calculate_directional_fsic_diff(server_fsic, client_fsic)
 
     # if fsics are identical or receiving end has newer data, then there is nothing to queue
     if not fsics:
@@ -507,6 +500,118 @@ def _queue_into_buffer(transfersession):
         )
         i += chunk_size
         chunk = fsics[i : i + chunk_size]
+
+    with connection.cursor() as cursor:
+        cursor.execute(
+            """INSERT INTO {outgoing_buffer}
+               (model_uuid, serialized, deleted, last_saved_instance, last_saved_counter,
+               hard_deleted, model_name, profile, partition, source_id, conflicting_serialized_data,
+               transfer_session_id, _self_ref_fk)
+               {select}
+            """.format(
+                outgoing_buffer=Buffer._meta.db_table,
+                select=" UNION ".join(select_buffers),
+            )
+        )
+        cursor.execute(
+            """INSERT INTO {outgoing_rmcb}
+               (instance_id, counter, transfer_session_id, model_uuid)
+               {select}
+            """.format(
+                outgoing_rmcb=RecordMaxCounterBuffer._meta.db_table,
+                select=" UNION ".join(select_rmc_buffers),
+            )
+        )
+
+
+@transaction.atomic(using=USING_DB)
+def _queue_into_buffer_v2(transfersession):
+    """
+    Takes a chunk of data from the store to be put into the buffer to be sent to another morango instance.
+
+    ALGORITHM: We do Filter Specific Instance Counter arithmetic to get our newest data compared to the server's older data.
+    We use raw sql queries to place data in the buffer and the record max counter buffer, which matches the conditions of the FSIC.
+
+    This version uses the new FSIC format that is split out by partition, divided into sub partitions (the ones under the filter)
+    and super partitions (prefixes of the sub partitions).
+    """
+    filter_prefixes = Filter(transfersession.filter)
+    server_fsic = json.loads(transfersession.server_fsic)
+    client_fsic = json.loads(transfersession.client_fsic)
+
+    assert "sub" in server_fsic
+    assert "super" in server_fsic
+    assert "sub" in client_fsic
+    assert "super" in client_fsic
+
+    server_fsic = expand_fsic_for_use(server_fsic)
+    client_fsic = expand_fsic_for_use(client_fsic)
+
+    if transfersession.push:
+        fsics = calculate_directional_fsic_diff_v2(client_fsic, server_fsic)
+    else:
+        fsics = calculate_directional_fsic_diff_v2(server_fsic, client_fsic)
+
+    # if fsics are identical or receiving end has newer data, then there is nothing to queue
+    if not fsics:
+        return
+
+    profile_condition = ["profile = '{}'".format(transfersession.sync_session.profile)]
+
+    # create condition for filtering by partitions
+    partition_conditions = []
+    for part, insts in fsics.items():
+        if insts:
+            partition_conditions.append(
+                "partition LIKE '{}%' AND (".format(part)
+                + _join_with_logical_operator(
+                    [
+                        "(last_saved_instance = '{}' AND last_saved_counter > {})".format(
+                            inst, counter
+                        )
+                        for inst, counter in insts.items()
+                    ],
+                    "OR",
+                )
+                + ")"
+            )
+    partition_conditions = [_join_with_logical_operator(partition_conditions, "OR")]
+
+    # combine conditions and filter by profile
+    where_condition = _join_with_logical_operator(
+        profile_condition + partition_conditions, "AND"
+    )
+
+    select_buffers = []
+    select_rmc_buffers = []
+
+    # execute raw sql to take all records that match condition, to be put into buffer for transfer
+    select_buffers.append(
+        """SELECT DISTINCT
+                id, serialized, deleted, last_saved_instance, last_saved_counter, hard_deleted, model_name, profile,
+                partition, source_id, conflicting_serialized_data,
+                CAST ('{transfer_session_id}' AS {transfer_session_id_type}), _self_ref_fk
+            FROM {store} WHERE {condition}
+        """.format(
+            transfer_session_id=transfersession.id,
+            transfer_session_id_type=TransferSession._meta.pk.rel_db_type(connection),
+            condition=where_condition,
+            store=Store._meta.db_table,
+        )
+    )
+    # take all record max counters that are foreign keyed onto store models, which were queued into the buffer
+    select_rmc_buffers.append(
+        """SELECT instance_id, counter, CAST ('{transfer_session_id}' AS {transfer_session_id_type}), store_model_id
+            FROM {record_max_counter} AS rmc
+            INNER JOIN {outgoing_buffer} AS buffer ON rmc.store_model_id = buffer.model_uuid
+            WHERE buffer.transfer_session_id = '{transfer_session_id}'
+        """.format(
+            transfer_session_id=transfersession.id,
+            transfer_session_id_type=TransferSession._meta.pk.rel_db_type(connection),
+            record_max_counter=RecordMaxCounter._meta.db_table,
+            outgoing_buffer=Buffer._meta.db_table,
+        )
+    )
 
     with connection.cursor() as cursor:
         cursor.execute(
@@ -1141,7 +1246,9 @@ class LegacyNetworkQueueOperation(NetworkLegacyNoOpMixin, NetworkOperation):
         # workflow we need to update the network server when pushing to say how many records we've queued. For pull,
         # we handle that in the initialization/creation of the transfer session, since that's when it's first available.
         if context.is_push:
-            self.update_transfer_session(context, records_total=context.transfer_session.records_total)
+            self.update_transfer_session(
+                context, records_total=context.transfer_session.records_total
+            )
 
         return transfer_statuses.COMPLETED
 

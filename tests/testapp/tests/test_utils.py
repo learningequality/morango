@@ -7,6 +7,7 @@ import pytest
 
 from morango.constants.capabilities import ALLOW_CERTIFICATE_PUSHING
 from morango.constants.capabilities import ASYNC_OPERATIONS
+from morango.constants.capabilities import FSIC_V2_FORMAT
 from morango.constants import transfer_stages
 from morango.utils import SETTINGS
 from morango.utils import CAPABILITIES_CLIENT_HEADER
@@ -29,6 +30,7 @@ class SettingsTestCase(SimpleTestCase):
         self.assertEqual(SETTINGS.MORANGO_SERIALIZE_BEFORE_QUEUING, True)
         self.assertEqual(SETTINGS.MORANGO_DESERIALIZE_AFTER_DEQUEUING, True)
         self.assertEqual(SETTINGS.MORANGO_DISALLOW_ASYNC_OPERATIONS, False)
+        self.assertEqual(SETTINGS.MORANGO_DISABLE_FSIC_V2_FORMAT, False)
         self.assertLength(3, SETTINGS.MORANGO_INITIALIZE_OPERATIONS)
         self.assertLength(3, SETTINGS.MORANGO_SERIALIZE_OPERATIONS)
         self.assertLength(4, SETTINGS.MORANGO_QUEUE_OPERATIONS)
@@ -58,6 +60,13 @@ class CapabilitiesTestCase(SimpleTestCase):
 
         with self.settings(MORANGO_DISALLOW_ASYNC_OPERATIONS=True):
             self.assertNotIn(ASYNC_OPERATIONS, get_capabilities())
+
+    def test_get_capabilities__fsic_v2_format(self):
+        with self.settings(MORANGO_DISABLE_FSIC_V2_FORMAT=False):
+            self.assertIn(FSIC_V2_FORMAT, get_capabilities())
+
+        with self.settings(MORANGO_DISABLE_FSIC_V2_FORMAT=True):
+            self.assertNotIn(FSIC_V2_FORMAT, get_capabilities())
 
     @mock.patch("morango.utils.CAPABILITIES", ("TEST", "SERIALIZE"))
     def test_serialize(self):

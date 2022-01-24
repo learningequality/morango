@@ -8,6 +8,7 @@ from morango.constants import settings as default_settings
 from morango.constants.capabilities import ALLOW_CERTIFICATE_PUSHING
 from morango.constants.capabilities import GZIP_BUFFER_POST
 from morango.constants.capabilities import ASYNC_OPERATIONS
+from morango.constants.capabilities import FSIC_V2_FORMAT
 
 
 def do_import(import_string):
@@ -51,6 +52,9 @@ def get_capabilities():
 
     if SETTINGS.ALLOW_CERTIFICATE_PUSHING:
         capabilities.add(ALLOW_CERTIFICATE_PUSHING)
+
+    if not SETTINGS.MORANGO_DISABLE_FSIC_V2_FORMAT:
+        capabilities.add(FSIC_V2_FORMAT)
 
     # Middleware async operation capabilities are standard in 0.6.0 and above
     if not SETTINGS.MORANGO_DISALLOW_ASYNC_OPERATIONS:

@@ -1,5 +1,7 @@
 from __future__ import unicode_literals
+from collections import defaultdict
 
+import functools
 import json
 import logging
 import uuid
@@ -12,6 +14,7 @@ from django.db import transaction
 from django.db.models import F
 from django.db.models import Func
 from django.db.models import Max
+from django.db.models import Q
 from django.db.models import TextField
 from django.db.models import Value
 from django.db.models.deletion import Collector
@@ -32,6 +35,7 @@ from morango.models.certificates import Filter
 from morango.models.fields.uuids import sha2_uuid
 from morango.models.fields.uuids import UUIDField
 from morango.models.fields.uuids import UUIDModelMixin
+from morango.models.fsic_utils import remove_redundant_instance_counters
 from morango.models.manager import SyncableModelManager
 from morango.models.morango_mptt import MorangoMPTTModel
 from morango.models.utils import get_0_4_system_parameters
@@ -288,10 +292,16 @@ class TransferSession(models.Model):
 
     # stages and stage status of transfer session
     transfer_stage = models.CharField(
-        max_length=20, choices=transfer_stages.CHOICES, blank=True, null=True,
+        max_length=20,
+        choices=transfer_stages.CHOICES,
+        blank=True,
+        null=True,
     )
     transfer_stage_status = models.CharField(
-        max_length=20, choices=transfer_statuses.CHOICES, blank=True, null=True,
+        max_length=20,
+        choices=transfer_statuses.CHOICES,
+        blank=True,
+        null=True,
     )
 
     @property
@@ -572,97 +582,148 @@ class DatabaseMaxCounter(AbstractCounter):
 
     @classmethod
     @transaction.atomic
-    def update_fsics(cls, fsics, sync_filter):
+    def update_fsics(cls, fsics, sync_filter, v2_format=True):
         internal_fsic = DatabaseMaxCounter.calculate_filter_specific_instance_counters(
-            sync_filter
+            sync_filter, v2_format=v2_format
         )
-        updated_fsic = {}
-        for key, value in six.iteritems(fsics):
-            if key in internal_fsic:
-                # if same instance id, update fsic with larger value
-                if fsics[key] > internal_fsic[key]:
+        if v2_format:
+            internal_fsic = internal_fsic["sub"]
+            fsics = fsics["sub"]
+            for part, insts in fsics.items():
+                for inst, counter in insts.items():
+                    if internal_fsic.get("part", {}).get(inst, 0) < counter:
+                        DatabaseMaxCounter.objects.update_or_create(
+                            instance_id=inst, partition=part, defaults={"counter": counter}
+                        )
+        else:
+            updated_fsic = {}
+            for key, value in six.iteritems(fsics):
+                if key in internal_fsic:
+                    # if same instance id, update fsic with larger value
+                    if fsics[key] > internal_fsic[key]:
+                        updated_fsic[key] = fsics[key]
+                else:
+                    # if instance id is not present, add it to updated fsics
                     updated_fsic[key] = fsics[key]
-            else:
-                # if instance id is not present, add it to updated fsics
-                updated_fsic[key] = fsics[key]
 
-        # load database max counters
-        for (key, value) in six.iteritems(updated_fsic):
-            for f in sync_filter:
-                DatabaseMaxCounter.objects.update_or_create(
-                    instance_id=key, partition=f, defaults={"counter": value}
-                )
+            # load database max counters
+            for (key, value) in six.iteritems(updated_fsic):
+                for f in sync_filter:
+                    DatabaseMaxCounter.objects.update_or_create(
+                        instance_id=key, partition=f, defaults={"counter": value}
+                    )
 
     @classmethod
-    def calculate_filter_specific_instance_counters(cls, filters, is_producer=False):
+    def get_instance_counters_for_partition(cls, part, only_if_in_store=False):
         """
-        Returns a dict that maps instance_ids to their respective "high-water level" counters with
-        respect to the provided list of filter partitions, based on what the local database contains.
-
-        First, for each partition in the filter, it calculates the maximum values the database has
-        received through any filters containing that partition.
-
-        Then, it combines these dicts into a single dict, collapsing across the filter partitions.
-        In Morango 0.6.5 and below, this was always calculated based on the "minimum" values for
-        each instance_id, and with instance_ids that didn't exist in *each* of the partitions being
-        excluded entirely. When the producing side had records needing to be sent for an instance
-        under one of the filter partitions, but not under another, it would not be included in the
-        FSIC and thereby lead to the data not being sent, as showed up in:
-        https://github.com/learningequality/kolibri/issues/8439
-
-        The solution was to add an asymmetry in how FSICs are calculated, with the sending side
-        using a "max" instead of a "min" to ensure everything is included, and then the receiving
-        side still using a "min" (though after it has completed a sync, it updates its counters
-        such that the min and max should then be equivalent).
-
-        One potential issue remains, but it is an edge case that can be worked around:
-        - We now take the maxes across the filter partitions and use those as the producer FSICs.
-        - When the receiver finishes integrating the received data, it updates its counters to match.
-        - If the sender had actually done a sync with just a subset of those filters in the past, it
-          might not actually have received everything available for the other filters, and hence the
-          receiver may not be correct in assuming it now has everything up to the levels of the
-          producer's FSICs (as it does by taking the "max" across the filter partition FSICs).
-        There are two ways to avoid this:
-        - Don't sync with differing subsets of the same partitions across multiple syncs. For
-          example, if you do syncs with filters "AB" and "AC", don't also do syncs with filters
-          "AC" and "AD". This is the approach that makes this work in Kolibri, for now.
-        - OR: Don't do syncs with more than one filter partition at a time. Do each one in sequence.
-          For example, rather than pushing "AB" and "AC" in a single transfer session, do one pull
-          for AB and then another one for AC. This has the disadvantage of a bit of extra overhead,
-          but would likely be the most robust option, and the easiest to enforce and reason about.
+        Return a dict of {instance_id: counter} for DMC's with the given partition.
+        If only_if_in_store is True, only return DMCs whose instance_id is still in the Store.
         """
-
-        queryset = cls.objects.all()
-
-        per_filter_max = []
-
-        for filt in filters:
-            # {filt} LIKE partition || '%'
-            qs = queryset.annotate(
-                filter_matches=ValueStartsWithField(filt, "partition")
+        queryset = cls.objects.filter(partition=part)
+        if only_if_in_store:
+            matching_store_instances = (
+                Store.objects.filter(partition__startswith=part)
+                .values_list("last_saved_instance")
+                .distinct()
             )
-            qs = qs.filter(filter_matches=True)
-            filt_maxes = qs.values("instance_id").annotate(maxval=Max("counter"))
-            per_filter_max.append(
-                {dmc["instance_id"]: dmc["maxval"] for dmc in filt_maxes}
+            queryset = queryset.filter(instance_id__in=matching_store_instances)
+        return dict(queryset.values_list("instance_id", "counter"))
+
+    @classmethod
+    def calculate_filter_specific_instance_counters(
+        cls,
+        filters,
+        is_producer=False,
+        v2_format=True,
+        only_if_in_store=False,
+        remove_redundant=True,
+    ):
+
+        if v2_format:
+
+            queryset = cls.objects.all()
+
+            # get the DMC records with partitions that fall under the filter prefixes
+            sub_condition = functools.reduce(
+                lambda x, y: x | y,
+                [Q(partition__startswith=prefix) for prefix in filters],
+            )
+            sub_partitions = set(
+                queryset.filter(sub_condition)
+                .values_list("partition", flat=True)
+                .distinct()
             )
 
-        instance_id_lists = [maxes.keys() for maxes in per_filter_max]
-        all_instance_ids = reduce(set.union, instance_id_lists, set())
-        if is_producer:
-            # when we're sending, we want to make sure we include everything
-            result = {
-                instance_id: max([d.get(instance_id, 0) for d in per_filter_max])
-                for instance_id in all_instance_ids
-            }
-        else:
-            # when we're receiving, we don't want to overpromise on what we have
-            result = {
-                instance_id: min([d.get(instance_id, 0) for d in per_filter_max])
-                for instance_id in reduce(
-                    set.intersection, instance_id_lists, all_instance_ids
+            # get the DMC records with partitions that are prefixes of the filters
+            super_partitions = set()
+            for filt in filters:
+                qs = (
+                    queryset.annotate(
+                        filter_matches=ValueStartsWithField(filt, "partition")
+                    )
+                    .filter(filter_matches=True)
+                    .exclude(partition=filt)
                 )
+                super_partitions.update(
+                    qs.values_list("partition", flat=True).distinct()
+                )
+
+            # get the instance counters for the partitions, filtered (if requested) by instance_ids still used in the store
+            super_fsics = {}
+            for part in super_partitions:
+                super_fsics[part] = cls.get_instance_counters_for_partition(
+                    part, only_if_in_store=only_if_in_store
+                )
+            sub_fsics = {}
+            for part in sub_partitions:
+                sub_fsics[part] = cls.get_instance_counters_for_partition(
+                    part, only_if_in_store=only_if_in_store
+                )
+
+            raw_fsic = {
+                "super": super_fsics,
+                "sub": sub_fsics,
             }
+
+            # if requested, remove instance counters on partitions that are redudant to counters on super partitions
+            if remove_redundant:
+                remove_redundant_instance_counters(raw_fsic)
+
+            return raw_fsic
+
+        else:
+
+            queryset = cls.objects.all()
+
+            per_filter_max = []
+
+            for filt in filters:
+                # {filt} LIKE partition || '%'
+                qs = queryset.annotate(
+                    filter_matches=ValueStartsWithField(filt, "partition")
+                )
+                qs = qs.filter(filter_matches=True)
+                filt_maxes = qs.values("instance_id").annotate(maxval=Max("counter"))
+                per_filter_max.append(
+                    {dmc["instance_id"]: dmc["maxval"] for dmc in filt_maxes}
+                )
+
+            instance_id_lists = [maxes.keys() for maxes in per_filter_max]
+            all_instance_ids = reduce(set.union, instance_id_lists, set())
+            if is_producer:
+                # when we're sending, we want to make sure we include everything
+                result = {
+                    instance_id: max([d.get(instance_id, 0) for d in per_filter_max])
+                    for instance_id in all_instance_ids
+                }
+            else:
+                # when we're receiving, we don't want to overpromise on what we have
+                result = {
+                    instance_id: min([d.get(instance_id, 0) for d in per_filter_max])
+                    for instance_id in reduce(
+                        set.intersection, instance_id_lists, all_instance_ids
+                    )
+                }
 
         return result
 
