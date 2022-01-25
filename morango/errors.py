@@ -68,3 +68,7 @@ class MorangoLimitExceeded(MorangoError):
 
 class InvalidMorangoSourceId(MorangoError):
     pass
+
+
+class MorangoInvalidFSICPartition(MorangoError):
+    pass

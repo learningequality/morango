@@ -18,10 +18,12 @@ from rest_framework.exceptions import ValidationError
 
 from morango.api.serializers import BufferSerializer
 from morango.constants.capabilities import ASYNC_OPERATIONS
+from morango.constants.capabilities import FSIC_V2_FORMAT
 from morango.constants import transfer_stages
 from morango.constants import transfer_statuses
 from morango.errors import MorangoResumeSyncError
 from morango.errors import MorangoLimitExceeded
+from morango.errors import MorangoInvalidFSICPartition
 from morango.models.certificates import Filter
 from morango.models.core import Buffer
 from morango.models.core import DatabaseMaxCounter
@@ -398,9 +400,10 @@ def _deserialize_from_store(profile, skip_erroring=False, filter=None):
 
 
 @transaction.atomic(using=USING_DB)
-def _queue_into_buffer(transfersession):
+def _queue_into_buffer_v1(transfersession):
     """
-    Takes a chunk of data from the store to be put into the buffer to be sent to another morango instance.
+    Takes a chunk of data from the store to be put into the buffer to be sent to another morango instance. This is the legacy
+    code to handle backwards compatibility with older versions of Morango, with the v1 version of the FSIC data structure.
 
     ALGORITHM: We do Filter Specific Instance Counter arithmetic to get our newest data compared to the server's older data.
     We use raw sql queries to place data in the buffer and the record max counter buffer, which matches the conditions of the FSIC,
@@ -409,9 +412,6 @@ def _queue_into_buffer(transfersession):
     filter_prefixes = Filter(transfersession.filter)
     server_fsic = json.loads(transfersession.server_fsic)
     client_fsic = json.loads(transfersession.client_fsic)
-
-    if "sub" in server_fsic:
-        return _queue_into_buffer_v2(transfersession)
 
     if transfersession.push:
         fsics = calculate_directional_fsic_diff(client_fsic, server_fsic)
@@ -529,13 +529,13 @@ def _queue_into_buffer_v2(transfersession):
     """
     Takes a chunk of data from the store to be put into the buffer to be sent to another morango instance.
 
+    This version uses the new v2 FSIC format that is split out by partition, divided into sub partitions (the ones under the filter)
+    and super partitions (prefixes of the sub partitions).
+
     ALGORITHM: We do Filter Specific Instance Counter arithmetic to get our newest data compared to the server's older data.
     We use raw sql queries to place data in the buffer and the record max counter buffer, which matches the conditions of the FSIC.
-
-    This version uses the new FSIC format that is split out by partition, divided into sub partitions (the ones under the filter)
-    and super partitions (prefixes of the sub partitions).
     """
-    filter_prefixes = Filter(transfersession.filter)
+    sync_filter = Filter(transfersession.filter)
     server_fsic = json.loads(transfersession.server_fsic)
     client_fsic = json.loads(transfersession.client_fsic)
 
@@ -543,6 +543,11 @@ def _queue_into_buffer_v2(transfersession):
     assert "super" in server_fsic
     assert "sub" in client_fsic
     assert "super" in client_fsic
+
+    # ensure that the partitions in the FSICs are under the current filter, before using them
+    for partition in itertools.chain(server_fsic["sub"].keys(), client_fsic["sub"]):
+        if partition not in sync_filter:
+            raise MorangoInvalidFSICPartition("Partition '{}' is not in filter".format(partition))
 
     server_fsic = expand_fsic_for_use(server_fsic)
     client_fsic = expand_fsic_for_use(client_fsic)
@@ -582,11 +587,8 @@ def _queue_into_buffer_v2(transfersession):
         profile_condition + partition_conditions, "AND"
     )
 
-    select_buffers = []
-    select_rmc_buffers = []
-
     # execute raw sql to take all records that match condition, to be put into buffer for transfer
-    select_buffers.append(
+    select_buffer_query = (
         """SELECT DISTINCT
                 id, serialized, deleted, last_saved_instance, last_saved_counter, hard_deleted, model_name, profile,
                 partition, source_id, conflicting_serialized_data,
@@ -600,7 +602,7 @@ def _queue_into_buffer_v2(transfersession):
         )
     )
     # take all record max counters that are foreign keyed onto store models, which were queued into the buffer
-    select_rmc_buffers.append(
+    select_rmc_buffer_query = (
         """SELECT instance_id, counter, CAST ('{transfer_session_id}' AS {transfer_session_id_type}), store_model_id
             FROM {record_max_counter} AS rmc
             INNER JOIN {outgoing_buffer} AS buffer ON rmc.store_model_id = buffer.model_uuid
@@ -622,7 +624,7 @@ def _queue_into_buffer_v2(transfersession):
                {select}
             """.format(
                 outgoing_buffer=Buffer._meta.db_table,
-                select=" UNION ".join(select_buffers),
+                select=select_buffer_query,
             )
         )
         cursor.execute(
@@ -631,7 +633,7 @@ def _queue_into_buffer_v2(transfersession):
                {select}
             """.format(
                 outgoing_rmcb=RecordMaxCounterBuffer._meta.db_table,
-                select=" UNION ".join(select_rmc_buffers),
+                select=select_rmc_buffer_query,
             )
         )
 
@@ -799,7 +801,9 @@ class SerializeOperation(LocalOperation):
 
         fsic = json.dumps(
             DatabaseMaxCounter.calculate_filter_specific_instance_counters(
-                context.filter, is_producer=context.is_producer
+                context.filter,
+                is_producer=context.is_producer,
+                v2_format=FSIC_V2_FORMAT in context.capabilities,
             )
         )
         if context.is_server:
@@ -826,7 +830,10 @@ class ProducerQueueOperation(LocalOperation):
         self._assert(context.sync_session is not None)
         self._assert(context.transfer_session is not None)
 
-        _queue_into_buffer(context.transfer_session)
+        if FSIC_V2_FORMAT in context.capabilities:
+            _queue_into_buffer_v2(context.transfer_session)
+        else:
+            _queue_into_buffer_v1(context.transfer_session)
 
         # update the records_total for client and server transfer session
         records_total = Buffer.objects.filter(
@@ -978,7 +985,11 @@ class ReceiverDeserializeOperation(LocalOperation):
                 if context.is_server
                 else context.transfer_session.server_fsic
             )
-            DatabaseMaxCounter.update_fsics(json.loads(fsic), context.filter)
+            DatabaseMaxCounter.update_fsics(
+                json.loads(fsic),
+                context.filter,
+                v2_format=FSIC_V2_FORMAT in context.capabilities,
+            )
 
         return transfer_statuses.COMPLETED
 

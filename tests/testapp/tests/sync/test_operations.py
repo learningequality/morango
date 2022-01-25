@@ -29,7 +29,8 @@ from morango.sync.context import LocalSessionContext
 from morango.sync.controller import MorangoProfileController
 from morango.sync.controller import SessionController
 from morango.sync.operations import _dequeue_into_store
-from morango.sync.operations import _queue_into_buffer
+from morango.sync.operations import _queue_into_buffer_v1
+from morango.sync.operations import _queue_into_buffer_v2
 from morango.sync.operations import CleanupOperation
 from morango.sync.operations import ReceiverDequeueOperation
 from morango.sync.operations import ProducerDequeueOperation
@@ -67,13 +68,12 @@ def assertRecordsNotBuffered(records):
         assert i.id not in rmcb_ids
 
 
-@override_settings(MORANGO_SERIALIZE_BEFORE_QUEUING=False)
-class QueueStoreIntoBufferTestCase(TestCase):
+@override_settings(MORANGO_SERIALIZE_BEFORE_QUEUING=False, MORANGO_DISABLE_FSIC_V2_FORMAT=True)
+class QueueStoreIntoBufferV1TestCase(TestCase):
     def setUp(self):
-        super(QueueStoreIntoBufferTestCase, self).setUp()
+        super(QueueStoreIntoBufferV1TestCase, self).setUp()
         self.data = create_dummy_store_data()
         self.transfer_session = self.data["sc"].current_transfer_session
-        # self.transfer_session.filter = "abc123"
         self.context = mock.Mock(
             spec=LocalSessionContext,
             transfer_session=self.transfer_session,
@@ -81,12 +81,13 @@ class QueueStoreIntoBufferTestCase(TestCase):
             filter=self.transfer_session.get_filter(),
             is_push=self.transfer_session.push,
             is_server=False,
+            capabilities=[],
         )
 
     def test_all_fsics(self):
         fsics = {self.data["group1_id"].id: 1, self.data["group2_id"].id: 1}
         self.transfer_session.client_fsic = json.dumps(fsics)
-        _queue_into_buffer(self.transfer_session)
+        _queue_into_buffer_v1(self.transfer_session)
         # ensure all store and buffer records are buffered
         assertRecordsBuffered(self.data["group1_c1"])
         assertRecordsBuffered(self.data["group1_c2"])
@@ -99,7 +100,7 @@ class QueueStoreIntoBufferTestCase(TestCase):
         fsics = {self.data["group1_id"].id: 1, self.data["group2_id"].id: 1}
         fsics.update({uuid.uuid4().hex: i for i in range(20000)})
         self.transfer_session.client_fsic = json.dumps(fsics)
-        _queue_into_buffer(self.transfer_session)
+        _queue_into_buffer_v1(self.transfer_session)
         # ensure all store and buffer records are buffered
         assertRecordsBuffered(self.data["group1_c1"])
         assertRecordsBuffered(self.data["group1_c2"])
@@ -114,7 +115,7 @@ class QueueStoreIntoBufferTestCase(TestCase):
         fsics = {self.data["group1_id"].id: 1, self.data["group2_id"].id: 1}
         fsics.update({uuid.uuid4().hex: i for i in range(99999)})
         self.transfer_session.client_fsic = json.dumps(fsics)
-        _queue_into_buffer(self.transfer_session)
+        _queue_into_buffer_v1(self.transfer_session)
         # ensure all store and buffer records are buffered
         assertRecordsBuffered(self.data["group1_c1"])
         assertRecordsBuffered(self.data["group1_c2"])
@@ -125,12 +126,12 @@ class QueueStoreIntoBufferTestCase(TestCase):
         fsics.update({uuid.uuid4().hex: i for i in range(100000)})
         self.transfer_session.client_fsic = json.dumps(fsics)
         with self.assertRaises(MorangoLimitExceeded):
-            _queue_into_buffer(self.transfer_session)
+            _queue_into_buffer_v1(self.transfer_session)
 
     def test_fsic_specific_id(self):
         fsics = {self.data["group2_id"].id: 1}
         self.transfer_session.client_fsic = json.dumps(fsics)
-        _queue_into_buffer(self.transfer_session)
+        _queue_into_buffer_v1(self.transfer_session)
         # ensure only records modified with 2nd instance id are buffered
         assertRecordsNotBuffered(self.data["group1_c1"])
         assertRecordsNotBuffered(self.data["group1_c2"])
@@ -142,7 +143,7 @@ class QueueStoreIntoBufferTestCase(TestCase):
         self.transfer_session.client_fsic = json.dumps(fsics)
         fsics[self.data["group1_id"].id] = 0
         self.transfer_session.server_fsic = json.dumps(fsics)
-        _queue_into_buffer(self.transfer_session)
+        _queue_into_buffer_v1(self.transfer_session)
         # ensure only records with updated 1st instance id are buffered
         assertRecordsBuffered(self.data["group1_c1"])
         assertRecordsBuffered(self.data["group1_c2"])
@@ -152,7 +153,7 @@ class QueueStoreIntoBufferTestCase(TestCase):
         fsics = {self.data["group1_id"].id: 100, self.data["group2_id"].id: 100}
         self.transfer_session.client_fsic = json.dumps(fsics)
         self.transfer_session.server_fsic = json.dumps(fsics)
-        _queue_into_buffer(self.transfer_session)
+        _queue_into_buffer_v1(self.transfer_session)
         # ensure no records are buffered
         self.assertFalse(Buffer.objects.all())
         self.assertFalse(RecordMaxCounterBuffer.objects.all())
@@ -164,7 +165,7 @@ class QueueStoreIntoBufferTestCase(TestCase):
         )
         self.transfer_session.filter = filter_prefixes
         self.transfer_session.client_fsic = json.dumps(fsics)
-        _queue_into_buffer(self.transfer_session)
+        _queue_into_buffer_v1(self.transfer_session)
         # ensure records with different partition values are buffered
         assertRecordsNotBuffered([self.data["user2"]])
         assertRecordsBuffered(self.data["user3_sumlogs"])
@@ -175,7 +176,7 @@ class QueueStoreIntoBufferTestCase(TestCase):
         filter_prefixes = "{}".format(self.data["user2"].id)
         self.transfer_session.filter = filter_prefixes
         self.transfer_session.client_fsic = json.dumps(fsics)
-        _queue_into_buffer(self.transfer_session)
+        _queue_into_buffer_v1(self.transfer_session)
         # ensure only records with user2 partition are buffered
         assertRecordsBuffered([self.data["user2"]])
         assertRecordsBuffered(self.data["user2_sumlogs"])
@@ -187,7 +188,7 @@ class QueueStoreIntoBufferTestCase(TestCase):
         fsics = {self.data["group1_id"].id: 1}
         self.transfer_session.filter = filter_prefixes
         self.transfer_session.client_fsic = json.dumps(fsics)
-        _queue_into_buffer(self.transfer_session)
+        _queue_into_buffer_v1(self.transfer_session)
         # ensure records updated with 1st instance id and summarylog partition are buffered
         assertRecordsBuffered(self.data["user1_sumlogs"])
         assertRecordsNotBuffered(self.data["user2_sumlogs"])
@@ -198,7 +199,7 @@ class QueueStoreIntoBufferTestCase(TestCase):
         fsics = {self.data["group2_id"].id: 1}
         self.transfer_session.filter = filter_prefixes
         self.transfer_session.client_fsic = json.dumps(fsics)
-        _queue_into_buffer(self.transfer_session)
+        _queue_into_buffer_v1(self.transfer_session)
         # ensure that record with valid fsic but invalid partition is not buffered
         assertRecordsNotBuffered([self.data["user4"]])
 
@@ -256,10 +257,140 @@ class QueueStoreIntoBufferTestCase(TestCase):
         assertRecordsBuffered(self.data["group1_c2"])
         assertRecordsBuffered(self.data["group2_c1"])
 
-    @mock.patch("morango.sync.operations._queue_into_buffer")
+    @mock.patch("morango.sync.operations._queue_into_buffer_v1")
     def test_local_queue_operation__noop(self, mock_queue):
         fsics = {self.data["group1_id"].id: 1, self.data["group2_id"].id: 1}
         self.transfer_session.client_fsic = json.dumps(fsics)
+
+        # as server, for push, operation should not queue into buffer
+        self.context.is_push = True
+        self.context.is_server = True
+
+        operation = ReceiverQueueOperation()
+        self.assertEqual(transfer_statuses.COMPLETED, operation.handle(self.context))
+        mock_queue.assert_not_called()
+
+
+@override_settings(MORANGO_SERIALIZE_BEFORE_QUEUING=False, MORANGO_DISABLE_FSIC_V2_FORMAT=False)
+class QueueStoreIntoBufferV2TestCase(TestCase):
+    def setUp(self):
+        super(QueueStoreIntoBufferV2TestCase, self).setUp()
+        self.data = create_dummy_store_data()
+        self.transfer_session = self.data["sc"].current_transfer_session
+        self.context = mock.Mock(
+            spec=LocalSessionContext,
+            transfer_session=self.transfer_session,
+            sync_session=self.transfer_session.sync_session,
+            filter=self.transfer_session.get_filter(),
+            is_push=self.transfer_session.push,
+            is_server=False,
+            capabilities=[FSIC_V2_FORMAT],
+        )
+
+    def test_many_fsics(self):
+        """
+        Testing the limits of how many instances can be included before we hit 'Expression tree is too large'
+        """
+        fsics = {"super": {}, "sub": {"": {self.data["group1_id"].id: 1, self.data["group2_id"].id: 1}}}
+        fsics["sub"][""].update({uuid.uuid4().hex: i for i in range(995)})
+        self.transfer_session.client_fsic = json.dumps(fsics)
+        self.transfer_session.server_fsic = json.dumps({"super": {}, "sub": {}})
+        _queue_into_buffer_v2(self.transfer_session)
+        # ensure all store and buffer records are buffered
+        assertRecordsBuffered(self.data["group1_c1"])
+        assertRecordsBuffered(self.data["group1_c2"])
+        assertRecordsBuffered(self.data["group2_c1"])
+
+    # def test_very_many_fsics(self):
+    #     """
+    #     Regression test against 'Expression tree is too large (maximum depth 1000)' error with many fsics
+    #     """
+    #     fsics = {"super": {}, "sub": {"": {self.data["group1_id"].id: 1, self.data["group2_id"].id: 1}}}
+    #     fsics["sub"][""].update({uuid.uuid4().hex: i for i in range(20000)})
+    #     self.transfer_session.client_fsic = json.dumps(fsics)
+    #     self.transfer_session.server_fsic = json.dumps({"super": {}, "sub": {}})
+    #     _queue_into_buffer_v2(self.transfer_session)
+    #     # ensure all store and buffer records are buffered
+    #     assertRecordsBuffered(self.data["group1_c1"])
+    #     assertRecordsBuffered(self.data["group1_c2"])
+    #     assertRecordsBuffered(self.data["group2_c1"])
+
+    # @pytest.mark.skip("Takes 30+ seconds, manual run only")
+    # def test_very_very_many_fsics(self):
+    #     """
+    #     Regression test against 'Expression tree is too large (maximum depth 1000)' error with many fsics
+    #     Maximum supported value: 99,999
+    #     """
+    #     fsics = {"super": {}, "sub": {"": {self.data["group1_id"].id: 1, self.data["group2_id"].id: 1}}}
+    #     fsics["sub"][""].update({uuid.uuid4().hex: i for i in range(99999)})
+    #     self.transfer_session.client_fsic = json.dumps(fsics)
+    #     self.transfer_session.server_fsic = json.dumps({"super": {}, "sub": {}})
+    #     _queue_into_buffer_v2(self.transfer_session)
+    #     # ensure all store and buffer records are buffered
+    #     assertRecordsBuffered(self.data["group1_c1"])
+    #     assertRecordsBuffered(self.data["group1_c2"])
+    #     assertRecordsBuffered(self.data["group2_c1"])
+
+    def test_fsic_specific_id(self):
+        fsics = {"super": {}, "sub": {"": {self.data["group2_id"].id: 1}}}
+        self.transfer_session.client_fsic = json.dumps(fsics)
+        self.transfer_session.server_fsic = json.dumps({"super": {}, "sub": {}})
+        _queue_into_buffer_v2(self.transfer_session)
+        # ensure only records modified with 2nd instance id are buffered
+        assertRecordsNotBuffered(self.data["group1_c1"])
+        assertRecordsNotBuffered(self.data["group1_c2"])
+        assertRecordsBuffered(self.data["group2_c1"])
+
+    def test_fsic_counters(self):
+        counter = InstanceIDModel.objects.get(id=self.data["group1_id"].id).counter
+        fsics = {"super": {}, "sub": {"": {self.data["group1_id"].id: counter - 1}}}
+        self.transfer_session.client_fsic = json.dumps(fsics)
+        fsics["sub"][""][self.data["group1_id"].id] = 0
+        self.transfer_session.server_fsic = json.dumps(fsics)
+        _queue_into_buffer_v2(self.transfer_session)
+        # ensure only records with updated 1st instance id are buffered
+        assertRecordsBuffered(self.data["group1_c1"])
+        assertRecordsBuffered(self.data["group1_c2"])
+        assertRecordsNotBuffered(self.data["group2_c1"])
+
+    def test_fsic_counters_too_high(self):
+        fsics = {"super": {}, "sub": {"": {self.data["group1_id"].id: 100, self.data["group2_id"].id: 100}}}
+        self.transfer_session.client_fsic = json.dumps(fsics)
+        self.transfer_session.server_fsic = json.dumps(fsics)
+        _queue_into_buffer_v2(self.transfer_session)
+        # ensure no records are buffered
+        self.assertFalse(Buffer.objects.all())
+        self.assertFalse(RecordMaxCounterBuffer.objects.all())
+
+    def test_valid_fsic_but_invalid_partition(self):
+        filter_prefixes = "{}:user:summary".format(self.data["user1"].id)
+        fsics = {"super": {}, "sub": {filter_prefixes: {self.data["group2_id"].id: 1}}}
+        self.transfer_session.filter = filter_prefixes
+        self.transfer_session.client_fsic = json.dumps(fsics)
+        self.transfer_session.server_fsic = json.dumps({"super": {}, "sub": {}})
+        _queue_into_buffer_v2(self.transfer_session)
+        # ensure that record with valid fsic but invalid partition is not buffered
+        assertRecordsNotBuffered([self.data["user4"]])
+
+    def test_local_queue_operation(self):
+        fsics = {"super": {}, "sub": {"": {self.data["group1_id"].id: 1, self.data["group2_id"].id: 1}}}
+        self.transfer_session.client_fsic = json.dumps(fsics)
+        self.transfer_session.server_fsic = json.dumps({"super": {}, "sub": {}})
+        self.assertEqual(0, self.transfer_session.records_total or 0)
+        operation = ProducerQueueOperation()
+        self.assertEqual(transfer_statuses.COMPLETED, operation.handle(self.context))
+        self.assertNotEqual(0, self.transfer_session.records_total)
+
+        # ensure all store and buffer records are buffered
+        assertRecordsBuffered(self.data["group1_c1"])
+        assertRecordsBuffered(self.data["group1_c2"])
+        assertRecordsBuffered(self.data["group2_c1"])
+
+    @mock.patch("morango.sync.operations._queue_into_buffer_v2")
+    def test_local_queue_operation__noop(self, mock_queue):
+        fsics = {"super": {}, "sub": {"": {self.data["group1_id"].id: 1, self.data["group2_id"].id: 1}}}
+        self.transfer_session.client_fsic = json.dumps(fsics)
+        self.transfer_session.server_fsic = json.dumps({"super": {}, "sub": {}})
 
         # as server, for push, operation should not queue into buffer
         self.context.is_push = True
@@ -311,9 +442,9 @@ class FSICPartitionEdgeCaseQueuingTestCase(TestCase):
     def clear_dmcs(self):
         DatabaseMaxCounter.objects.all().delete()
 
-    def fsic_from_dmcs(self, filters, dmc_tuples, is_producer=False):
+    def fsic_from_dmcs(self, filters, dmc_tuples):
         self.create_dmcs(dmc_tuples)
-        return DatabaseMaxCounter.calculate_filter_specific_instance_counters(filters, is_producer=is_producer)
+        return DatabaseMaxCounter.calculate_filter_specific_instance_counters(filters, v2_format=True)
 
     def initialize_sessions(self, filters):
         # create controllers for store/buffer operations
@@ -344,20 +475,21 @@ class FSICPartitionEdgeCaseQueuingTestCase(TestCase):
             filter=self.transfer_session.get_filter(),
             is_push=self.transfer_session.push,
             is_server=False,
+            capabilities=[FSIC_V2_FORMAT],
         )
 
     def set_sender_fsic_from_dmcs(self, dmc_tuples):
         self.transfer_session.client_fsic = json.dumps(
-            self.fsic_from_dmcs(self.context.filter, dmc_tuples, is_producer=True)
+            self.fsic_from_dmcs(self.context.filter, dmc_tuples)
         )
     
     def set_receiver_fsic_from_dmcs(self, dmc_tuples):
         self.transfer_session.server_fsic = json.dumps(
-            self.fsic_from_dmcs(self.context.filter, dmc_tuples, is_producer=False)
+            self.fsic_from_dmcs(self.context.filter, dmc_tuples)
         )
 
     def queue(self):
-        _queue_into_buffer(self.transfer_session)
+        _queue_into_buffer_v2(self.transfer_session)
 
     def test_soud_to_full_to_full(self):
         """
@@ -457,6 +589,7 @@ class DequeueBufferIntoStoreTestCase(TestCase):
             transfer_session=self.transfer_session,
             sync_session=self.transfer_session.sync_session,
             is_server=True,
+            capabilities=[],
         )
 
     def assert_store_records_tagged_with_last_session(self, store_ids):

@@ -582,7 +582,7 @@ class DatabaseMaxCounter(AbstractCounter):
 
     @classmethod
     @transaction.atomic
-    def update_fsics(cls, fsics, sync_filter, v2_format=True):
+    def update_fsics(cls, fsics, sync_filter, v2_format=False):
         internal_fsic = DatabaseMaxCounter.calculate_filter_specific_instance_counters(
             sync_filter, v2_format=v2_format
         )
@@ -614,7 +614,7 @@ class DatabaseMaxCounter(AbstractCounter):
                     )
 
     @classmethod
-    def get_instance_counters_for_partition(cls, part, only_if_in_store=False):
+    def get_instance_counters_for_partition(cls, part, only_if_in_store=True):
         """
         Return a dict of {instance_id: counter} for DMC's with the given partition.
         If only_if_in_store is True, only return DMCs whose instance_id is still in the Store.
@@ -634,9 +634,8 @@ class DatabaseMaxCounter(AbstractCounter):
         cls,
         filters,
         is_producer=False,
-        v2_format=True,
-        only_if_in_store=False,
-        remove_redundant=True,
+        v2_format=False,
+        only_if_in_store=True,
     ):
 
         if v2_format:
@@ -685,9 +684,8 @@ class DatabaseMaxCounter(AbstractCounter):
                 "sub": sub_fsics,
             }
 
-            # if requested, remove instance counters on partitions that are redudant to counters on super partitions
-            if remove_redundant:
-                remove_redundant_instance_counters(raw_fsic)
+            # remove instance counters on partitions that are redundant to counters on super partitions
+            remove_redundant_instance_counters(raw_fsic)
 
             return raw_fsic
 
