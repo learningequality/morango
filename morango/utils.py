@@ -122,10 +122,11 @@ else:
     pid_exists = _windows_pid_exists
 
 
-def _assert(condition, message):
+def _assert(condition, message, error_type=AssertionError):
     """
     :param condition: A bool condition that if false will raise an AssertionError
     :param message: assertion error detail message
+    :param error_type: The type of error to raise
     """
     if not condition:
-        raise AssertionError(message)
+        raise error_type(message)

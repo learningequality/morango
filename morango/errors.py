@@ -72,3 +72,7 @@ class InvalidMorangoSourceId(MorangoError):
 
 class MorangoInvalidFSICPartition(MorangoError):
     pass
+
+
+class MorangoSkipOperation(MorangoError):
+    pass

@@ -23,6 +23,7 @@ from morango.constants import transfer_statuses
 from morango.errors import MorangoResumeSyncError
 from morango.errors import MorangoLimitExceeded
 from morango.errors import MorangoInvalidFSICPartition
+from morango.errors import MorangoSkipOperation
 from morango.models.certificates import Filter
 from morango.models.core import Buffer
 from morango.models.core import DatabaseMaxCounter
@@ -695,8 +696,8 @@ class BaseOperation(object):
                 raise NotImplementedError(
                     "Transfer operation must return False, or a transfer status"
                 )
-        except AssertionError:
-            # if the operation raises an AssertionError, we equate that to returning False, which
+        except MorangoSkipOperation:
+            # if the operation raises an MorangoSkipOperation, we equate that to returning False, which
             # means that this operation did not handle it and so other operation instances should
             # be tried to handle it
             result = False
@@ -714,7 +715,7 @@ class BaseOperation(object):
         """
         :param condition: a bool condition, if false will raise assertion error
         """
-        _assert(condition, message)
+        _assert(condition, message, error_type=MorangoSkipOperation)
 
 
 class LocalOperation(BaseOperation):
