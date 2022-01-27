@@ -554,6 +554,35 @@ class FSICPartitionEdgeCaseQueuingTestCase(TestCase):
         assertRecordsNotBuffered(laptop_data_excluded)
         assertRecordsBuffered(tablet_data)
 
+    def test_subpartition_gets_included(self):
+        """
+        Ensure that store records in subpartitions get included, but only if in the filter.
+        """
+        
+        self.initialize_sessions(filters="p1")
+
+        store_tuples_included = [
+            (self.i1, "p1a", 2),
+            (self.i1, "p1b", 5),
+        ]
+        store_tuples_excluded = [
+            (self.i1, "p2", 5),
+            (self.i2, "p1", 2),
+            (self.i2, "p", 2),
+        ]
+        dmc_tuples = [
+            (self.i1, "p1", 5),
+            (self.i2, "p2", 5),
+        ]
+
+        data_included = self.create_stores(store_tuples_included)
+        data_excluded = self.create_stores(store_tuples_excluded)
+
+        self.set_sender_fsic_from_dmcs(dmc_tuples)
+        self.set_receiver_fsic_from_dmcs([])
+        self.queue()
+        assertRecordsBuffered(data_included)
+        assertRecordsNotBuffered(data_excluded)
 
 
 @override_settings(MORANGO_DESERIALIZE_AFTER_DEQUEUING=False)
