@@ -594,9 +594,11 @@ class TransferClient(object):
         self.signals = SyncClientSignals()
 
         # TODO: come up with strategy to use only one context here
-        self.local_context = LocalSessionContext(sync_session=sync_session)
         self.remote_context = NetworkSessionContext(
             sync_connection, sync_session=sync_session
+        )
+        self.local_context = LocalSessionContext(
+            sync_session=sync_session, capabilities=self.remote_context.capabilities
         )
 
     def proceed_to_and_wait_for(self, stage):
