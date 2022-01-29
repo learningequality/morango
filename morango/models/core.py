@@ -615,18 +615,28 @@ class DatabaseMaxCounter(AbstractCounter):
                     )
 
     @classmethod
-    def get_instance_counters_for_partitions(cls, partitions, only_if_in_store=True):
+    def get_instance_counters_for_partitions(cls, partitions, is_producer=False):
         queryset = cls.objects.filter(partition__in=partitions)
-        if only_if_in_store:
-            matching_store_instances = Store.objects.filter(
+
+        # filter out instance_ids that are no longer relevant
+        if (
+            is_producer
+        ):  # for the producing side, we only need to use instance_ids that are still on Store records
+            matching_instances = Store.objects.filter(
                 partition__startswith=models.OuterRef("partition"),
                 last_saved_instance=models.OuterRef("instance_id"),
             ).values("last_saved_instance")
-            # manually add EXISTS clause to avoid Django bug which puts `= TRUE` comparison that kills postgres perf
-            exists = models.Exists(matching_store_instances).resolve_expression(
-                query=queryset.query, allow_joins=True, reuse=None
-            )
-            queryset.query.where.add(exists, "AND")
+        else:  # for the receiving side, we include all instances that still exist in the RecordMaxCounters
+            matching_instances = RecordMaxCounter.objects.filter(
+                store_model__partition__startswith=models.OuterRef("partition"),
+                instance_id=models.OuterRef("instance_id"),
+            ).values("instance_id")
+
+        # manually add EXISTS clause to avoid Django bug which puts `= TRUE` comparison that kills postgres perf
+        exists = models.Exists(matching_instances).resolve_expression(
+            query=queryset.query, allow_joins=True, reuse=None
+        )
+        queryset.query.where.add(exists, "AND")
 
         queryset = queryset.values_list("partition", "instance_id", "counter")
 
@@ -643,7 +653,6 @@ class DatabaseMaxCounter(AbstractCounter):
         filters,
         is_producer=False,
         v2_format=False,
-        only_if_in_store=True,
     ):
 
         if v2_format:
@@ -675,12 +684,12 @@ class DatabaseMaxCounter(AbstractCounter):
                     qs.values_list("partition", flat=True).distinct()
                 )
 
-            # get the instance counters for the partitions, filtered (if requested) by instance_ids still used in the store
+            # get the instance counters for the partitions, also filtering out old unnecessary instance_ids
             super_fsics = cls.get_instance_counters_for_partitions(
-                super_partitions, only_if_in_store=only_if_in_store
+                super_partitions, is_producer=is_producer
             )
             sub_fsics = cls.get_instance_counters_for_partitions(
-                sub_partitions, only_if_in_store=only_if_in_store
+                sub_partitions, is_producer=is_producer
             )
 
             raw_fsic = {
