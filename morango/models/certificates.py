@@ -338,7 +338,7 @@ class Filter(object):
         self._template = template
         self._params = params
         self._filter_string = string.Template(template).safe_substitute(params)
-        self._filter_tuple = tuple(self._filter_string.split())
+        self._filter_tuple = tuple(self._filter_string.split()) or ("",)
 
     def is_subset_of(self, other):
         for partition in self._filter_tuple:

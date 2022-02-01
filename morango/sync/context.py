@@ -39,7 +39,7 @@ class SessionContext(object):
         :type sync_filter Filter|None
         :param is_push: A boolean indicating whether or not the transfer is a push or pull
         :type is_push: bool
-        :param capabilities: Capabilities set that is combined (union) against our own capabilities
+        :param capabilities: Capabilities set that is combined (intersected) with our own capabilities
         :type capabilities: set|None
         """
         self.sync_session = sync_session

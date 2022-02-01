@@ -266,6 +266,39 @@ class PushPullClientTestCase(LiveServerTestCase):
         transfer_session = second_pull_client.local_context.transfer_session
         self.assertEqual(0, transfer_session.records_total)
 
+    def test_second_pull_with_instance_id_no_longer_in_store(self):
+        with second_environment():
+            SummaryLog.objects.create(user=self.remote_user)
+            summ_log_id = SummaryLog.objects.first().id
+
+        self.assertEqual(0, SummaryLog.objects.filter(id=summ_log_id).count())
+
+        # first pull
+        pull_client = self.client.get_pull_client()
+        pull_client.initialize(self.filter)
+        transfer_session = pull_client.local_context.transfer_session
+        self.assertEqual(1, transfer_session.records_total)
+        self.assertEqual(0, transfer_session.records_transferred)
+        pull_client.run()
+        self.assertEqual(1, transfer_session.records_transferred)
+        pull_client.finalize()
+
+        # sanity check pull worked
+        self.assertEqual(1, SummaryLog.objects.filter(id=summ_log_id).count())
+
+        # update the log record locally
+        SummaryLog.objects.filter(id=summ_log_id).update(content_id="a" * 32)
+
+        # now start a push, to serialize the local record, but don't actually push
+        second_push_client = self.client.get_push_client()
+        second_push_client.initialize(self.filter)
+
+        # now do another pull, which shouldn't have anything new to bring down
+        second_pull_client = self.client.get_pull_client()
+        second_pull_client.initialize(self.filter)
+        transfer_session = second_pull_client.local_context.transfer_session
+        self.assertEqual(0, transfer_session.records_total)
+
     def test_resume(self):
         # create data
         for _ in range(5):

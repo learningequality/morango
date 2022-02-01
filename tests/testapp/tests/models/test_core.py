@@ -1,9 +1,9 @@
 import factory
 import uuid
 from django.test import TestCase
+from django.test import override_settings
 from django.utils import timezone
 from django.utils.six import iteritems
-
 from facility_profile.models import MyUser
 
 from morango.constants import transfer_stages
@@ -20,8 +20,8 @@ class DatabaseMaxCounterFactory(factory.DjangoModelFactory):
     class Meta:
         model = DatabaseMaxCounter
 
-
-class FilterMaxCounterTestCase(TestCase):
+@override_settings(MORANGO_DISABLE_FSIC_V2_FORMAT=True)
+class OldFilterMaxCounterTestCase(TestCase):
     def setUp(self):
         self.instance_a = "a" * 32
         self.prefix_a = "AAA"
@@ -103,7 +103,8 @@ class FilterMaxCounterTestCase(TestCase):
         self.assertEqual(fsic_receiver.get(self.instance_b, 0), 10)
 
 
-class DatabaseMaxCounterUpdateCalculation(TestCase):
+@override_settings(MORANGO_DISABLE_FSIC_V2_FORMAT=True)
+class OldDatabaseMaxCounterUpdateCalculation(TestCase):
     def setUp(self):
         self.filter = "filter"
 

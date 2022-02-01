@@ -95,5 +95,6 @@ Pipfile
 # Jetbrains IDE
 .idea
 
-tests/testapp/testapp.db
-tests/testapp/testapp2.db
+*.db
+
+.vscode
