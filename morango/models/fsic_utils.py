@@ -85,7 +85,7 @@ def expand_fsic_for_use(raw_fsic, sync_filter):
     assert "sub" in raw_fsic
     raw_fsic = raw_fsic.copy()
 
-    # ensure that the subpartition list includes all the filter partitions    
+    # ensure that the subpartition list includes all the filter partitions
     _add_filter_partitions(raw_fsic["sub"], sync_filter)
 
     # get a list of any subpartitions that are subordinate to other subpartitions
