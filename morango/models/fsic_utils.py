@@ -66,15 +66,15 @@ def expand_fsic_for_use(raw_fsic, sync_filter):
     assert "super" in raw_fsic
     assert "sub" in raw_fsic
     raw_fsic = raw_fsic.copy()
-    
+
     # ensure that the subpartition list includes all the filter partitions
     for partition in sync_filter:
         if partition not in raw_fsic["sub"]:
             raw_fsic["sub"][partition] = {}
-    
+
     # get a list of any subpartitions that are subordinate to other subpartitions
     subordinates = _get_sub_partitions(raw_fsic["sub"].keys())
-    
+
     # propagate the super partition counts down into sub-partitions
     for sub_part, sub_fsic in raw_fsic["sub"].items():
         # skip any partitions that are subordinate to another sub-partition
@@ -87,12 +87,12 @@ def expand_fsic_for_use(raw_fsic, sync_filter):
                 for instance, counter in super_fsic.items():
                     if counter > sub_fsic.get(instance, 0):
                         sub_fsic[instance] = counter
-    
+
     # remove any empty subpartitions
     for sub_part in list(raw_fsic["sub"].keys()):
         if not raw_fsic["sub"][sub_part]:
             del raw_fsic["sub"][sub_part]
-    
+
     return raw_fsic["sub"]
 
 
