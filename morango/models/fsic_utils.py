@@ -58,7 +58,7 @@ def remove_redundant_instance_counters(raw_fsic):
                         del sub_dict[inst]
 
 
-def expand_fsic_for_use(raw_fsic):
+def expand_fsic_for_use(raw_fsic, sync_filter):
     """
     Convert the raw FSIC format from the wire into a format usable for filtering, by propagating super partition counts
     down into sub-partitions. Returns only the expanded subpartition dict, discarding the super partitions.
@@ -66,7 +66,16 @@ def expand_fsic_for_use(raw_fsic):
     assert "super" in raw_fsic
     assert "sub" in raw_fsic
     raw_fsic = raw_fsic.copy()
+    
+    # ensure that the subpartition list includes all the filter partitions
+    for partition in sync_filter:
+        if partition not in raw_fsic["sub"]:
+            raw_fsic["sub"][partition] = {}
+    
+    # get a list of any subpartitions that are subordinate to other subpartitions
     subordinates = _get_sub_partitions(raw_fsic["sub"].keys())
+    
+    # propagate the super partition counts down into sub-partitions
     for sub_part, sub_fsic in raw_fsic["sub"].items():
         # skip any partitions that are subordinate to another sub-partition
         if sub_part in subordinates:
@@ -78,6 +87,12 @@ def expand_fsic_for_use(raw_fsic):
                 for instance, counter in super_fsic.items():
                     if counter > sub_fsic.get(instance, 0):
                         sub_fsic[instance] = counter
+    
+    # remove any empty subpartitions
+    for sub_part in list(raw_fsic["sub"].keys()):
+        if not raw_fsic["sub"][sub_part]:
+            del raw_fsic["sub"][sub_part]
+    
     return raw_fsic["sub"]
 
 
