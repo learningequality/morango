@@ -171,9 +171,10 @@ def chunk_fsic_v2(fsics, chunk_size):
     chunked_fsics = []
     current_chunk = defaultdict(dict)
 
-    for part, insts in fsics.items():
+    for part in sorted(fsics):
+        insts = fsics[part]
         remaining_in_chunk -= 1
-        for inst in insts:
+        for inst in sorted(insts):
             if remaining_in_chunk <= 0:
                 if current_chunk:
                     chunked_fsics.append(dict(current_chunk))
