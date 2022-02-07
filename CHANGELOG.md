@@ -2,6 +2,9 @@
 
 List of the most important changes for each release.
 
+## 0.6.8
+- Fixes subset syncing issues by introducing new FSIC v2 format
+
 ## 0.6.7
 - Updates transfer status fields to be nullable and corrects prior migration
 
