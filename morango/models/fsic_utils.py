@@ -155,3 +155,33 @@ def calculate_directional_fsic_diff_v2(fsic1, fsic2):
                 result[part][inst] = receiving_counter
 
     return dict(result)
+
+
+def chunk_fsic_v2(fsics, chunk_size):
+    """
+    Split FSIC v2 dict into chunks with maximum partitions + instances of chunk_size.
+
+    :param fsic: dict containing FSIC v2's
+    :param chunk_size: size of chunks to split into
+    :return: list of dicts containing FSIC v2's
+    """
+
+    remaining_in_chunk = chunk_size
+
+    chunked_fsics = []
+    current_chunk = defaultdict(dict)
+
+    for part, insts in fsics.items():
+        remaining_in_chunk -= 1
+        for inst in insts:
+            if remaining_in_chunk <= 0:
+                if current_chunk:
+                    chunked_fsics.append(dict(current_chunk))
+                current_chunk = defaultdict(dict)
+                remaining_in_chunk = chunk_size - 1
+            current_chunk[part][inst] = insts[inst]
+            remaining_in_chunk -= 1
+    if current_chunk:
+        chunked_fsics.append(dict(current_chunk))
+
+    return chunked_fsics

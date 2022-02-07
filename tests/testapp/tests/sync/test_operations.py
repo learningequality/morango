@@ -106,14 +106,14 @@ class QueueStoreIntoBufferV1TestCase(TestCase):
         assertRecordsBuffered(self.data["group1_c2"])
         assertRecordsBuffered(self.data["group2_c1"])
 
-    @pytest.mark.skip("Takes 30+ seconds, manual run only")
+    # @pytest.mark.skip("Takes 30+ seconds, manual run only")
     def test_very_very_many_fsics(self):
         """
         Regression test against 'Expression tree is too large (maximum depth 1000)' error with many fsics
-        Maximum supported value: 99,999
+        Maximum supported value: 99,998
         """
         fsics = {self.data["group1_id"].id: 1, self.data["group2_id"].id: 1}
-        fsics.update({uuid.uuid4().hex: i for i in range(99999)})
+        fsics.update({uuid.uuid4().hex: i for i in range(99998)})
         self.transfer_session.client_fsic = json.dumps(fsics)
         _queue_into_buffer_v1(self.transfer_session)
         # ensure all store and buffer records are buffered
@@ -287,12 +287,13 @@ class QueueStoreIntoBufferV2TestCase(TestCase):
             capabilities=[FSIC_V2_FORMAT],
         )
 
-    def test_many_fsics(self):
+    # @pytest.mark.skip("Takes 30+ seconds, manual run only")
+    def test_very_many_instances_in_fsic(self):
         """
-        Testing the limits of how many instances can be included before we hit 'Expression tree is too large'
+        Regression test against 'Expression tree is too large (maximum depth 1000)' error with large fsics
         """
         fsics = {"super": {}, "sub": {"": {self.data["group1_id"].id: 1, self.data["group2_id"].id: 1}}}
-        fsics["sub"][""].update({uuid.uuid4().hex: i for i in range(995)})
+        fsics["sub"][""].update({uuid.uuid4().hex: i for i in range(10000)})
         self.transfer_session.client_fsic = json.dumps(fsics)
         self.transfer_session.server_fsic = json.dumps({"super": {}, "sub": {}})
         _queue_into_buffer_v2(self.transfer_session)
@@ -301,35 +302,55 @@ class QueueStoreIntoBufferV2TestCase(TestCase):
         assertRecordsBuffered(self.data["group1_c2"])
         assertRecordsBuffered(self.data["group2_c1"])
 
-    # def test_very_many_fsics(self):
-    #     """
-    #     Regression test against 'Expression tree is too large (maximum depth 1000)' error with many fsics
-    #     """
-    #     fsics = {"super": {}, "sub": {"": {self.data["group1_id"].id: 1, self.data["group2_id"].id: 1}}}
-    #     fsics["sub"][""].update({uuid.uuid4().hex: i for i in range(20000)})
-    #     self.transfer_session.client_fsic = json.dumps(fsics)
-    #     self.transfer_session.server_fsic = json.dumps({"super": {}, "sub": {}})
-    #     _queue_into_buffer_v2(self.transfer_session)
-    #     # ensure all store and buffer records are buffered
-    #     assertRecordsBuffered(self.data["group1_c1"])
-    #     assertRecordsBuffered(self.data["group1_c2"])
-    #     assertRecordsBuffered(self.data["group2_c1"])
+    # @pytest.mark.skip("Takes 30+ seconds, manual run only")
+    def test_very_many_partitions_in_fsic(self):
+        """
+        Regression test against 'Expression tree is too large (maximum depth 1000)' error with large fsics
+        """
+        fsics = {"super": {}, "sub": {"": {self.data["group1_id"].id: 1, self.data["group2_id"].id: 1}}}
+        for i in range(10000):
+            fsics["sub"][uuid.uuid4().hex] = {uuid.uuid4().hex: i}
+        self.transfer_session.client_fsic = json.dumps(fsics)
+        self.transfer_session.server_fsic = json.dumps({"super": {}, "sub": {}})
+        _queue_into_buffer_v2(self.transfer_session)
+        # ensure all store and buffer records are buffered
+        assertRecordsBuffered(self.data["group1_c1"])
+        assertRecordsBuffered(self.data["group1_c2"])
+        assertRecordsBuffered(self.data["group2_c1"])
 
     # @pytest.mark.skip("Takes 30+ seconds, manual run only")
-    # def test_very_very_many_fsics(self):
-    #     """
-    #     Regression test against 'Expression tree is too large (maximum depth 1000)' error with many fsics
-    #     Maximum supported value: 99,999
-    #     """
-    #     fsics = {"super": {}, "sub": {"": {self.data["group1_id"].id: 1, self.data["group2_id"].id: 1}}}
-    #     fsics["sub"][""].update({uuid.uuid4().hex: i for i in range(99999)})
-    #     self.transfer_session.client_fsic = json.dumps(fsics)
-    #     self.transfer_session.server_fsic = json.dumps({"super": {}, "sub": {}})
-    #     _queue_into_buffer_v2(self.transfer_session)
-    #     # ensure all store and buffer records are buffered
-    #     assertRecordsBuffered(self.data["group1_c1"])
-    #     assertRecordsBuffered(self.data["group1_c2"])
-    #     assertRecordsBuffered(self.data["group2_c1"])
+    def test_very_many_partitions_and_instances_in_fsic(self):
+        """
+        Regression test against 'Expression tree is too large (maximum depth 1000)' error with large fsics
+        """
+        fsics = {"super": {}, "sub": {"": {self.data["group1_id"].id: 1, self.data["group2_id"].id: 1}}}
+        for i in range(99):
+            fsics["sub"][uuid.uuid4().hex] = {uuid.uuid4().hex: i for i in range(999)}
+        self.transfer_session.client_fsic = json.dumps(fsics)
+        self.transfer_session.server_fsic = json.dumps({"super": {}, "sub": {}})
+        _queue_into_buffer_v2(self.transfer_session)
+        # ensure all store and buffer records are buffered
+        assertRecordsBuffered(self.data["group1_c1"])
+        assertRecordsBuffered(self.data["group1_c2"])
+        assertRecordsBuffered(self.data["group2_c1"])
+
+    def test_too_many_fsic_partitions(self):
+        fsics = {"super": {}, "sub": {"": {self.data["group1_id"].id: 1, self.data["group2_id"].id: 1}}}
+        for i in range(5000):
+            fsics["sub"][uuid.uuid4().hex] = {uuid.uuid4().hex: i for i in range(2)}
+        self.transfer_session.client_fsic = json.dumps(fsics)
+        self.transfer_session.server_fsic = json.dumps({"super": {}, "sub": {}})
+        with self.assertRaises(MorangoLimitExceeded):
+            _queue_into_buffer_v2(self.transfer_session, chunk_size=10)
+
+    def test_too_many_fsic_instances(self):
+        fsics = {"super": {}, "sub": {"": {self.data["group1_id"].id: 1, self.data["group2_id"].id: 1}}}
+        for i in range(2):
+            fsics["sub"][uuid.uuid4().hex] = {uuid.uuid4().hex: i for i in range(5000)}
+        self.transfer_session.client_fsic = json.dumps(fsics)
+        self.transfer_session.server_fsic = json.dumps({"super": {}, "sub": {}})
+        with self.assertRaises(MorangoLimitExceeded):
+            _queue_into_buffer_v2(self.transfer_session, chunk_size=10)
 
     def test_fsic_specific_id(self):
         fsics = {"super": {}, "sub": {"": {self.data["group2_id"].id: 1}}}
