@@ -1,11 +1,12 @@
+from morango.models.fsic_utils import chunk_fsic_v2
 from morango.models.fsic_utils import expand_fsic_for_use
 from morango.models.fsic_utils import remove_redundant_instance_counters
 from morango.models.fsic_utils import calculate_directional_fsic_diff_v2
 
 from django.test import TestCase
 
+
 class TestFSICUtils(TestCase):
-    
     def test_expand_fsic_for_use(self):
         source_fsic = {
             "super": {
@@ -16,7 +17,7 @@ class TestFSICUtils(TestCase):
                 },
                 "q": {
                     "f": 5,
-                }
+                },
             },
             "sub": {
                 "rp1": {
@@ -30,8 +31,7 @@ class TestFSICUtils(TestCase):
                 "rp2i": {
                     "e": 5,
                 },
-                "tt": {  # this will be removed, as it's empty
-                },
+                "tt": {},  # this will be removed, as it's empty
             },
         }
         expected_fsic = {
@@ -98,7 +98,7 @@ class TestFSICUtils(TestCase):
                     "c": 5,  # will be stripped out, because lower than p's and p3's counter
                     "d": 2,  # will be stripped out, because lower than p3's counter
                 },
-            }
+            },
         }
         expected_fsic = {
             "super": {
@@ -118,7 +118,7 @@ class TestFSICUtils(TestCase):
                     "d": 2,
                 },
                 "p1i": {
-                    "e": 5, 
+                    "e": 5,
                 },
                 "p1j": {},
                 "p2i": {
@@ -127,7 +127,7 @@ class TestFSICUtils(TestCase):
                 "p3i": {
                     "a": 8,
                 },
-            }
+            },
         }
         remove_redundant_instance_counters(source_fsic)
         self.assertEqual(source_fsic, expected_fsic)
@@ -175,7 +175,7 @@ class TestFSICUtils(TestCase):
             "p3": {  # will be excluded, because it's not in the source
                 "a": 2,
                 "c": 3,
-            }
+            },
         }
         expected_diff = {
             "p": {
@@ -191,7 +191,10 @@ class TestFSICUtils(TestCase):
                 "q": 0,
             },
         }
-        self.assertEqual(calculate_directional_fsic_diff_v2(sending_fsic, receiving_fsic), expected_diff)
+        self.assertEqual(
+            calculate_directional_fsic_diff_v2(sending_fsic, receiving_fsic),
+            expected_diff,
+        )
 
     def test_calculate_directional_fsic_diff_v2_identical(self):
         sending_fsic = receiving_fsic = {
@@ -214,7 +217,10 @@ class TestFSICUtils(TestCase):
             },
         }
         expected_diff = {}
-        self.assertEqual(calculate_directional_fsic_diff_v2(sending_fsic, receiving_fsic), expected_diff)
+        self.assertEqual(
+            calculate_directional_fsic_diff_v2(sending_fsic, receiving_fsic),
+            expected_diff,
+        )
 
     def test_calculate_directional_fsic_diff_v2_receiver_is_higher(self):
         sending_fsic = {
@@ -256,4 +262,72 @@ class TestFSICUtils(TestCase):
             },
         }
         expected_diff = {}
-        self.assertEqual(calculate_directional_fsic_diff_v2(sending_fsic, receiving_fsic), expected_diff)
+        self.assertEqual(
+            calculate_directional_fsic_diff_v2(sending_fsic, receiving_fsic),
+            expected_diff,
+        )
+
+    def test_chunk_fsic_v2(self):
+        fsic = {
+            "p": {
+                "a": 5,
+                "c": 7,
+            },
+            "p1": {
+                "a": 7,
+                "b": 9,
+                "d": 2,
+            },
+            "p1i": {
+                "a": 7,
+                "b": 19,
+                "c": 32,
+                "d": 12,
+            },
+            "p2": {
+                "a": 8,
+            },
+        }
+        expected_chunks_1_2 = [
+            {"p": {"a": 5}},
+            {"p": {"c": 7}},
+            {"p1": {"a": 7}},
+            {"p1": {"b": 9}},
+            {"p1": {"d": 2}},
+            {"p1i": {"a": 7}},
+            {"p1i": {"b": 19}},
+            {"p1i": {"c": 32}},
+            {"p1i": {"d": 12}},
+            {"p2": {"a": 8}},
+        ]
+        expected_chunks_3 = [
+            {"p": {"a": 5, "c": 7}},
+            {"p1": {"a": 7, "b": 9}},
+            {"p1": {"d": 2}},
+            {"p1i": {"a": 7, "b": 19}},
+            {"p1i": {"c": 32, "d": 12}},
+            {"p2": {"a": 8}},
+        ]
+        expected_chunks_4 = [
+            {"p": {"a": 5, "c": 7}},
+            {"p1": {"a": 7, "b": 9, "d": 2}},
+            {"p1i": {"a": 7, "b": 19, "c": 32}},
+            {"p1i": {"d": 12}, "p2": {"a": 8}},
+        ]
+        expected_chunks_5 = [
+            {"p": {"a": 5, "c": 7}, "p1": {"a": 7}},
+            {"p1": {"b": 9, "d": 2}, "p1i": {"a": 7}},
+            {"p1i": {"b": 19, "c": 32, "d": 12}},
+            {"p2": {"a": 8}},
+        ]
+        expected_chunks_6 = [
+            {"p": {"a": 5, "c": 7}, "p1": {"a": 7, "b": 9}},
+            {"p1": {"d": 2}, "p1i": {"a": 7, "b": 19, "c": 32}},
+            {"p1i": {"d": 12}, "p2": {"a": 8}},
+        ]
+        self.assertEqual(chunk_fsic_v2(fsic, 1), expected_chunks_1_2)
+        self.assertEqual(chunk_fsic_v2(fsic, 2), expected_chunks_1_2)
+        self.assertEqual(chunk_fsic_v2(fsic, 3), expected_chunks_3)
+        self.assertEqual(chunk_fsic_v2(fsic, 4), expected_chunks_4)
+        self.assertEqual(chunk_fsic_v2(fsic, 5), expected_chunks_5)
+        self.assertEqual(chunk_fsic_v2(fsic, 6), expected_chunks_6)
