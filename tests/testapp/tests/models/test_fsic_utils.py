@@ -9,44 +9,55 @@ class TestFSICUtils(TestCase):
     def test_expand_fsic_for_use(self):
         source_fsic = {
             "super": {
-                "p": {
+                "r": {
                     "a": 5,
                     "b": 3,
                     "c": 7,
                 },
+                "q": {
+                    "f": 5,
+                }
             },
             "sub": {
-                "p1": {
+                "rp1": {
                     "a": 1,
                     "b": 9,
                     "d": 2,
                 },
-                "p1i": {
+                "rp1i": {
                     "e": 5,
                 },
-                "p2i": {
+                "rp2i": {
                     "e": 5,
+                },
+                "tt": {  # this will be removed, as it's empty
                 },
             },
         }
         expected_fsic = {
-            "p1": {
+            "rp1": {
                 "a": 5,  # from super, because it was larger
                 "b": 9,  # from sub, because it was larger
                 "c": 7,  # from super, because it didn't exist in sub
                 "d": 2,  # from sub, because it didn't exist in super
             },
-            "p1i": {  # only instance here, because others from super were covered by p1
-                "e": 5, 
+            "rp1i": {  # only instance here, because others from super were covered by p1
+                "e": 5,
             },
-            "p2i": {  # but no prefix in sub for this one, so it does inherit from super
+            "rp2": {  # this one was inserted here, because it's in the filter, and inherits from super
                 "a": 5,
                 "b": 3,
                 "c": 7,
+            },
+            "rp2i": {  # this doesn't inherit, because it's a suffix of the inserted "rp2"
                 "e": 5,
             },
+            "q1": {
+                "f": 5,  # inserted here, because it's in the filter, and inherits from super
+            },
         }
-        self.assertEqual(expand_fsic_for_use(source_fsic), expected_fsic)
+        sync_filter = ["rp1", "rp2", "q1", "t"]
+        self.assertEqual(expand_fsic_for_use(source_fsic, sync_filter), expected_fsic)
 
     def test_remove_redundant_instance_counters(self):
         source_fsic = {

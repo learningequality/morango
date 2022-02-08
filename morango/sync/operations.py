@@ -545,12 +545,12 @@ def _queue_into_buffer_v2(transfersession):
     assert "super" in client_fsic
 
     # ensure that the partitions in the FSICs are under the current filter, before using them
-    for partition in itertools.chain(server_fsic["sub"].keys(), client_fsic["sub"]):
+    for partition in itertools.chain(server_fsic["sub"].keys(), client_fsic["sub"].keys()):
         if partition not in sync_filter:
             raise MorangoInvalidFSICPartition("Partition '{}' is not in filter".format(partition))
 
-    server_fsic = expand_fsic_for_use(server_fsic)
-    client_fsic = expand_fsic_for_use(client_fsic)
+    server_fsic = expand_fsic_for_use(server_fsic, sync_filter)
+    client_fsic = expand_fsic_for_use(client_fsic, sync_filter)
 
     if transfersession.push:
         fsics = calculate_directional_fsic_diff_v2(client_fsic, server_fsic)
