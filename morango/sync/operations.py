@@ -614,7 +614,7 @@ def _queue_into_buffer_v2(transfersession, chunk_size=200):
 
         # execute raw sql to take all records that match condition, to be put into buffer for transfer
         select_buffers.append(
-            """SELECT DISTINCT
+            """SELECT
                     id, serialized, deleted, last_saved_instance, last_saved_counter, hard_deleted, model_name, profile,
                     partition, source_id, conflicting_serialized_data,
                     CAST ('{transfer_session_id}' AS {transfer_session_id_type}), _self_ref_fk
