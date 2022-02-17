@@ -1,3 +1,6 @@
+SHELL := /bin/bash
+
+.ONESHELL:
 .PHONY: help clean clean-pyc release dist
 
 define BROWSER_PYSCRIPT
@@ -23,11 +26,18 @@ endef
 export PRINT_HELP_PYSCRIPT
 BROWSER := python -c "$$BROWSER_PYSCRIPT"
 
+export PYTHONPATH
+export DJANGO_SETTINGS_MODULE
+
 help:
 	@echo "clean-build - remove build artifacts"
 	@echo "clean-pyc - remove Python file artifacts"
 	@echo "release - package and upload a release"
 	@echo "dist - package"
+	@echo "test - run python tests"
+	@echo "test-with-postgres - run python tests with docker postgres backend"
+	@echo "tox - run all tests, with existing postgres backend"
+	@echo "tox-with-postgres - run all tests, with docker postgres backend"
 
 clean: clean-build clean-pyc clean-test
 
@@ -60,16 +70,33 @@ migrations:
 	python tests/testapp/manage.py makemigrations
 
 test:
-	pytest tests/testapp/tests/
+	python -O -m pytest tests/testapp/tests/
 
-test-all:
+tox:
 	tox
 
+%-with-postgres:
+	export PYTHONPATH=./tests/testapp
+	export DJANGO_SETTINGS_MODULE=testapp.postgres_settings
+	set -ex
+	function _on_interrupt() {
+		# leave off `-v` to skip volume cleanup for debugging error
+		docker-compose down
+	}
+	trap _on_interrupt SIGINT SIGTERM SIGKILL ERR
+	docker-compose up --detach
+	until docker-compose logs --tail=1 postgres | grep -q "database system is ready to accept connections"; do
+		echo "$(date) - waiting for postgres..."
+		sleep 1
+	done
+	$(MAKE) -e $(subst -with-postgres,,$@)
+	docker-compose down -v
+
 coverage: ## check code coverage quickly with the default Python
-		coverage run --source morango setup.py test
-		coverage report -m
-		coverage html
-		$(BROWSER) htmlcov/index.html
+	coverage run --source morango setup.py test
+	coverage report -m
+	coverage html
+	$(BROWSER) htmlcov/index.html
 
 docs: clean-docs
 	$(MAKE) -C docs html

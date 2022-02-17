@@ -1126,6 +1126,30 @@ class BufferEndpointTestCase(CertificateTestCaseMixin, APITestCase):
             expected_count=2,
         )
 
+    def test_pull_by_page_offset__order_by(self):
+        total = 100
+        offset = 0
+        transfer_session_id = self.create_records_for_pulling(count=total)
+        returned_uuids = set()
+        last_transfer_session_id = None
+
+        while offset < total:
+            get_params = dict(
+                transfer_session_id=transfer_session_id,
+                limit=5,
+                offset=offset,
+            )
+            response = self.client.get(reverse("buffers-list"), get_params, format="json")
+            self.assertEqual(response.status_code, 200)
+            data = json.loads(response.content.decode())
+            model_uuids = {d["model_uuid"] for d in data["results"]}
+            self.assertFalse(model_uuids & returned_uuids)
+            returned_uuids.update(model_uuids)
+            if last_transfer_session_id:
+                Buffer.objects.filter(transfer_session_id=last_transfer_session_id).delete()
+            last_transfer_session_id = self.create_records_for_pulling(count=10)
+            offset += 5
+
 
 def _lazy_settings():
     return {"this_is_a_test": "lazy"}
