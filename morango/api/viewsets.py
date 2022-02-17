@@ -501,7 +501,7 @@ class BufferViewSet(mixins.ListModelMixin, viewsets.GenericViewSet):
 
     def get_queryset(self):
         session_id = self.request.query_params["transfer_session_id"]
-        return Buffer.objects.filter(transfer_session_id=session_id)
+        return Buffer.objects.filter(transfer_session_id=session_id).order_by("pk")
 
 
 class MorangoInfoViewSet(viewsets.ViewSet):
