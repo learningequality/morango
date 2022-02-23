@@ -665,7 +665,7 @@ def _queue_into_buffer_v2(transfersession, chunk_size=200):
 
 
 @transaction.atomic(using=USING_DB)
-def _dequeue_into_store(transfersession):
+def _dequeue_into_store(transfer_session, fsic, v2_format=False):
     """
     Takes data from the buffers and merges into the store and record max counters.
 
@@ -673,22 +673,28 @@ def _dequeue_into_store(transfersession):
     are not affected by previous cases.
     """
     with connection.cursor() as cursor:
-        DBBackend._dequeuing_delete_rmcb_records(cursor, transfersession.id)
-        DBBackend._dequeuing_delete_buffered_records(cursor, transfersession.id)
+        DBBackend._dequeuing_delete_rmcb_records(cursor, transfer_session.id)
+        DBBackend._dequeuing_delete_buffered_records(cursor, transfer_session.id)
         current_id = InstanceIDModel.get_current_instance_and_increment_counter()
         DBBackend._dequeuing_merge_conflict_buffer(
-            cursor, current_id, transfersession.id
+            cursor, current_id, transfer_session.id
         )
-        DBBackend._dequeuing_merge_conflict_rmcb(cursor, transfersession.id)
+        DBBackend._dequeuing_merge_conflict_rmcb(cursor, transfer_session.id)
         DBBackend._dequeuing_update_rmcs_last_saved_by(
-            cursor, current_id, transfersession.id
+            cursor, current_id, transfer_session.id
         )
-        DBBackend._dequeuing_delete_mc_rmcb(cursor, transfersession.id)
-        DBBackend._dequeuing_delete_mc_buffer(cursor, transfersession.id)
-        DBBackend._dequeuing_insert_remaining_buffer(cursor, transfersession.id)
-        DBBackend._dequeuing_insert_remaining_rmcb(cursor, transfersession.id)
-        DBBackend._dequeuing_delete_remaining_rmcb(cursor, transfersession.id)
-        DBBackend._dequeuing_delete_remaining_buffer(cursor, transfersession.id)
+        DBBackend._dequeuing_delete_mc_rmcb(cursor, transfer_session.id)
+        DBBackend._dequeuing_delete_mc_buffer(cursor, transfer_session.id)
+        DBBackend._dequeuing_insert_remaining_buffer(cursor, transfer_session.id)
+        DBBackend._dequeuing_insert_remaining_rmcb(cursor, transfer_session.id)
+        DBBackend._dequeuing_delete_remaining_rmcb(cursor, transfer_session.id)
+        DBBackend._dequeuing_delete_remaining_buffer(cursor, transfer_session.id)
+
+    DatabaseMaxCounter.update_fsics(
+        json.loads(fsic),
+        transfer_session.get_filter(),
+        v2_format=v2_format,
+    )
 
 
 class BaseOperation(object):
@@ -966,7 +972,17 @@ class ReceiverDequeueOperation(LocalOperation):
         # if no records were transferred, we can safely skip
         records_transferred = context.transfer_session.records_transferred or 0
         if records_transferred > 0:
-            _dequeue_into_store(context.transfer_session)
+            # update database max counters but use latest fsics from client/server
+            fsic = (
+                context.transfer_session.client_fsic
+                if context.is_server
+                else context.transfer_session.server_fsic
+            )
+            _dequeue_into_store(
+                context.transfer_session,
+                fsic,
+                v2_format=FSIC_V2_FORMAT in context.capabilities,
+            )
 
         return transfer_statuses.COMPLETED
 
@@ -997,25 +1013,13 @@ class ReceiverDeserializeOperation(LocalOperation):
         self._assert(context.sync_session is not None)
         self._assert(context.transfer_session is not None)
         self._assert(context.filter is not None)
+        self._assert(context.is_receiver)
 
         records_transferred = context.transfer_session.records_transferred or 0
         if SETTINGS.MORANGO_DESERIALIZE_AFTER_DEQUEUING and records_transferred > 0:
             # we first serialize to avoid deserialization merge conflicts
             _serialize_into_store(context.sync_session.profile, filter=context.filter)
             _deserialize_from_store(context.sync_session.profile, filter=context.filter)
-
-        # update database max counters but use latest fsics from client/server
-        if context.is_receiver:
-            fsic = (
-                context.transfer_session.client_fsic
-                if context.is_server
-                else context.transfer_session.server_fsic
-            )
-            DatabaseMaxCounter.update_fsics(
-                json.loads(fsic),
-                context.filter,
-                v2_format=FSIC_V2_FORMAT in context.capabilities,
-            )
 
         return transfer_statuses.COMPLETED
 
