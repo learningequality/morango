@@ -6,6 +6,8 @@ from django.utils import timezone
 from django.utils.six import iteritems
 from facility_profile.models import MyUser
 
+from ..helpers import RecordMaxCounterFactory
+from ..helpers import StoreFactory
 from morango.constants import transfer_stages
 from morango.constants import transfer_statuses
 from morango.sync.controller import MorangoProfileController
@@ -20,9 +22,10 @@ class DatabaseMaxCounterFactory(factory.DjangoModelFactory):
     class Meta:
         model = DatabaseMaxCounter
 
-@override_settings(MORANGO_DISABLE_FSIC_V2_FORMAT=True)
-class OldFilterMaxCounterTestCase(TestCase):
+
+class BaseDatabaseMaxCounterTestCase(TestCase):
     def setUp(self):
+        super(BaseDatabaseMaxCounterTestCase, self).setUp()
         self.instance_a = "a" * 32
         self.prefix_a = "AAA"
         self.user_prefix_a = "AAA:user_id:joe"
@@ -57,6 +60,9 @@ class OldFilterMaxCounterTestCase(TestCase):
             instance_id=self.instance_b, partition=self.user2_prefix_b, counter=2
         )
 
+
+@override_settings(MORANGO_DISABLE_FSIC_V2_FORMAT=True)
+class OldFilterMaxCounterTestCase(BaseDatabaseMaxCounterTestCase):
     def test_filter_not_in_dmc(self):
         fmcs = DatabaseMaxCounter.calculate_filter_specific_instance_counters(
             Filter("ZZZ")
@@ -145,6 +151,100 @@ class OldDatabaseMaxCounterUpdateCalculation(TestCase):
             )
         DatabaseMaxCounter.update_fsics(client_fsic, Filter(self.filter))
         self.assertFalse(DatabaseMaxCounter.objects.filter(counter=1).exists())
+
+
+class DatabaseMaxCounterTestCase(BaseDatabaseMaxCounterTestCase):
+    def setUp(self):
+        super(DatabaseMaxCounterTestCase, self).setUp()
+        self.unknown_instance_id = uuid.uuid4().hex
+        self.model1_id = uuid.uuid4().hex
+        self.model2_id = uuid.uuid4().hex
+        self.model3_id = uuid.uuid4().hex
+        self.model4_id = uuid.uuid4().hex
+        StoreFactory(
+            id=self.model1_id,
+            partition=self.prefix_a,
+            serialized="store",
+            last_saved_instance=self.instance_a,
+            last_saved_counter=3,
+        )
+        StoreFactory(
+            id=self.model2_id,
+            partition=self.user_prefix_a,
+            serialized="store",
+            last_saved_instance=self.instance_a,
+            last_saved_counter=3,
+        )
+        StoreFactory(
+            id=self.model3_id,
+            partition=self.prefix_b,
+            serialized="store",
+            last_saved_instance=self.instance_b,
+            last_saved_counter=5,
+        )
+        StoreFactory(
+            id=self.model4_id,
+            partition=self.user_prefix_a,
+            serialized="store",
+            last_saved_instance=self.unknown_instance_id,
+            last_saved_counter=7,
+        )
+
+    def setUpRecordMaxCounters(self):
+        RecordMaxCounterFactory(
+            instance_id=self.instance_a,
+            store_model_id=self.model1_id,
+            counter=101,
+        )
+        RecordMaxCounterFactory(
+            instance_id=self.instance_a,
+            store_model_id=self.model2_id,
+            counter=102,
+        )
+        RecordMaxCounterFactory(
+            instance_id=self.instance_b,
+            store_model_id=self.model3_id,
+            counter=103,
+        )
+        RecordMaxCounterFactory(
+            instance_id=self.unknown_instance_id,
+            store_model_id=self.model4_id,
+            counter=104,
+        )
+
+    def test_get_instance_counters_for_partitions__producer(self):
+        counters = DatabaseMaxCounter.get_instance_counters_for_partitions([self.user_prefix_a], is_producer=True)
+        self.assertEqual(1, len(counters))
+        partition_counters = counters.get(self.user_prefix_a)
+        self.assertEqual(1, len(partition_counters))
+        self.assertEqual(20, partition_counters.get(self.instance_a))
+
+    @override_settings(MORANGO_DISABLE_FSIC_REDUCTION=True)
+    def test_get_instance_counters_for_partitions__producer__no_reduction(self):
+        counters = DatabaseMaxCounter.get_instance_counters_for_partitions([self.user_prefix_a], is_producer=True)
+        self.assertEqual(1, len(counters))
+        partition_counters = counters.get(self.user_prefix_a)
+        self.assertEqual(2, len(partition_counters))
+        self.assertEqual(20, partition_counters.get(self.instance_a))
+        self.assertEqual(10, partition_counters.get(self.instance_b))
+
+    def test_get_instance_counters_for_partitions__receiver(self):
+        self.setUpRecordMaxCounters()
+        counters = DatabaseMaxCounter.get_instance_counters_for_partitions([self.user_prefix_a])
+        self.assertEqual(1, len(counters))
+        partition_counters = counters.get(self.user_prefix_a)
+        self.assertEqual(1, len(partition_counters))
+        self.assertEqual(20, partition_counters.get(self.instance_a))
+
+    @override_settings(MORANGO_DISABLE_FSIC_REDUCTION=True)
+    def test_get_instance_counters_for_partitions__receiver__no_reduction(self):
+        self.setUpRecordMaxCounters()
+        counters = DatabaseMaxCounter.get_instance_counters_for_partitions([self.user_prefix_a])
+        self.assertEqual(1, len(counters))
+        partition_counters = counters.get(self.user_prefix_a)
+        self.assertEqual(2, len(partition_counters))
+        self.assertEqual(20, partition_counters.get(self.instance_a))
+        self.assertEqual(10, partition_counters.get(self.instance_b))
 
 
 class TransferSessionTestCase(TestCase):
