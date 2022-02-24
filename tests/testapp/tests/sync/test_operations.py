@@ -503,7 +503,7 @@ class FSICPartitionEdgeCaseQueuingTestCase(TestCase):
         self.transfer_session.client_fsic = json.dumps(
             self.fsic_from_dmcs(self.context.filter, dmc_tuples)
         )
-    
+
     def set_receiver_fsic_from_dmcs(self, dmc_tuples):
         self.transfer_session.server_fsic = json.dumps(
             self.fsic_from_dmcs(self.context.filter, dmc_tuples)
@@ -579,7 +579,7 @@ class FSICPartitionEdgeCaseQueuingTestCase(TestCase):
         """
         Ensure that store records in subpartitions get included, but only if in the filter.
         """
-        
+
         self.initialize_sessions(filters="p1")
 
         store_tuples_included = [
@@ -663,7 +663,8 @@ class DequeueBufferIntoStoreTestCase(TestCase):
             self.data[key] for key in ["model2", "model3", "model4", "model5", "model7"]
         ]
         self.assert_store_records_not_tagged_with_last_session(store_ids)
-        _dequeue_into_store(self.data["sc"].current_transfer_session)
+        transfer_session = self.data["sc"].current_transfer_session
+        _dequeue_into_store(transfer_session, transfer_session.client_fsic, v2_format=False)
         # this one is a reverse fast forward, so it doesn't modify the store record and shouldn't be tagged
         self.assert_store_records_not_tagged_with_last_session([self.data["model1"]])
         self.assert_store_records_tagged_with_last_session(store_ids)
@@ -902,7 +903,7 @@ class DequeueBufferIntoStoreTestCase(TestCase):
         )
 
     def test_dequeue_into_store(self):
-        _dequeue_into_store(self.transfer_session)
+        _dequeue_into_store(self.transfer_session, self.transfer_session.client_fsic, v2_format=False)
         # ensure a record with different transfer session id is not affected
         self.assertTrue(
             Buffer.objects.filter(transfer_session_id=self.data["tfs_id"]).exists()
@@ -1007,13 +1008,11 @@ class DequeueBufferIntoStoreTestCase(TestCase):
         self.assertEqual(transfer_statuses.COMPLETED, operation.handle(self.context))
         mock_dequeue.assert_not_called()
 
-    @mock.patch("morango.sync.operations.DatabaseMaxCounter.update_fsics")
-    def test_local_deserialize_operation(self, mock_update_fsics):
+    def test_local_deserialize_operation(self):
         self.transfer_session.records_transferred = 1
         self.context.filter = [self.transfer_session.filter]
         operation = ReceiverDeserializeOperation()
         self.assertEqual(transfer_statuses.COMPLETED, operation.handle(self.context))
-        mock_update_fsics.assert_called()
 
     def test_local_cleanup(self):
         self.context.is_server = False
