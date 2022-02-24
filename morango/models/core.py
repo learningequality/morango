@@ -618,25 +618,30 @@ class DatabaseMaxCounter(AbstractCounter):
     def get_instance_counters_for_partitions(cls, partitions, is_producer=False):
         queryset = cls.objects.filter(partition__in=partitions)
 
-        # filter out instance_ids that are no longer relevant
-        if (
-            is_producer
-        ):  # for the producing side, we only need to use instance_ids that are still on Store records
-            matching_instances = Store.objects.filter(
-                partition__startswith=models.OuterRef("partition"),
-                last_saved_instance=models.OuterRef("instance_id"),
-            ).values("last_saved_instance")
-        else:  # for the receiving side, we include all instances that still exist in the RecordMaxCounters
-            matching_instances = RecordMaxCounter.objects.filter(
-                store_model__partition__startswith=models.OuterRef("partition"),
-                instance_id=models.OuterRef("instance_id"),
-            ).values("instance_id")
+        # filter out instance_ids that are no longer relevant if settings don't prevent it
+        # because these queries can be somewhat intensive
+        if not SETTINGS.MORANGO_DISABLE_FSIC_REDUCTION:
+            if is_producer:
+                # for the producing side, we only need to use instance_ids
+                # that are still on Store records
+                matching_instances = Store.objects.filter(
+                    partition__startswith=models.OuterRef("partition"),
+                    last_saved_instance=models.OuterRef("instance_id"),
+                ).values("last_saved_instance")
+            else:
+                # for the receiving side, we include all instances
+                # that still exist in the RecordMaxCounters
+                matching_instances = RecordMaxCounter.objects.filter(
+                    store_model__partition__startswith=models.OuterRef("partition"),
+                    instance_id=models.OuterRef("instance_id"),
+                ).values("instance_id")
 
-        # manually add EXISTS clause to avoid Django bug which puts `= TRUE` comparison that kills postgres perf
-        exists = models.Exists(matching_instances).resolve_expression(
-            query=queryset.query, allow_joins=True, reuse=None
-        )
-        queryset.query.where.add(exists, "AND")
+            # manually add EXISTS clause to avoid Django bug which puts `= TRUE` comparison
+            # that kills postgres performance
+            exists = models.Exists(matching_instances).resolve_expression(
+                query=queryset.query, allow_joins=True, reuse=None
+            )
+            queryset.query.where.add(exists, "AND")
 
         queryset = queryset.values_list("partition", "instance_id", "counter")
 

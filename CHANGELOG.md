@@ -5,6 +5,7 @@ List of the most important changes for each release.
 ## 0.6.9
 - Fixes un-ordered selection of buffers during sync which can allow duplicates to be synced with PostgreSQL backends
 - Moves updating of database counters to occur in the same DB transaction as updates to the Store
+- Adds setting to disable reduction of FSICs when calculating them for a set of partitions
 
 ## 0.6.8
 - Fixes subset syncing issues by introducing new FSIC v2 format
