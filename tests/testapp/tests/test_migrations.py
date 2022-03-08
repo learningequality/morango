@@ -18,7 +18,7 @@ class MorangoNullableMigrationTest(TestMigrations):
 
     app = "morango"
     migrate_from = "0018_auto_20210714_2216"
-    migrate_to = "0019_auto_20220113_1807"
+    migrate_to = "0020_postgres_fix_nullable"
 
     def setUpBeforeMigration(self, apps):
         # simulate as if 0018_auto_20210714_2216 hadn't applied Nullablity to the columns,
