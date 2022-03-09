@@ -7,7 +7,7 @@ watchdog==0.10.3
 argh==0.26.2
 
 # for extracting model docs
-django==1.11.29  # pyup: >=1.11,<2
+django==2.2.27  # pyup: >=1.11,<2
 djangorestframework==3.9.1
 django-mptt==0.9.1
 rsa==3.4.2
