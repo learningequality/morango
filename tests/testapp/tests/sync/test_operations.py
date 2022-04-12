@@ -7,6 +7,8 @@ from django.test import TestCase
 from django.test import override_settings
 from django.utils import timezone
 from facility_profile.models import Facility
+from facility_profile.models import MyUser
+from facility_profile.models import SummaryLog
 import mock
 import pytest
 
@@ -29,6 +31,7 @@ from morango.sync.context import LocalSessionContext
 from morango.sync.controller import MorangoProfileController
 from morango.sync.controller import SessionController
 from morango.sync.operations import _dequeue_into_store
+from morango.sync.operations import _deserialize_from_store
 from morango.sync.operations import _queue_into_buffer_v1
 from morango.sync.operations import _queue_into_buffer_v2
 from morango.sync.operations import CleanupOperation
@@ -1037,3 +1040,102 @@ class DequeueBufferIntoStoreTestCase(TestCase):
                 transfer_session_id=self.transfer_session.id
             ).exists()
         )
+
+
+class DeserializationTestCases(TestCase):
+
+    def setUp(self):
+
+        self.profile = "facilitydata"
+
+        self.serialized_user = {
+            "id": uuid.uuid4().hex,
+            "username": "testuser",
+            "password": "testpassword",
+        }
+        self.serialized_log1 = {
+            "id": uuid.uuid4().hex,
+            "user_id": self.serialized_user["id"],
+            "content_id": uuid.uuid4().hex,
+        }
+        self.serialized_log2 = {
+            "id": uuid.uuid4().hex,
+            "user_id": self.serialized_user["id"],
+            "content_id": uuid.uuid4().hex,
+        }
+
+    def serialize_to_store(self, Model, data):
+        instance = Model(**data)
+        serialized = instance.serialize()
+        Store.objects.create(
+            id=serialized["id"],
+            serialized=json.dumps(serialized),
+            last_saved_instance=uuid.uuid4().hex,
+            last_saved_counter=5,
+            dirty_bit=True,
+            profile=self.profile,
+            partition=instance._morango_partition,
+            source_id=instance._morango_source_id,
+            model_name=instance.morango_model_name,
+        )
+
+    def serialize_all_to_store(self):
+        self.serialize_to_store(MyUser, self.serialized_user)
+        self.serialize_to_store(SummaryLog, self.serialized_log1)
+        self.serialize_to_store(SummaryLog, self.serialized_log2)
+
+    def assert_deserialization(self, user_deserialized=True, log1_deserialized=True, log2_deserialized=True):
+        assert MyUser.objects.filter(id=self.serialized_user["id"]).exists() == user_deserialized
+        assert SummaryLog.objects.filter(id=self.serialized_log1["id"]).exists() == log1_deserialized
+        assert SummaryLog.objects.filter(id=self.serialized_log2["id"]).exists() == log2_deserialized
+        assert Store.objects.get(id=self.serialized_user["id"]).dirty_bit == (not user_deserialized)
+        assert Store.objects.get(id=self.serialized_log1["id"]).dirty_bit == (not log1_deserialized)
+        assert Store.objects.get(id=self.serialized_log2["id"]).dirty_bit == (not log2_deserialized)
+
+    def test_successful_deserialization(self):
+
+        self.serialize_all_to_store()
+
+        _deserialize_from_store(self.profile)
+
+        self.assert_deserialization()
+
+    def test_deserialization_with_missing_username(self):
+            
+        self.serialized_user["username"] = ""
+
+        self.serialize_all_to_store()
+
+        _deserialize_from_store(self.profile)
+
+        self.assert_deserialization(user_deserialized=False, log1_deserialized=False, log2_deserialized=False)
+    
+    def test_deserialization_with_excessively_long_username(self):
+            
+        self.serialized_user["username"] = "a" * 256
+
+        self.serialize_all_to_store()
+
+        _deserialize_from_store(self.profile)
+
+        self.assert_deserialization(user_deserialized=False, log1_deserialized=False, log2_deserialized=False)
+        
+    def test_deserialization_with_invalid_content_id(self):
+
+        self.serialized_log1["content_id"] = "invalid"
+
+        self.serialize_all_to_store()
+
+        _deserialize_from_store(self.profile)
+
+        self.assert_deserialization(log1_deserialized=False)
+
+    def test_deserialization_with_invalid_log_user_id(self):
+
+        self.serialized_log1["user_id"] = uuid.uuid4().hex
+
+        self.serialize_all_to_store()
+
+        _deserialize_from_store(self.profile)
+
+        self.assert_deserialization(log1_deserialized=False)
