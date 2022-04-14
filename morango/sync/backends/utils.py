@@ -7,12 +7,16 @@ from morango.errors import MorangoError
 
 
 def load_backend(conn):
-
+    """
+    :rtype: morango.sync.backends.base.BaseSQLWrapper
+    """
     if "postgresql" in conn.vendor:
-        return import_module("morango.sync.backends.postgres")
-    if "sqlite" in conn.vendor:
-        return import_module("morango.sync.backends.sqlite")
-    raise MorangoError("Incompatible database backend for syncing")
+        SQLWrapper = import_module("morango.sync.backends.postgres").SQLWrapper
+    elif "sqlite" in conn.vendor:
+        SQLWrapper = import_module("morango.sync.backends.sqlite").SQLWrapper
+    else:
+        raise MorangoError("Incompatible database backend for syncing")
+    return SQLWrapper(conn)
 
 
 @lru_cache(maxsize=1)
@@ -46,3 +50,74 @@ def calculate_max_sqlite_variables():
                 break
 
     return MAX_VARIABLE_NUMBER
+
+
+def get_pk_field(fields):
+    try:
+        return next(f for f in fields if f.primary_key)
+    except StopIteration:
+        raise ValueError("No primary key found in fields")
+
+
+class TemporaryTable(object):
+    """
+    Utility class for managing a temporary table within the database
+    """
+
+    __slots__ = ("connection", "name", "fields", "backend", "_meta")
+
+    def __init__(self, connection, name, **fields):
+        self.connection = connection
+        self.name = name
+        self.fields = []
+        self.backend = load_backend(connection)
+        self._meta = self.Meta()
+
+        for name, field in fields.items():
+            field.set_attributes_from_name(name)
+            self.fields.append(field)
+
+    def __enter__(self):
+        self.create()
+        return self
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        self.drop()
+
+    @property
+    def sql_name(self):
+        return self.connection.ops.quote_name("t_{}".format(self.name))
+
+    def create(self):
+        fields = []
+        params = []
+        with self.connection.schema_editor() as schema_editor:
+            for field in self.fields:
+                field_sql, field_params = schema_editor.column_sql(
+                    self, field, include_default=True
+                )
+                field_sql_name = self.connection.ops.quote_name(field.column)
+                fields.append("{name} {sql}".format(name=field_sql_name, sql=field_sql))
+                params.extend(field_params)
+        with self.connection.cursor() as c:
+            self.backend._create_temporary_table(c, self.sql_name, fields, params)
+
+    def drop(self):
+        with self.connection.cursor() as c:
+            c.execute("DROP TABLE IF EXISTS {name}".format(name=self.sql_name))
+
+    def bulk_insert(self, values):
+        params = []
+        for value_dict in values:
+            for field in self.fields:
+                params.append(value_dict.get(field.attname))
+        with self.connection.cursor() as c:
+            self.backend._bulk_full_record_upsert(c, self.sql_name, self.fields, params)
+
+    class Meta:
+        """
+        HACK: some Django code bits require a model, only to access meta information, which we use
+        this to mimic that on this non-model class
+        """
+
+        db_tablespace = None

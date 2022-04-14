@@ -432,6 +432,7 @@ class DeserializationFromStoreIntoAppTestCase(TestCase):
         st = StoreModelFacilityFactory(
             id=uuid.uuid4().hex, serialized=serialized, model_name="contentsummarylog"
         )
+        self.assertTrue(st.dirty_bit)
         self.mc.deserialize_from_store()
         st.refresh_from_db()
         self.assertTrue(st.dirty_bit)
@@ -632,7 +633,7 @@ class SelfReferentialFKDeserializationTestCase(TestCase):
 
         new_log.refresh_from_db()
         self.assertTrue(new_log.dirty_bit)
-        self.assertIn("exist", new_log.deserialization_error)
+        self.assertIn("missing MyUser", new_log.deserialization_error)
 
 
 class SessionControllerTestCase(SimpleTestCase):

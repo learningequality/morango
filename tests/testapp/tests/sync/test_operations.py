@@ -43,7 +43,7 @@ from morango.sync.operations import ProducerQueueOperation
 from morango.sync.operations import ReceiverQueueOperation
 from morango.sync.syncsession import TransferClient
 
-DBBackend = load_backend(connection).SQLWrapper()
+DBBackend = load_backend(connection)
 
 
 class FacilityModelFactory(factory.DjangoModelFactory):

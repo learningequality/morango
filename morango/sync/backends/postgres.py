@@ -1,6 +1,5 @@
-from django.db import connection
-
 from .base import BaseSQLWrapper
+from .utils import get_pk_field
 from morango.models.core import Buffer
 from morango.models.core import RecordMaxCounter
 from morango.models.core import RecordMaxCounterBuffer
@@ -9,58 +8,100 @@ from morango.models.core import Store
 
 class SQLWrapper(BaseSQLWrapper):
     backend = "postgresql"
+    create_temporary_table_template = (
+        "CREATE TEMP TABLE {name} ({fields}) ON COMMIT DROP"
+    )
 
-    def _bulk_insert_into_app_models(
-        self, cursor, app_model, fields, db_values, placeholder_list
-    ):
+    def _prepare_with_values(self, name, fields, db_values):
+        placeholder_list = self._create_placeholder_list(fields, db_values)
         # convert this list to a string to be passed into raw sql query
         placeholder_str = ", ".join(placeholder_list).replace("'", "")
-        # cast the values in the SET statement to their appropiate postgres db types
-        set_casted_values = ", ".join(
-            map(
-                lambda f: "{f} = nv.{f}::{type}".format(
-                    f=f.attname, type=f.rel_db_type(connection)
-                ),
-                fields,
-            )
-        )
-        # cast the values in the SELECT statement to their appropiate posgtres db types
-        select_casted_values = ", ".join(
-            map(
-                lambda f: "{f}::{type}".format(
-                    f=f.attname, type=f.rel_db_type(connection)
-                ),
-                fields,
-            )
-        )
-        # cast the pk to the correct field type for this model
-        pk = [f for f in fields if f.primary_key][0]
-        fields = str(tuple(str(f.attname) for f in fields)).replace("'", "")
-
-        insert = """
-            WITH new_values {fields} as
+        return """
+            WITH {name} {fields} as
             (
                 VALUES {placeholder_str}
-            ),
+            )
+        """.format(
+            name=name,
+            fields=str(tuple(str(f.column) for f in fields)).replace("'", ""),
+            placeholder_str=placeholder_str,
+        )
+
+    def _prepare_casted_fields(self, fields):
+        return ", ".join(
+            map(
+                lambda f: "{f}::{type}".format(
+                    f=f.column, type=f.rel_db_type(self.connection)
+                ),
+                fields,
+            )
+        )
+
+    def _prepare_set_casted_values(self, fields, source_table):
+        return ", ".join(
+            map(
+                lambda f: "{f} = {src}.{f}::{type}".format(
+                    f=f.attname,
+                    type=f.rel_db_type(self.connection),
+                    src=source_table,
+                ),
+                fields,
+            )
+        )
+
+    def _bulk_full_record_upsert(self, cursor, table_name, fields, db_values):
+        pk = get_pk_field(fields)
+
+        insert = """
+            {cte},
             updated as
             (
-                UPDATE {app_model} model
+                UPDATE {table_name} model
                 SET {set_values}
-                FROM new_values nv
-                WHERE model.id = nv.id::{id_type}
-                returning model.*
+                FROM {cte_name} cte
+                WHERE model.id = cte.{pk_field}::{pk_type}
+                RETURNING model.{pk_field}
             )
-            INSERT INTO {app_model} {fields}
+            INSERT INTO {table_name} {fields}
             SELECT {select_fields}
-            FROM new_values ut
-            WHERE ut.id::{id_type} not in (SELECT id FROM updated)
-        """.format(
-            app_model=app_model,
-            fields=fields,
-            placeholder_str=placeholder_str,
-            set_values=set_casted_values,
-            select_fields=select_casted_values,
-            id_type=pk.rel_db_type(connection),
+            FROM {cte_name} cte
+            WHERE cte.{pk_field}::{pk_type} NOT IN (SELECT {pk_field} FROM updated)
+        """
+
+        cte_name = "new_values"
+        insert = insert.format(
+            cte=self._prepare_with_values(cte_name, fields, db_values),
+            cte_name=cte_name,
+            table_name=table_name,
+            fields=str(tuple(str(f.column) for f in fields)).replace("'", ""),
+            set_values=self._prepare_set_casted_values(fields, cte_name),
+            select_fields=self._prepare_casted_fields(fields),
+            pk_field=pk.column,
+            pk_type=pk.rel_db_type(self.connection),
+        )
+        # use DB-APIs parameter substitution (2nd parameter expects a sequence)
+        cursor.execute(insert, db_values)
+
+    def _bulk_update(self, cursor, table_name, fields, db_values):
+        pk = get_pk_field(fields)
+
+        insert = """
+            {cte}
+            UPDATE {table_name} model
+            SET {set_values}
+            FROM {cte_name} cte
+            WHERE model.{pk_field} = cte.{pk_field}::{pk_type}
+        """
+
+        cte_name = "new_values"
+        insert = insert.format(
+            cte=self._prepare_with_values(cte_name, fields, db_values),
+            cte_name=cte_name,
+            table_name=table_name,
+            fields=str(tuple(str(f.column) for f in fields)).replace("'", ""),
+            set_values=self._prepare_set_casted_values(fields, cte_name),
+            pk_field=pk.column,
+            pk_type=pk.rel_db_type(self.connection),
         )
         # use DB-APIs parameter substitution (2nd parameter expects a sequence)
         cursor.execute(insert, db_values)
