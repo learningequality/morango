@@ -60,13 +60,20 @@ class MyUser(AbstractBaseUser, FacilityDataSyncableModel):
     objects = SyncableUserModelManager()
 
     def calculate_source_id(self, *args, **kwargs):
-        return self.username
+        if self._morango_source_id:
+            return self._morango_source_id
+        else:
+            return uuid.uuid5(uuid.UUID("a" * 32), self.username).hex
 
     def calculate_partition(self, *args, **kwargs):
         return '{id}:user'.format(id=self.ID_PLACEHOLDER)
 
     def has_morango_certificate_scope_permission(self, scope_definition_id, scope_params):
-        return self.is_superuser
+        return self.is_superuser        
+
+    @staticmethod
+    def compute_namespaced_id(partition_value, source_id_value, model_name):
+        return source_id_value
 
 
 class SummaryLog(FacilityDataSyncableModel):

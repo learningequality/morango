@@ -53,16 +53,20 @@ class PushPullClientTestCase(LiveServerTestCase):
         )
         self.conn.chunk_size = 3
 
-        self.remote_user = self._setUpServer()
+        self.remote_user, self.root_cert_id = self._setUpServer()
         self.filter = Filter("{}:user".format(self.remote_user.id))
-        self.client = self._setUpClient(self.remote_user.id)
+        self.client = self._setUpClient(self.root_cert_id)
         self.session = self.client.sync_session
         self.last_session_activity = self.session.last_activity_timestamp
         self.last_transfer_activity = None
 
-        self.local_user = MyUser.objects.create(
-            id=self.remote_user.id, username="bob", is_superuser=True
-        )
+        # perform an initial sync to ensure the user is on both sides
+        client = self.client.get_pull_client()
+        client.initialize(self.filter)
+        client.run()
+        client.finalize()
+
+        self.local_user = MyUser.objects.first()
 
     def _setUpCertScopes(self):
         root_scope = ScopeDefinition.objects.create(
@@ -90,11 +94,11 @@ class PushPullClientTestCase(LiveServerTestCase):
 
     def _setUpServer(self):
         with second_environment():
-            root_scope, subset_scope = self._setUpCertScopes()
-            root_cert = Certificate.generate_root_certificate(root_scope.id)
+            self.server_root_scope, self.server_subset_scope = self._setUpCertScopes()
+            root_cert = Certificate.generate_root_certificate(self.server_root_scope.id)
 
             remote_user = MyUser.objects.create(
-                id=root_cert.id, username="bob", is_superuser=True
+                _morango_source_id=root_cert.id, username="bob", is_superuser=True
             )
             remote_user.set_password("password")
             remote_user.save()
@@ -102,25 +106,25 @@ class PushPullClientTestCase(LiveServerTestCase):
             subset_cert = Certificate(
                 parent=root_cert,
                 profile=self.profile,
-                scope_definition=subset_scope,
-                scope_version=subset_scope.version,
+                scope_definition=self.server_subset_scope,
+                scope_version=self.server_subset_scope.version,
                 scope_params=json.dumps({"user": remote_user.id, "sub": "user"}),
                 private_key=Key(),
             )
             root_cert.sign_certificate(subset_cert)
             subset_cert.save()
-        return remote_user
+        return remote_user, root_cert.id
 
     def _setUpClient(self, primary_partition):
-        root_scope, subset_scope = self._setUpCertScopes()
+        self.client_root_scope, self.client_subset_scope = self._setUpCertScopes()
 
         server_certs = self.conn.get_remote_certificates(
-            primary_partition, root_scope.id
+            primary_partition, self.client_root_scope.id
         )
         server_cert = server_certs[0]
         client_cert = self.conn.certificate_signing_request(
             server_cert,
-            subset_scope.id,
+            self.client_subset_scope.id,
             {"user": primary_partition, "sub": "user"},
             userargs="bob",
             password="password",

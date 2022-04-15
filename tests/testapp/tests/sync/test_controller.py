@@ -428,9 +428,10 @@ class DeserializationFromStoreIntoAppTestCase(TestCase):
         self.assertFalse(Facility.objects.filter(id=st.id).exists())
 
     def test_broken_fk_leaves_store_dirty_bit(self):
-        serialized = """{"user_id": "40de9a3fded95d7198f200c78e559353", "id": "bd205b5ee5bc42da85925d24c61341a8"}"""
+        log_id = uuid.uuid4().hex
+        serialized = json.dumps({"user_id": "40de9a3fded95d7198f200c78e559353", "id": log_id})
         st = StoreModelFacilityFactory(
-            id=uuid.uuid4().hex, serialized=serialized, model_name="contentsummarylog"
+            id=log_id, serialized=serialized, model_name="contentsummarylog"
         )
         self.assertTrue(st.dirty_bit)
         self.mc.deserialize_from_store()
