@@ -52,7 +52,8 @@ class SQLWrapper(BaseSQLWrapper):
     def _bulk_full_record_upsert(self, cursor, table_name, fields, db_values):
         pk = get_pk_field(fields)
 
-        insert = """
+        cte_name = "new_values"
+        upsert = """
             {cte},
             updated as
             (
@@ -66,21 +67,18 @@ class SQLWrapper(BaseSQLWrapper):
             SELECT {select_fields}
             FROM {cte_name} cte
             WHERE cte.{pk_field}::{pk_type} NOT IN (SELECT {pk_field} FROM updated)
-        """
-
-        cte_name = "new_values"
-        insert = insert.format(
+        """.format(
             cte=self._prepare_with_values(cte_name, fields, db_values),
             cte_name=cte_name,
             table_name=table_name,
             fields=str(tuple(str(f.column) for f in fields)).replace("'", ""),
-            set_values=self._prepare_set_casted_values(fields, cte_name),
+            set_values=self._prepare_set_casted_values(fields, "cte"),
             select_fields=self._prepare_casted_fields(fields),
             pk_field=pk.column,
             pk_type=pk.rel_db_type(self.connection),
         )
         # use DB-APIs parameter substitution (2nd parameter expects a sequence)
-        cursor.execute(insert, db_values)
+        cursor.execute(upsert, db_values)
 
     def _bulk_update(self, cursor, table_name, fields, db_values):
         pk = get_pk_field(fields)
@@ -99,7 +97,7 @@ class SQLWrapper(BaseSQLWrapper):
             cte_name=cte_name,
             table_name=table_name,
             fields=str(tuple(str(f.column) for f in fields)).replace("'", ""),
-            set_values=self._prepare_set_casted_values(fields, cte_name),
+            set_values=self._prepare_set_casted_values(fields, "cte"),
             pk_field=pk.column,
             pk_type=pk.rel_db_type(self.connection),
         )

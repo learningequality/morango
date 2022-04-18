@@ -67,6 +67,12 @@ class TemporaryTable(object):
     __slots__ = ("connection", "name", "fields", "backend", "_meta")
 
     def __init__(self, connection, name, **fields):
+        """
+        :param connection: A database connection object
+        :param name: A str name for the table in the database
+        :param fields: Keyword arguments are assumed to be fields for defining the schema of the
+            temporary table
+        """
         self.connection = connection
         self.name = name
         self.fields = []
@@ -86,13 +92,27 @@ class TemporaryTable(object):
 
     @property
     def sql_name(self):
+        """
+        :return: The name actual name of the table used in the DB, prefixed to avoid collisions
+        """
         return self.connection.ops.quote_name("t_{}".format(self.name))
 
+    def get_field(self, name):
+        """
+        :param name: A str of the name of which field to find
+        :return: The field object
+        """
+        return next(f for f in self.fields if f.name == name)
+
     def create(self):
+        """
+        Creates the temporary table within the database
+        """
         fields = []
         params = []
         with self.connection.schema_editor() as schema_editor:
             for field in self.fields:
+                # generates the SQL expression for the table column
                 field_sql, field_params = schema_editor.column_sql(
                     self, field, include_default=True
                 )
@@ -103,16 +123,24 @@ class TemporaryTable(object):
             self.backend._create_temporary_table(c, self.sql_name, fields, params)
 
     def drop(self):
+        """
+        Drops the temporary table within the database
+        """
         with self.connection.cursor() as c:
             c.execute("DROP TABLE IF EXISTS {name}".format(name=self.sql_name))
 
     def bulk_insert(self, values):
+        """
+        Bulk inserts a list of records into the temporary table
+
+        :param values: A list of dictionaries containing data to insert, keyed by field name
+        """
         params = []
         for value_dict in values:
             for field in self.fields:
                 params.append(value_dict.get(field.attname))
         with self.connection.cursor() as c:
-            self.backend._bulk_full_record_upsert(c, self.sql_name, self.fields, params)
+            self.backend._bulk_insert(c, self.sql_name, self.fields, params)
 
     class Meta:
         """

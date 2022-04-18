@@ -3,7 +3,6 @@ import itertools
 import json
 import logging
 import uuid
-
 from collections import defaultdict
 
 from django.core import exceptions
@@ -18,13 +17,13 @@ from django.utils import timezone
 from rest_framework.exceptions import ValidationError
 
 from morango.api.serializers import BufferSerializer
-from morango.constants.capabilities import ASYNC_OPERATIONS
-from morango.constants.capabilities import FSIC_V2_FORMAT
 from morango.constants import transfer_stages
 from morango.constants import transfer_statuses
-from morango.errors import MorangoResumeSyncError
-from morango.errors import MorangoLimitExceeded
+from morango.constants.capabilities import ASYNC_OPERATIONS
+from morango.constants.capabilities import FSIC_V2_FORMAT
 from morango.errors import MorangoInvalidFSICPartition
+from morango.errors import MorangoLimitExceeded
+from morango.errors import MorangoResumeSyncError
 from morango.errors import MorangoSkipOperation
 from morango.models.certificates import Filter
 from morango.models.core import Buffer
@@ -37,18 +36,15 @@ from morango.models.core import RecordMaxCounterBuffer
 from morango.models.core import Store
 from morango.models.core import TransferSession
 from morango.models.core import UUIDField
-from morango.models.fsic_utils import (
-    calculate_directional_fsic_diff,
-    calculate_directional_fsic_diff_v2,
-    chunk_fsic_v2,
-    expand_fsic_for_use,
-)
+from morango.models.fsic_utils import calculate_directional_fsic_diff
+from morango.models.fsic_utils import calculate_directional_fsic_diff_v2
+from morango.models.fsic_utils import chunk_fsic_v2
+from morango.models.fsic_utils import expand_fsic_for_use
 from morango.registry import syncable_models
 from morango.sync.backends.utils import load_backend
-from morango.sync.backends.utils import get_pk_field
+from morango.sync.backends.utils import TemporaryTable
 from morango.sync.context import LocalSessionContext
 from morango.sync.context import NetworkSessionContext
-from morango.sync.backends.utils import TemporaryTable
 from morango.sync.utils import mute_signals
 from morango.sync.utils import validate_and_create_buffer_data
 from morango.utils import _assert
@@ -268,6 +264,18 @@ def _serialize_into_store(profile, filter=None):
 
 
 def _validate_missing_store_foreign_keys(from_model_name, to_model_name, temp_table):
+    """
+    Performs validation on a bulk set of foreign keys (FKs), given a temp table with two columns,
+    `from_pk` and `to_pk`, the primary key (PK) pair to validate. Any store record matching
+    `from_pk`, while missing a store record matching `to_pk`, will be updated with a deserialization
+    error and its PK returned within a list.
+
+    :param from_model_name: A str name of the model which has the FK, for logging purposes
+    :param to_model_name: A str name of the model referenced by the FK, for logging purposes
+    :param temp_table: A temp table object for querying against in the DB
+    :type temp_table: morango.sync.backends.utils.TemporaryTable
+    :return: A list of store PKs that have broken FKs
+    """
     invalid_pks = []
     select_sql = """
         SELECT t.from_pk, t.to_pk
@@ -288,6 +296,7 @@ def _validate_missing_store_foreign_keys(from_model_name, to_model_name, temp_ta
     )
     store_update_fields = [Store._meta.pk, store_deserialization_error]
 
+    from_pk_field = temp_table.get_field("from_pk")
     update_values = []
     with connection.cursor() as c:
         c.execute(select_sql)
@@ -300,16 +309,24 @@ def _validate_missing_store_foreign_keys(from_model_name, to_model_name, temp_ta
             )
             logger.warning(err)
             update_values.extend([from_pk, err])
-            invalid_pks.append(from_pk)
-        # update Store with errors
-        DBBackend._bulk_update(
-            c, Store._meta.db_table, store_update_fields, update_values
-        )
+            invalid_pks.append(from_pk_field.to_python(from_pk))
+        if update_values:
+            # update Store with errors
+            DBBackend._bulk_update(
+                c, Store._meta.db_table, store_update_fields, update_values
+            )
     return invalid_pks
 
 
 def _handle_deleted_store_foreign_keys(temp_table):
-    deleted_pks = []
+    """
+    Handles store records with foreign key (FK) references to other deleted store records to prevent
+    their deserialization and update the `DeletedModels` and `HardDeletedModels` tracking, given a
+    temp table with two columns, `from_pk` and `to_pk`, the primary key (PK) pair
+    :param temp_table: A temp table object for querying against in the DB
+    :type temp_table: morango.sync.backends.utils.TemporaryTable
+    :return: A list of store PKs that have FKs to deleted records
+    """
     select_sql = """
         SELECT t.from_pk, s.profile, s.deleted, s.hard_deleted
         FROM {temp_table} t
@@ -321,44 +338,63 @@ def _handle_deleted_store_foreign_keys(temp_table):
         pk_field=Store._meta.pk.column,
     )
 
+    from_pk_field = temp_table.get_field("from_pk")
+    deleted_pks = []
     deleted_values = []
     hard_deleted_values = []
     with connection.cursor() as c:
         c.execute(select_sql)
+        # find all the store PKs which have FKs to deleted store PKs
         for from_pk, profile, deleted, hard_deleted in c.fetchall():
             if deleted or hard_deleted:
                 deleted_values.extend([from_pk, profile])
             if hard_deleted:
                 hard_deleted_values.extend([from_pk, profile])
-            deleted_pks.append(from_pk)
+            deleted_pks.append(from_pk_field.to_python(from_pk))
         # update deleted tracking models
-        DBBackend._bulk_full_record_upsert(
-            c, DeletedModels._meta.db_table, DeletedModels._meta.fields, deleted_values
-        )
-        DBBackend._bulk_full_record_upsert(
-            c,
-            HardDeletedModels._meta.db_table,
-            HardDeletedModels._meta.fields,
-            hard_deleted_values,
-        )
+        if deleted_values:
+            DBBackend._bulk_full_record_upsert(
+                c,
+                DeletedModels._meta.db_table,
+                DeletedModels._meta.fields,
+                deleted_values,
+            )
+        if hard_deleted_values:
+            DBBackend._bulk_full_record_upsert(
+                c,
+                HardDeletedModels._meta.db_table,
+                HardDeletedModels._meta.fields,
+                hard_deleted_values,
+            )
     return deleted_pks
 
 
 def _validate_store_foreign_keys(from_model_name, fk_references):
+    """
+    Validates the foreign key (FK) references of a model whose name is `from_model_name`, through
+    bulk processing using a temporary table within the database for holding the FK references
+
+    :param from_model_name: A str name of the model which has the FKs, for logging purposes
+    :param fk_references: A dictionary of lists containing `morango.models.core.ForeignKeyReference`
+        keyed by the
+    :return: A tuple of two lists containing store PKs with broken FKs and FKs to deleted records
+    """
     exclude_pks = []
     deleted_pks = []
 
     for to_model_name, to_fk_references in fk_references.items():
-        temp_table = TemporaryTable(
+        with TemporaryTable(
             connection, "fks", from_pk=UUIDField(), to_pk=UUIDField()
-        )
-        with temp_table:
+        ) as temp_table:
+            # insert all the FK references into a temp table in the database
             temp_table.bulk_insert([fks._asdict() for fks in to_fk_references])
+            # now pass the temp table to validate against broken FKs
             exclude_pks.extend(
                 _validate_missing_store_foreign_keys(
                     from_model_name, to_model_name, temp_table
                 )
             )
+            # find any FKs referencing deleted records
             deleted_pks.extend(_handle_deleted_store_foreign_keys(temp_table))
 
     return exclude_pks, deleted_pks
@@ -497,6 +533,7 @@ def _deserialize_from_store(profile, skip_erroring=False, filter=None):
                 # array for holding db values from the fields of each model for this class
                 db_values = []
                 for app_model in app_models:
+                    print("CHECK EXCLUDE", app_model.pk, excluded_list)
                     if (
                         app_model.pk not in excluded_list
                         and app_model.pk not in deleted_list

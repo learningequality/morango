@@ -21,6 +21,22 @@ class BaseSQLWrapper(object):
     def _bulk_full_record_upsert(self, cursor, table_name, fields, db_values):
         raise NotImplementedError("Subclass must implement this method.")
 
+    def _bulk_insert(self, cursor, table_name, fields, db_values):
+        placeholder_str = ", ".join(
+            self._create_placeholder_list(fields, db_values)
+        ).replace("'", "")
+        fields_str = str(tuple(str(f.attname) for f in fields)).replace("'", "")
+        insert = """
+            INSERT INTO {table_name} {fields}
+            VALUES {placeholder_str}
+        """.format(
+            table_name=table_name, fields=fields_str, placeholder_str=placeholder_str
+        )
+        cursor.execute(insert, db_values)
+
+    def _bulk_update(self, cursor, table_name, fields, db_values):
+        raise NotImplementedError("Subclass must implement this method.")
+
     def _dequeuing_delete_rmcb_records(self, cursor, transfersession_id):
         # delete all RMCBs which are a reverse FF (store version newer than buffer version)
         delete_rmcb_records = """DELETE FROM {rmcb}

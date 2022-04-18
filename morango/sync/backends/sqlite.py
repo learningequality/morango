@@ -29,16 +29,31 @@ class SQLWrapper(BaseSQLWrapper):
             for x in range(0, len(placeholder_list), num_of_rows_able_to_insert)
         ]
         # insert data chunks
-        fields = str(tuple(str(f.attname) for f in fields)).replace("'", "")
+        fields_str = str(tuple(str(f.attname) for f in fields)).replace("'", "")
         for values, params in zip(value_chunks, placeholder_chunks):
             placeholder_str = ", ".join(params).replace("'", "")
-            insert = """REPLACE INTO {table_name} {fields}
-                        VALUES {placeholder_str}
+            insert = """
+                REPLACE INTO {table_name} {fields}
+                VALUES {placeholder_str}
             """.format(
-                table_name=table_name, fields=fields, placeholder_str=placeholder_str
+                table_name=table_name,
+                fields=fields_str,
+                placeholder_str=placeholder_str,
             )
             # use DB-APIs parameter substitution (2nd parameter expects a sequence)
             cursor.execute(insert, values)
+
+    def _bulk_insert(self, cursor, table_name, fields, db_values):
+        num_of_rows_able_to_insert = calculate_max_sqlite_variables() // len(fields)
+        num_of_values_able_to_insert = num_of_rows_able_to_insert * len(fields)
+        value_chunks = [
+            db_values[x : x + num_of_values_able_to_insert]
+            for x in range(0, len(db_values), num_of_values_able_to_insert)
+        ]
+        for value_chunk in value_chunks:
+            super(SQLWrapper, self)._bulk_insert(
+                cursor, table_name, fields, value_chunk
+            )
 
     def _bulk_update(self, cursor, table_name, fields, db_values):
         """
@@ -90,7 +105,6 @@ class SQLWrapper(BaseSQLWrapper):
                 ),
             )
             # use DB-APIs parameter substitution (2nd parameter expects a sequence)
-            print("EXECUTE BULK UPDATE:", update, params)
             cursor.execute(update, params)
 
     def _dequeuing_merge_conflict_rmcb(self, cursor, transfersession_id):
