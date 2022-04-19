@@ -326,6 +326,7 @@ def _deserialize_from_store(profile, skip_erroring=False, filter=None):
                         except (
                             exceptions.ValidationError,
                             exceptions.ObjectDoesNotExist,
+                            ValueError,
                         ) as e:
                             excluded_list.append(store_model.id)
                             # if the app model did not validate, we leave the store dirty bit set, but mark the error
@@ -363,13 +364,16 @@ def _deserialize_from_store(profile, skip_erroring=False, filter=None):
                         app_model = store_model._deserialize_store_model(fk_cache)
                         # if the model was not deleted add its field values to the list
                         if app_model:
+                            new_db_values = []
                             for f in fields:
                                 value = getattr(app_model, f.attname)
                                 db_value = f.get_db_prep_value(value, connection)
-                                db_values.append(db_value)
+                                new_db_values.append(db_value)
+                            db_values += new_db_values
                     except (
                         exceptions.ValidationError,
                         exceptions.ObjectDoesNotExist,
+                        ValueError,
                     ) as e:
                         # if the app model did not validate, we leave the store dirty bit set
                         excluded_list.append(store_model.id)
