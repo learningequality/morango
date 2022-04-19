@@ -512,6 +512,12 @@ def _deserialize_from_store(profile, skip_erroring=False, filter=None):
                         if app_model:
                             app_models.append(app_model)
                         for fk_model, fk_refs in model_deferred_fks.items():
+                            # validate that the FK references aren't to anything already in the
+                            # excluded list, which should only contain models which failed to
+                            # deserialize for reasons other than broken FKs at this point
+                            for fk_ref in fk_refs:
+                                if fk_ref.to_pk in excluded_list:
+                                    raise exceptions.ValidationError("{} with id {} failed to deserialize".format(fk_model, fk_ref.to_pk))
                             deferred_fks[fk_model].extend(fk_refs)
                     except (
                         exceptions.ValidationError,
@@ -533,17 +539,23 @@ def _deserialize_from_store(profile, skip_erroring=False, filter=None):
                 # array for holding db values from the fields of each model for this class
                 db_values = []
                 for app_model in app_models:
-                    print("CHECK EXCLUDE", app_model.pk, excluded_list)
                     if (
                         app_model.pk not in excluded_list
                         and app_model.pk not in deleted_list
                     ):
-                        new_db_values = []
-                        for f in fields:
-                            value = getattr(app_model, f.attname)
-                            db_value = f.get_db_prep_value(value, connection)
-                            new_db_values.append(db_value)
-                        db_values += new_db_values
+                        # handle any errors that might come from `get_db_prep_value`
+                        try:
+                            new_db_values = []
+                            for f in fields:
+                                value = getattr(app_model, f.attname)
+                                db_value = f.get_db_prep_value(value, connection)
+                                new_db_values.append(db_value)
+                            db_values += new_db_values
+                        except ValueError as e:
+                            excluded_list.append(app_model.pk)
+                            store_model = store_models.get(pk=app_model.pk)
+                            store_model.deserialization_error = str(e)
+                            store_model.save(update_fields=["deserialization_error"])
 
                 if db_values:
                     with connection.cursor() as cursor:

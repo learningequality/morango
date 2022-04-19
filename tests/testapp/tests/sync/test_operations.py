@@ -2,15 +2,14 @@ import json
 import uuid
 
 import factory
+import mock
 from django.db import connection
-from django.test import TestCase
 from django.test import override_settings
+from django.test import TestCase
 from django.utils import timezone
 from facility_profile.models import Facility
 from facility_profile.models import MyUser
 from facility_profile.models import SummaryLog
-import mock
-import pytest
 
 from ..helpers import create_buffer_and_store_dummy_data
 from ..helpers import create_dummy_store_data
@@ -19,12 +18,12 @@ from morango.constants.capabilities import FSIC_V2_FORMAT
 from morango.errors import MorangoLimitExceeded
 from morango.models.core import Buffer
 from morango.models.core import DatabaseIDModel
+from morango.models.core import DatabaseMaxCounter
 from morango.models.core import InstanceIDModel
 from morango.models.core import RecordMaxCounter
 from morango.models.core import RecordMaxCounterBuffer
 from morango.models.core import Store
 from morango.models.core import SyncSession
-from morango.models.core import DatabaseMaxCounter
 from morango.models.core import TransferSession
 from morango.sync.backends.utils import load_backend
 from morango.sync.context import LocalSessionContext
@@ -35,11 +34,11 @@ from morango.sync.operations import _deserialize_from_store
 from morango.sync.operations import _queue_into_buffer_v1
 from morango.sync.operations import _queue_into_buffer_v2
 from morango.sync.operations import CleanupOperation
-from morango.sync.operations import ReceiverDequeueOperation
-from morango.sync.operations import ProducerDequeueOperation
-from morango.sync.operations import ReceiverDeserializeOperation
 from morango.sync.operations import InitializeOperation
+from morango.sync.operations import ProducerDequeueOperation
 from morango.sync.operations import ProducerQueueOperation
+from morango.sync.operations import ReceiverDequeueOperation
+from morango.sync.operations import ReceiverDeserializeOperation
 from morango.sync.operations import ReceiverQueueOperation
 from morango.sync.syncsession import TransferClient
 
@@ -1101,7 +1100,7 @@ class DeserializationTestCases(TestCase):
         self.assert_deserialization()
 
     def test_deserialization_with_missing_username(self):
-            
+
         self.serialized_user["username"] = ""
 
         self.serialize_all_to_store()
@@ -1109,9 +1108,9 @@ class DeserializationTestCases(TestCase):
         _deserialize_from_store(self.profile)
 
         self.assert_deserialization(user_deserialized=False, log1_deserialized=False, log2_deserialized=False)
-    
+
     def test_deserialization_with_excessively_long_username(self):
-            
+
         self.serialized_user["username"] = "a" * 256
 
         self.serialize_all_to_store()
@@ -1119,7 +1118,7 @@ class DeserializationTestCases(TestCase):
         _deserialize_from_store(self.profile)
 
         self.assert_deserialization(user_deserialized=False, log1_deserialized=False, log2_deserialized=False)
-        
+
     def test_deserialization_with_invalid_content_id(self):
 
         self.serialized_log1["content_id"] = "invalid"
