@@ -2,6 +2,9 @@ import json
 import sys
 import uuid
 
+from django.test.utils import CaptureQueriesContext
+from django.db import connection
+
 from django.urls import reverse
 from django.test.utils import override_settings
 from django.urls.exceptions import NoReverseMatch
@@ -1056,6 +1059,15 @@ class BufferEndpointTestCase(CertificateTestCaseMixin, APITestCase):
                 self.assertEqual(3, len(record["rmcb_list"]))
 
             return data
+
+    def test_buffer_serializer_makes_no_transfer_session_query(self):
+        transfer_session_id = self.create_records_for_pulling()
+        buffers = Buffer.objects.filter(transfer_session_id=transfer_session_id)
+
+        with CaptureQueriesContext(connection) as ctx:
+            result = BufferSerializer(instance=buffers[0]).data
+            for q in ctx.captured_queries:
+                self.assertNotRegexpMatches(q["sql"], 'morango_transfersession')
 
     def test_pull_valid_buffer_list(self):
 

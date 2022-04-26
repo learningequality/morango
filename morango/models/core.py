@@ -525,7 +525,7 @@ class Buffer(AbstractStore):
 
     def rmcb_list(self):
         return RecordMaxCounterBuffer.objects.filter(
-            model_uuid=self.model_uuid, transfer_session=self.transfer_session
+            model_uuid=self.model_uuid, transfer_session_id=self.transfer_session_id
         )
 
 
