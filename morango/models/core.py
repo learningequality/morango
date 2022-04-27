@@ -900,6 +900,8 @@ class SyncableModel(UUIDModelMixin):
         for field in self._meta.fields:
             if not isinstance(field, models.ForeignKey):
                 continue
+            # by not excluding the field if it's null, the default validation logic will apply
+            # and should raise a ValidationError if the FK field is not nullable
             if getattr(self, field.attname) is None:
                 continue
             excluded_fields.append(field.name)
