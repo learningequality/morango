@@ -4,13 +4,15 @@ import pytest
 from django.conf import settings
 from django.db import connection
 from django.db.utils import IntegrityError
+from django.test import TestCase
+from django.test import TransactionTestCase
 from django.utils import timezone
 
-from .helpers import TestMigrations
+from .helpers import TestMigrationsMixin
 
 
 @pytest.mark.skipif(not settings.MORANGO_TEST_POSTGRESQL, reason="Only postgres")
-class MorangoNullableMigrationTest(TestMigrations):
+class MorangoNullableMigrationTest(TestMigrationsMixin, TestCase):
     """
     Test migration that applies nullable status to `transfer_stage` and `transfer_stage_status`
     """
@@ -54,7 +56,7 @@ class MorangoNullableMigrationTest(TestMigrations):
 
 
 @pytest.mark.skipif(not settings.MORANGO_TEST_POSTGRESQL, reason="Only postgres")
-class SkipIfExistsMigrationTest(TestMigrations):
+class SkipIfExistsMigrationTest(TestMigrationsMixin, TransactionTestCase):
     """
     Test migration that creates an index on the partition field of the Store model
     """
