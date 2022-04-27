@@ -4,6 +4,7 @@ import functools
 import json
 import logging
 import uuid
+from functools import reduce
 
 from django.core import exceptions
 from django.db import connection
@@ -24,11 +25,10 @@ from django.utils import six
 from django.utils import timezone
 from django.utils.functional import cached_property
 
-from functools import reduce
-
 from morango import proquint
+from morango.constants import transfer_stages
+from morango.constants import transfer_statuses
 from morango.errors import InvalidMorangoSourceId
-from morango.registry import syncable_models
 from morango.models.certificates import Certificate
 from morango.models.certificates import Filter
 from morango.models.fields.uuids import sha2_uuid
@@ -38,10 +38,9 @@ from morango.models.fsic_utils import remove_redundant_instance_counters
 from morango.models.manager import SyncableModelManager
 from morango.models.morango_mptt import MorangoMPTTModel
 from morango.models.utils import get_0_4_system_parameters
-from morango.models.utils import get_0_5_system_id
 from morango.models.utils import get_0_5_mac_address
-from morango.constants import transfer_stages
-from morango.constants import transfer_statuses
+from morango.models.utils import get_0_5_system_id
+from morango.registry import syncable_models
 from morango.utils import _assert
 from morango.utils import SETTINGS
 
@@ -445,6 +444,11 @@ class Store(AbstractStore):
     )
 
     objects = StoreManager()
+
+    class Meta:
+        indexes = [
+            models.Index(fields=['partition'], name='idx_morango_store_partition'),
+        ]
 
     def _deserialize_store_model(self, fk_cache):  # noqa: C901
         """
