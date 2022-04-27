@@ -2,6 +2,10 @@
 
 List of the most important changes for each release.
 
+## 0.6.11
+- Added deferred processing of foreign keys to allow bulk processing and to improve performance.
+- Eliminated extraneous SQL queries for the transfer session when querying for buffers.
+
 ## 0.6.10
 - Fixes Django migration issue introduced in 0.6.7 allowing nullable fields with PostgreSQL backends
 
