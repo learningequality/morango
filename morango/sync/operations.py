@@ -11,6 +11,7 @@ from django.db import connection
 from django.db import connections
 from django.db import router
 from django.db import transaction
+from django.db.models import CharField
 from django.db.models import Q
 from django.db.models import signals
 from django.utils import timezone
@@ -278,7 +279,7 @@ def _validate_missing_store_foreign_keys(from_model_name, to_model_name, temp_ta
     """
     invalid_pks = []
     select_sql = """
-        SELECT t.from_pk, t.to_pk
+        SELECT t.from_field, t.from_pk, t.to_pk
         FROM {temp_table} t
         WHERE NOT EXISTS (
             SELECT 1
@@ -297,18 +298,27 @@ def _validate_missing_store_foreign_keys(from_model_name, to_model_name, temp_ta
     store_update_fields = [Store._meta.pk, store_deserialization_error]
 
     from_pk_field = temp_table.get_field("from_pk")
+    to_pk_field = temp_table.get_field("to_pk")
     update_values = []
     with connection.cursor() as c:
         c.execute(select_sql)
-        for from_pk, to_pk in c.fetchall():
-            err = "Error deserializing instance of {from_model} with id {from_pk}: missing {to_model} with id {to_pk}".format(
-                from_model=from_model_name,
-                from_pk=from_pk,
-                to_model=to_model_name,
-                to_pk=to_pk,
+        for from_field, from_pk, to_pk in c.fetchall():
+            err = dict(
+                {
+                    from_field: "{to_model_name} instance with id '{to_pk}' does not exist".format(
+                        to_model_name=to_model_name,
+                        to_pk=to_pk_field.to_python(to_pk),
+                    )
+                }
             )
-            logger.warning(err)
-            update_values.extend([from_pk, err])
+            logger.warning(
+                "Error deserializing instance of {from_model} with id {from_pk}: {err}".format(
+                    from_model=from_model_name,
+                    from_pk=from_pk,
+                    err=str(err),
+                )
+            )
+            update_values.extend([from_pk, str(err)])
             invalid_pks.append(from_pk_field.to_python(from_pk))
         if update_values:
             # update Store with errors
@@ -384,7 +394,11 @@ def _validate_store_foreign_keys(from_model_name, fk_references):
 
     for to_model_name, to_fk_references in fk_references.items():
         with TemporaryTable(
-            connection, "fks", from_pk=UUIDField(), to_pk=UUIDField()
+            connection,
+            "fks",
+            from_field=CharField(max_length=255),
+            from_pk=UUIDField(),
+            to_pk=UUIDField(),
         ) as temp_table:
             # insert all the FK references into a temp table in the database
             temp_table.bulk_insert([fks._asdict() for fks in to_fk_references])
@@ -517,7 +531,11 @@ def _deserialize_from_store(profile, skip_erroring=False, filter=None):
                             # deserialize for reasons other than broken FKs at this point
                             for fk_ref in fk_refs:
                                 if fk_ref.to_pk in excluded_list:
-                                    raise exceptions.ValidationError("{} with id {} failed to deserialize".format(fk_model, fk_ref.to_pk))
+                                    raise exceptions.ValidationError(
+                                        "{} with id {} failed to deserialize".format(
+                                            fk_model, fk_ref.to_pk
+                                        )
+                                    )
                             deferred_fks[fk_model].extend(fk_refs)
                     except (
                         exceptions.ValidationError,

@@ -4,7 +4,6 @@ import functools
 import json
 import logging
 import uuid
-
 from collections import defaultdict
 from collections import namedtuple
 from functools import reduce
@@ -778,7 +777,7 @@ class RecordMaxCounterBuffer(AbstractCounter):
     model_uuid = UUIDField(db_index=True)
 
 
-ForeignKeyReference = namedtuple("ForeignKeyReference", ["from_pk", "to_pk"])
+ForeignKeyReference = namedtuple("ForeignKeyReference", ["from_field", "from_pk", "to_pk"])
 
 
 class SyncableModel(UUIDModelMixin):
@@ -905,8 +904,12 @@ class SyncableModel(UUIDModelMixin):
             if getattr(self, field.attname) is None:
                 continue
             excluded_fields.append(field.name)
-            deferred_fks[field.related_model.__name__].append(
-                ForeignKeyReference(from_pk=self.pk, to_pk=getattr(self, field.attname))
+            deferred_fks[field.related_model._meta.verbose_name].append(
+                ForeignKeyReference(
+                    from_field=field.attname,
+                    from_pk=self.pk,
+                    to_pk=getattr(self, field.attname)
+                )
             )
 
         self.clean_fields(exclude=excluded_fields)

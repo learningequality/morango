@@ -144,8 +144,8 @@ class TemporaryTable(object):
 
     class Meta:
         """
-        HACK: some Django code bits require a model, only to access meta information, which we use
-        this to mimic that on this non-model class
+        HACK: some Django code bits require a model, only to access meta information, so we use
+        this to mimic a model class
         """
 
         db_tablespace = None

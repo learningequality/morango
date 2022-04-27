@@ -1,16 +1,16 @@
+import contextlib
 import json
 import uuid
-import contextlib
+from test.support import EnvironmentVarGuard
 
 import factory
 import mock
 from django.test import SimpleTestCase
 from django.test import TestCase
 from facility_profile.models import Facility
-from facility_profile.models import MyUser
 from facility_profile.models import InteractionLog
+from facility_profile.models import MyUser
 from facility_profile.models import SummaryLog
-from test.support import EnvironmentVarGuard
 
 from ..helpers import serialized_facility_factory
 from ..helpers import TestSessionContext
@@ -641,7 +641,7 @@ class ForeignKeyDeserializationTestCase(TestCase):
 
         new_log.refresh_from_db()
         self.assertTrue(new_log.dirty_bit)
-        self.assertIn("missing MyUser", new_log.deserialization_error)
+        self.assertIn("my user instance with id '{}'".format(data["user_id"]), new_log.deserialization_error)
 
     def test_deserialization_of_model_with_disallowed_null_foreignkey(self):
 
