@@ -27,6 +27,9 @@ export PRINT_HELP_PYSCRIPT
 BROWSER := python -c "$$BROWSER_PYSCRIPT"
 
 export PYTHONPATH
+
+DJANGO_SETTINGS_MODULE ?= testapp.settings
+
 export DJANGO_SETTINGS_MODULE
 
 help:

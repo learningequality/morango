@@ -1,22 +1,21 @@
 """
 Helper functions for use across syncing related functionality.
 """
-import uuid
 import json
+import uuid
+from test.support import EnvironmentVarGuard
 
 import factory
 import mock
+from django.core.serializers.json import DjangoJSONEncoder
 from django.db import connection
 from django.db.migrations.executor import MigrationExecutor
-from django.test import TestCase
 from django.test.testcases import LiveServerTestCase
-from django.core.serializers.json import DjangoJSONEncoder
 from django.utils import timezone
 from facility_profile.models import Facility
 from facility_profile.models import InteractionLog
 from facility_profile.models import MyUser
 from facility_profile.models import SummaryLog
-from test.support import EnvironmentVarGuard
 
 from morango.api.serializers import BufferSerializer
 from morango.models.core import AbstractStore
@@ -32,8 +31,8 @@ from morango.sync.context import SessionContext
 from morango.sync.controller import MorangoProfileController
 from morango.sync.controller import SessionController
 from morango.sync.syncsession import NetworkSyncConnection
-from morango.sync.syncsession import TransferClient
 from morango.sync.syncsession import SyncSessionClient
+from morango.sync.syncsession import TransferClient
 
 
 class FacilityFactory(factory.DjangoModelFactory):
@@ -447,7 +446,7 @@ class TestSessionContext(SessionContext):
         self._stage_status = stage_status or self._stage_status
 
 
-class TestMigrations(TestCase):
+class TestMigrationsMixin(object):
     # Modified from https://www.caktusgroup.com/blog/2016/02/02/writing-unit-tests-django-migrations/
 
     migrate_from = None
