@@ -1067,7 +1067,7 @@ class BufferEndpointTestCase(CertificateTestCaseMixin, APITestCase):
         with CaptureQueriesContext(connection) as ctx:
             result = BufferSerializer(instance=buffers[0]).data
             for q in ctx.captured_queries:
-                self.assertNotRegexpMatches(q["sql"], 'morango_transfersession')
+                self.assertFalse('morango_transfersession' in q['sql'])
 
     def test_pull_valid_buffer_list(self):
 
