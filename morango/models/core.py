@@ -900,6 +900,8 @@ class SyncableModel(UUIDModelMixin):
         for field in self._meta.fields:
             if not isinstance(field, models.ForeignKey):
                 continue
+            if getattr(self, field.attname) is None:
+                continue
             excluded_fields.append(field.name)
             deferred_fks[field.related_model.__name__].append(
                 ForeignKeyReference(from_pk=self.pk, to_pk=getattr(self, field.attname))

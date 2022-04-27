@@ -8,6 +8,7 @@ from django.test import SimpleTestCase
 from django.test import TestCase
 from facility_profile.models import Facility
 from facility_profile.models import MyUser
+from facility_profile.models import InteractionLog
 from facility_profile.models import SummaryLog
 from test.support import EnvironmentVarGuard
 
@@ -616,6 +617,12 @@ class SelfReferentialFKDeserializationTestCase(TestCase):
         self.assertTrue(new_child.dirty_bit)
         self.assertIn("exist", new_child.deserialization_error)
 
+
+class ForeignKeyDeserializationTestCase(TestCase):
+    def setUp(self):
+        (self.current_id, _) = InstanceIDModel.get_or_create_current_instance()
+        self.mc = MorangoProfileController("facilitydata")
+
     def test_deserialization_of_model_with_missing_foreignkey_referent(self):
 
         user = MyUser.objects.create(username="penguin")
@@ -635,6 +642,67 @@ class SelfReferentialFKDeserializationTestCase(TestCase):
         new_log.refresh_from_db()
         self.assertTrue(new_log.dirty_bit)
         self.assertIn("missing MyUser", new_log.deserialization_error)
+
+    def test_deserialization_of_model_with_disallowed_null_foreignkey(self):
+
+        user = MyUser.objects.create(username="penguin")
+        log = SummaryLog.objects.create(user=user)
+        self.mc.serialize_into_store()
+
+        new_log = Store.objects.get(id=log.id)
+        data = json.loads(new_log.serialized)
+        new_log.id = data["id"] = "f" * 32
+        data["user_id"] = None
+        new_log.serialized = json.dumps(data)
+        new_log.dirty_bit = True
+        new_log.save()
+
+        self.mc.deserialize_from_store()
+
+        new_log.refresh_from_db()
+        self.assertTrue(new_log.dirty_bit)
+        self.assertIn("cannot be null", new_log.deserialization_error)
+
+    def test_deserialization_of_model_with_allowed_null_foreignkey(self):
+
+        user = MyUser.objects.create(username="penguin")
+        log = InteractionLog.objects.create(user=user)
+        self.mc.serialize_into_store()
+
+        new_log = Store.objects.get(id=log.id)
+        data = json.loads(new_log.serialized)
+        new_log.id = data["id"] = "f" * 32
+        data["user_id"] = None
+        new_log.serialized = json.dumps(data)
+        new_log.dirty_bit = True
+        new_log.save()
+
+        self.mc.deserialize_from_store()
+
+        new_log.refresh_from_db()
+        self.assertFalse(new_log.dirty_bit)
+        self.assertTrue(new_log.deserialization_error == "")
+        self.assertTrue(InteractionLog.objects.filter(id=new_log.id).exists())
+
+    def test_deserialization_of_model_with_valid_foreignkey_referent(self):
+
+        user = MyUser.objects.create(username="penguin")
+        log = SummaryLog.objects.create(user=user)
+        self.mc.serialize_into_store()
+
+        new_log = Store.objects.get(id=log.id)
+        data = json.loads(new_log.serialized)
+        new_log.id = data["id"] = "f" * 32
+        new_log.serialized = json.dumps(data)
+        new_log.dirty_bit = True
+        new_log.save()
+
+        self.mc.deserialize_from_store()
+
+        new_log.refresh_from_db()
+        self.assertFalse(new_log.dirty_bit)
+        self.assertTrue(new_log.deserialization_error == "")
+        self.assertTrue(SummaryLog.objects.filter(id=new_log.id).exists())
 
 
 class SessionControllerTestCase(SimpleTestCase):

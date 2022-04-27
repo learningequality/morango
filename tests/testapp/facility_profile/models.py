@@ -94,7 +94,7 @@ class InteractionLog(FacilityDataSyncableModel):
     # Morango syncing settings
     morango_model_name = "contentinteractionlog"
 
-    user = models.ForeignKey(MyUser)
+    user = models.ForeignKey(MyUser, blank=True, null=True)
     content_id = UUIDField(db_index=True, default=uuid.uuid4)
 
     def calculate_source_id(self, *args, **kwargs):
