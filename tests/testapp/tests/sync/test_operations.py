@@ -1064,10 +1064,12 @@ class DeserializationTestCases(TestCase):
             "content_id": uuid.uuid4().hex,
         }
 
-    def serialize_to_store(self, Model, data):
+    def serialize_to_store(self, Model, data, post_serialization=None):
         instance = Model(**data)
         instance.calculate_uuid()
         serialized = instance.serialize()
+        if post_serialization:
+            serialized.update(post_serialization)
         Store.objects.create(
             id=serialized["id"],
             serialized=json.dumps(serialized),
@@ -1080,11 +1082,12 @@ class DeserializationTestCases(TestCase):
             model_name=instance.morango_model_name,
         )
 
-    def serialize_all_to_store(self):
+    def serialize_all_to_store(self, post_serialization=None):
+        post_serialization = post_serialization or {}
         self.serialize_to_store(Facility, self.serialized_facility)
-        self.serialize_to_store(MyUser, self.serialized_user)
-        self.serialize_to_store(SummaryLog, self.serialized_log1)
-        self.serialize_to_store(SummaryLog, self.serialized_log2)
+        self.serialize_to_store(MyUser, self.serialized_user, post_serialization=post_serialization.get("user", {}))
+        self.serialize_to_store(SummaryLog, self.serialized_log1, post_serialization=post_serialization.get("log1", {}))
+        self.serialize_to_store(SummaryLog, self.serialized_log2, post_serialization=post_serialization.get("log2", {}))
         self.serialize_to_store(ConditionalLog, self.serialized_conditional)
 
     def assert_deserialization(
@@ -1186,15 +1189,13 @@ class DeserializationTestCases(TestCase):
 
     def test_deserialization_with_invalid_content_id(self):
 
-        self.serialized_log1["content_id"] = "invalid"
-
-        self.serialize_all_to_store()
+        self.serialize_all_to_store({"log1": {"content_id": "invalid"}})
 
         _deserialize_from_store(self.profile)
 
         self.assert_deserialization(log1_deserialized=False)
 
-    def test_deserialization_with_invalid_log_user_id(self):
+    def test_deserialization_with_log_non_existent_user_id(self):
 
         self.serialized_log1["user_id"] = uuid.uuid4().hex
 
