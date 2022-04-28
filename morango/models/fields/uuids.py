@@ -32,6 +32,9 @@ class UUIDField(models.UUIDField):
         value = super(UUIDField, self).to_python(value)
         return value.hex if isinstance(value, uuid.UUID) else value
 
+    def value_from_object(self, obj):
+        return self.to_python(super(UUIDField, self).value_from_object(obj))
+
 
 class UUIDModelMixin(models.Model):
     """
