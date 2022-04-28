@@ -3,6 +3,7 @@ import itertools
 import json
 import logging
 import uuid
+from collections import defaultdict
 
 from django.core import exceptions
 from django.core.serializers.json import DjangoJSONEncoder
@@ -10,19 +11,20 @@ from django.db import connection
 from django.db import connections
 from django.db import router
 from django.db import transaction
+from django.db.models import CharField
 from django.db.models import Q
 from django.db.models import signals
 from django.utils import timezone
 from rest_framework.exceptions import ValidationError
 
 from morango.api.serializers import BufferSerializer
-from morango.constants.capabilities import ASYNC_OPERATIONS
-from morango.constants.capabilities import FSIC_V2_FORMAT
 from morango.constants import transfer_stages
 from morango.constants import transfer_statuses
-from morango.errors import MorangoResumeSyncError
-from morango.errors import MorangoLimitExceeded
+from morango.constants.capabilities import ASYNC_OPERATIONS
+from morango.constants.capabilities import FSIC_V2_FORMAT
 from morango.errors import MorangoInvalidFSICPartition
+from morango.errors import MorangoLimitExceeded
+from morango.errors import MorangoResumeSyncError
 from morango.errors import MorangoSkipOperation
 from morango.models.certificates import Filter
 from morango.models.core import Buffer
@@ -34,14 +36,14 @@ from morango.models.core import RecordMaxCounter
 from morango.models.core import RecordMaxCounterBuffer
 from morango.models.core import Store
 from morango.models.core import TransferSession
-from morango.models.fsic_utils import (
-    calculate_directional_fsic_diff,
-    calculate_directional_fsic_diff_v2,
-    chunk_fsic_v2,
-    expand_fsic_for_use,
-)
+from morango.models.core import UUIDField
+from morango.models.fsic_utils import calculate_directional_fsic_diff
+from morango.models.fsic_utils import calculate_directional_fsic_diff_v2
+from morango.models.fsic_utils import chunk_fsic_v2
+from morango.models.fsic_utils import expand_fsic_for_use
 from morango.registry import syncable_models
 from morango.sync.backends.utils import load_backend
+from morango.sync.backends.utils import TemporaryTable
 from morango.sync.context import LocalSessionContext
 from morango.sync.context import NetworkSessionContext
 from morango.sync.utils import mute_signals
@@ -52,7 +54,7 @@ from morango.utils import SETTINGS
 
 logger = logging.getLogger(__name__)
 
-DBBackend = load_backend(connection).SQLWrapper()
+DBBackend = load_backend(connection)
 
 # if postgres, get serializable db connection
 db_name = router.db_for_write(Store)
@@ -262,6 +264,156 @@ def _serialize_into_store(profile, filter=None):
                 )
 
 
+def _validate_missing_store_foreign_keys(from_model_name, to_model_name, temp_table):
+    """
+    Performs validation on a bulk set of foreign keys (FKs), given a temp table with two columns,
+    `from_pk` and `to_pk`, the primary key (PK) pair to validate. Any store record matching
+    `from_pk`, while missing a store record matching `to_pk`, will be updated with a deserialization
+    error and its PK returned within a list.
+
+    :param from_model_name: A str name of the model which has the FK, for logging purposes
+    :param to_model_name: A str name of the model referenced by the FK, for logging purposes
+    :param temp_table: A temp table object for querying against in the DB
+    :type temp_table: morango.sync.backends.utils.TemporaryTable
+    :return: A list of store PKs that have broken FKs
+    """
+    invalid_pks = []
+    select_sql = """
+        SELECT t.from_field, t.from_pk, t.to_pk
+        FROM {temp_table} t
+        WHERE NOT EXISTS (
+            SELECT 1
+            FROM {store} s
+            WHERE s.{pk_field} = t.to_pk
+        )
+    """.format(
+        temp_table=temp_table.sql_name,
+        store=Store._meta.db_table,
+        pk_field=Store._meta.pk.column,
+    )
+
+    store_deserialization_error = next(
+        f for f in Store._meta.fields if f.name == "deserialization_error"
+    )
+    store_update_fields = [Store._meta.pk, store_deserialization_error]
+
+    from_pk_field = temp_table.get_field("from_pk")
+    to_pk_field = temp_table.get_field("to_pk")
+    update_values = []
+    with connection.cursor() as c:
+        c.execute(select_sql)
+        for from_field, from_pk, to_pk in c.fetchall():
+            err = dict(
+                {
+                    from_field: "{to_model_name} instance with id '{to_pk}' does not exist".format(
+                        to_model_name=to_model_name,
+                        to_pk=to_pk_field.to_python(to_pk),
+                    )
+                }
+            )
+            logger.warning(
+                "Error deserializing instance of {from_model} with id {from_pk}: {err}".format(
+                    from_model=from_model_name,
+                    from_pk=from_pk,
+                    err=str(err),
+                )
+            )
+            update_values.extend([from_pk, str(err)])
+            invalid_pks.append(from_pk_field.to_python(from_pk))
+        if update_values:
+            # update Store with errors
+            DBBackend._bulk_update(
+                c, Store._meta.db_table, store_update_fields, update_values
+            )
+    return invalid_pks
+
+
+def _handle_deleted_store_foreign_keys(temp_table):
+    """
+    Handles store records with foreign key (FK) references to other deleted store records to prevent
+    their deserialization and update the `DeletedModels` and `HardDeletedModels` tracking, given a
+    temp table with two columns, `from_pk` and `to_pk`, the primary key (PK) pair
+    :param temp_table: A temp table object for querying against in the DB
+    :type temp_table: morango.sync.backends.utils.TemporaryTable
+    :return: A list of store PKs that have FKs to deleted records
+    """
+    select_sql = """
+        SELECT t.from_pk, s.profile, s.deleted, s.hard_deleted
+        FROM {temp_table} t
+            INNER JOIN {store} s ON s.{pk_field} = t.to_pk
+        WHERE s.deleted OR s.hard_deleted
+    """.format(
+        temp_table=temp_table.sql_name,
+        store=Store._meta.db_table,
+        pk_field=Store._meta.pk.column,
+    )
+
+    from_pk_field = temp_table.get_field("from_pk")
+    deleted_pks = []
+    deleted_values = []
+    hard_deleted_values = []
+    with connection.cursor() as c:
+        c.execute(select_sql)
+        # find all the store PKs which have FKs to deleted store PKs
+        for from_pk, profile, deleted, hard_deleted in c.fetchall():
+            if deleted or hard_deleted:
+                deleted_values.extend([from_pk, profile])
+            if hard_deleted:
+                hard_deleted_values.extend([from_pk, profile])
+            deleted_pks.append(from_pk_field.to_python(from_pk))
+        # update deleted tracking models
+        if deleted_values:
+            DBBackend._bulk_full_record_upsert(
+                c,
+                DeletedModels._meta.db_table,
+                DeletedModels._meta.fields,
+                deleted_values,
+            )
+        if hard_deleted_values:
+            DBBackend._bulk_full_record_upsert(
+                c,
+                HardDeletedModels._meta.db_table,
+                HardDeletedModels._meta.fields,
+                hard_deleted_values,
+            )
+    return deleted_pks
+
+
+def _validate_store_foreign_keys(from_model_name, fk_references):
+    """
+    Validates the foreign key (FK) references of a model whose name is `from_model_name`, through
+    bulk processing using a temporary table within the database for holding the FK references
+
+    :param from_model_name: A str name of the model which has the FKs, for logging purposes
+    :param fk_references: A dictionary of lists containing `morango.models.core.ForeignKeyReference`
+        keyed by the
+    :return: A tuple of two lists containing store PKs with broken FKs and FKs to deleted records
+    """
+    exclude_pks = []
+    deleted_pks = []
+
+    for to_model_name, to_fk_references in fk_references.items():
+        with TemporaryTable(
+            connection,
+            "fks",
+            from_field=CharField(max_length=255),
+            from_pk=UUIDField(),
+            to_pk=UUIDField(),
+        ) as temp_table:
+            # insert all the FK references into a temp table in the database
+            temp_table.bulk_insert([fks._asdict() for fks in to_fk_references])
+            # now pass the temp table to validate against broken FKs
+            exclude_pks.extend(
+                _validate_missing_store_foreign_keys(
+                    from_model_name, to_model_name, temp_table
+                )
+            )
+            # find any FKs referencing deleted records
+            deleted_pks.extend(_handle_deleted_store_foreign_keys(temp_table))
+
+    return exclude_pks, deleted_pks
+
+
 def _deserialize_from_store(profile, skip_erroring=False, filter=None):
     """
     Takes data from the store and integrates into the application.
@@ -275,11 +427,13 @@ def _deserialize_from_store(profile, skip_erroring=False, filter=None):
     """
 
     fk_cache = {}
+    excluded_list = []
+    deleted_list = []
+
     with transaction.atomic(using=USING_DB):
-        excluded_list = []
         # iterate through classes which are in foreign key dependency order
         for model in syncable_models.get_models(profile):
-
+            deferred_fks = defaultdict(list)
             store_models = Store.objects.filter(profile=profile)
 
             model_condition = Q(model_name=model.morango_model_name)
@@ -313,7 +467,9 @@ def _deserialize_from_store(profile, skip_erroring=False, filter=None):
                 while len(dirty_children) > 0:
                     for store_model in dirty_children:
                         try:
-                            app_model = store_model._deserialize_store_model(fk_cache)
+                            app_model, _ = store_model._deserialize_store_model(
+                                fk_cache
+                            )
                             if app_model:
                                 with mute_signals(signals.pre_save, signals.post_save):
                                     app_model.save(update_dirty_bit_to=False)
@@ -356,20 +512,31 @@ def _deserialize_from_store(profile, skip_erroring=False, filter=None):
                 )
 
             else:
-                # array for holding db values from the fields of each model for this class
-                db_values = []
+                # collect all initially valid app models
+                app_models = []
                 fields = model._meta.fields
                 for store_model in store_models.filter(dirty_bit=True):
                     try:
-                        app_model = store_model._deserialize_store_model(fk_cache)
-                        # if the model was not deleted add its field values to the list
+                        (
+                            app_model,
+                            model_deferred_fks,
+                        ) = store_model._deserialize_store_model(
+                            fk_cache, defer_fks=True
+                        )
                         if app_model:
-                            new_db_values = []
-                            for f in fields:
-                                value = getattr(app_model, f.attname)
-                                db_value = f.get_db_prep_value(value, connection)
-                                new_db_values.append(db_value)
-                            db_values += new_db_values
+                            app_models.append(app_model)
+                        for fk_model, fk_refs in model_deferred_fks.items():
+                            # validate that the FK references aren't to anything already in the
+                            # excluded list, which should only contain models which failed to
+                            # deserialize for reasons other than broken FKs at this point
+                            for fk_ref in fk_refs:
+                                if fk_ref.to_pk in excluded_list:
+                                    raise exceptions.ValidationError(
+                                        "{} with id {} failed to deserialize".format(
+                                            fk_model, fk_ref.to_pk
+                                        )
+                                    )
+                            deferred_fks[fk_model].extend(fk_refs)
                     except (
                         exceptions.ValidationError,
                         exceptions.ObjectDoesNotExist,
@@ -380,22 +547,41 @@ def _deserialize_from_store(profile, skip_erroring=False, filter=None):
                         store_model.deserialization_error = str(e)
                         store_model.save(update_fields=["deserialization_error"])
 
+                # validate app model FKs
+                model_excluded_pks, model_deleted_pks = _validate_store_foreign_keys(
+                    model.__name__, deferred_fks
+                )
+                excluded_list.extend(model_excluded_pks)
+                deleted_list.extend(model_deleted_pks)
+
+                # array for holding db values from the fields of each model for this class
+                db_values = []
+                for app_model in app_models:
+                    if (
+                        app_model.pk not in excluded_list
+                        and app_model.pk not in deleted_list
+                    ):
+                        # handle any errors that might come from `get_db_prep_value`
+                        try:
+                            new_db_values = []
+                            for f in fields:
+                                value = getattr(app_model, f.attname)
+                                db_value = f.get_db_prep_value(value, connection)
+                                new_db_values.append(db_value)
+                            db_values += new_db_values
+                        except ValueError as e:
+                            excluded_list.append(app_model.pk)
+                            store_model = store_models.get(pk=app_model.pk)
+                            store_model.deserialization_error = str(e)
+                            store_model.save(update_fields=["deserialization_error"])
+
                 if db_values:
-                    # number of rows to update
-                    num_of_rows = len(db_values) // len(fields)
-                    # create '%s' placeholders for a single row
-                    placeholder_tuple = tuple(["%s" for _ in range(len(fields))])
-                    # create list of the '%s' tuple placeholders based on number of rows to update
-                    placeholder_list = [
-                        str(placeholder_tuple) for _ in range(num_of_rows)
-                    ]
                     with connection.cursor() as cursor:
-                        DBBackend._bulk_insert_into_app_models(
+                        DBBackend._bulk_full_record_upsert(
                             cursor,
                             model._meta.db_table,
                             fields,
                             db_values,
-                            placeholder_list,
                         )
 
                 # clear dirty bit for all store records for this model/profile except for rows that did not validate

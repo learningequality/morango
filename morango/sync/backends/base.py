@@ -5,6 +5,38 @@ from morango.models.core import Store
 
 
 class BaseSQLWrapper(object):
+    create_temporary_table_template = "CREATE TEMP TABLE {name} ({fields})"
+
+    def __init__(self, connection):
+        self.connection = connection
+
+    def _create_placeholder_list(self, fields, db_values):
+        # number of rows to update
+        num_of_rows = len(db_values) // len(fields)
+        # create '%s' placeholders for a single row
+        placeholder_tuple = tuple(["%s" for _ in range(len(fields))])
+        # create list of the '%s' tuple placeholders based on number of rows to update
+        return [str(placeholder_tuple) for _ in range(num_of_rows)]
+
+    def _bulk_full_record_upsert(self, cursor, table_name, fields, db_values):
+        raise NotImplementedError("Subclass must implement this method.")
+
+    def _bulk_insert(self, cursor, table_name, fields, db_values):
+        placeholder_str = ", ".join(
+            self._create_placeholder_list(fields, db_values)
+        ).replace("'", "")
+        fields_str = str(tuple(str(f.attname) for f in fields)).replace("'", "")
+        insert = """
+            INSERT INTO {table_name} {fields}
+            VALUES {placeholder_str}
+        """.format(
+            table_name=table_name, fields=fields_str, placeholder_str=placeholder_str
+        )
+        cursor.execute(insert, db_values)
+
+    def _bulk_update(self, cursor, table_name, fields, db_values):
+        raise NotImplementedError("Subclass must implement this method.")
+
     def _dequeuing_delete_rmcb_records(self, cursor, transfersession_id):
         # delete all RMCBs which are a reverse FF (store version newer than buffer version)
         delete_rmcb_records = """DELETE FROM {rmcb}
@@ -132,3 +164,15 @@ class BaseSQLWrapper(object):
             buffer=Buffer._meta.db_table, transfer_session_id=transfersession_id
         )
         cursor.execute(delete_remaining_buffer)
+
+    def _create_temporary_table(self, cursor, name, field_sqls, fields_params):
+        """
+        :param cursor: The database connection cursor
+        :param name: The str name of the temp table
+        :param field_sqls: A list of SQL strings representing the fields
+        :param fields_params: A list of SQL parameters if necessary for the fields SQL
+        """
+        sql = self.create_temporary_table_template.format(
+            name=name, fields=", ".join(field_sqls)
+        )
+        cursor.execute(sql, fields_params)

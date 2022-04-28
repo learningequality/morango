@@ -1,5 +1,6 @@
 from .base import BaseSQLWrapper
 from .utils import calculate_max_sqlite_variables
+from .utils import get_pk_field
 from morango.models.core import Buffer
 from morango.models.core import RecordMaxCounter
 from morango.models.core import RecordMaxCounterBuffer
@@ -9,14 +10,13 @@ from morango.models.core import Store
 class SQLWrapper(BaseSQLWrapper):
     backend = "sqlite"
 
-    def _bulk_insert_into_app_models(
-        self, cursor, app_model, fields, db_values, placeholder_list
-    ):
+    def _bulk_full_record_upsert(self, cursor, table_name, fields, db_values):
         """
         Example query:
         `REPLACE INTO model (F1,F2,F3) VALUES (%s, %s, %s), (%s, %s, %s), (%s, %s, %s)`
         where values=[1,2,3,4,5,6,7,8,9]
         """
+        placeholder_list = self._create_placeholder_list(fields, db_values)
         # calculate and create equal sized chunks of data to insert incrementally
         num_of_rows_able_to_insert = calculate_max_sqlite_variables() // len(fields)
         num_of_values_able_to_insert = num_of_rows_able_to_insert * len(fields)
@@ -29,16 +29,83 @@ class SQLWrapper(BaseSQLWrapper):
             for x in range(0, len(placeholder_list), num_of_rows_able_to_insert)
         ]
         # insert data chunks
-        fields = str(tuple(str(f.attname) for f in fields)).replace("'", "")
+        fields_str = str(tuple(str(f.attname) for f in fields)).replace("'", "")
         for values, params in zip(value_chunks, placeholder_chunks):
             placeholder_str = ", ".join(params).replace("'", "")
-            insert = """REPLACE INTO {app_model} {fields}
-                        VALUES {placeholder_str}
+            insert = """
+                REPLACE INTO {table_name} {fields}
+                VALUES {placeholder_str}
             """.format(
-                app_model=app_model, fields=fields, placeholder_str=placeholder_str
+                table_name=table_name,
+                fields=fields_str,
+                placeholder_str=placeholder_str,
             )
             # use DB-APIs parameter substitution (2nd parameter expects a sequence)
             cursor.execute(insert, values)
+
+    def _bulk_insert(self, cursor, table_name, fields, db_values):
+        num_of_rows_able_to_insert = calculate_max_sqlite_variables() // len(fields)
+        num_of_values_able_to_insert = num_of_rows_able_to_insert * len(fields)
+        value_chunks = [
+            db_values[x : x + num_of_values_able_to_insert]
+            for x in range(0, len(db_values), num_of_values_able_to_insert)
+        ]
+        for value_chunk in value_chunks:
+            super(SQLWrapper, self)._bulk_insert(
+                cursor, table_name, fields, value_chunk
+            )
+
+    def _bulk_update(self, cursor, table_name, fields, db_values):
+        """
+        Example query:
+        `UPDATE model SET F1=(CASE id WHEN %s THEN %s ... END) ...`
+        WHERE id IN [...]
+        """
+        # calculate and create equal sized chunks of data to update incrementally
+        # for every field we're updating, we'll require 3 parameters
+        num_update_fields = len(fields) - 1
+        num_of_rows_able_to_update = (
+            calculate_max_sqlite_variables() // num_update_fields // 3
+        )
+        num_of_values_able_to_update = num_of_rows_able_to_update * len(fields)
+        value_chunks = [
+            db_values[x : x + num_of_values_able_to_update]
+            for x in range(0, len(db_values), num_of_values_able_to_update)
+        ]
+        pk = get_pk_field(fields)
+
+        # insert data chunks
+        for values in value_chunks:
+            set_sql = ""
+            params = []
+            pk_params = []
+            for field in fields:
+                if field == pk:
+                    continue
+                set_field_sql = " {field} = (CASE {pk_field}".format(
+                    field=field.column, pk_field=pk.column
+                )
+                for y in range(0, len(values), len(fields)):
+                    value_set = values[y : y + len(fields)]
+                    set_field_sql += " WHEN %s THEN %s"
+                    pk_params.append(value_set[fields.index(pk)])
+                    params.append(value_set[fields.index(pk)])
+                    params.append(value_set[fields.index(field)])
+                set_field_sql += " END),"
+                set_sql += set_field_sql
+            params.extend(pk_params)
+            update = """
+                UPDATE {table_name} SET {set_sql} WHERE {pk_field} IN {placeholder_str}
+            """.format(
+                table_name=table_name,
+                set_sql=set_sql[:-1],
+                pk_field=pk.column,
+                placeholder_str="({})".format(
+                    ",".join("%s" for _ in range(len(pk_params)))
+                ),
+            )
+            # use DB-APIs parameter substitution (2nd parameter expects a sequence)
+            cursor.execute(update, params)
 
     def _dequeuing_merge_conflict_rmcb(self, cursor, transfersession_id):
         # transfer record max counters for records with merge conflicts + perform max
