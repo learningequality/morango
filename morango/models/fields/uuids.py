@@ -2,6 +2,7 @@ import hashlib
 import uuid
 
 from django.db import models
+
 from morango.utils import _assert
 
 
@@ -9,60 +10,27 @@ def sha2_uuid(*args):
     return hashlib.sha256("::".join(args).encode("utf-8")).hexdigest()[:32]
 
 
-class UUIDField(models.CharField):
+class UUIDField(models.UUIDField):
     """
     Adaptation of Django's UUIDField, but with 32-char hex representation as Python representation rather than a UUID instance.
     """
-
-    def __init__(self, *args, **kwargs):
-        kwargs["max_length"] = 32
-        super(UUIDField, self).__init__(*args, **kwargs)
-
-    def prepare_value(self, value):
-        if isinstance(value, uuid.UUID):
-            return value.hex
-        return value
-
-    def deconstruct(self):
-        name, path, args, kwargs = super(UUIDField, self).deconstruct()
-        del kwargs["max_length"]
-        return name, path, args, kwargs
-
-    def get_internal_type(self):
-        return "UUIDField"
 
     def get_db_prep_value(self, value, connection, prepared=False):
         if value is None:
             return None
         if not isinstance(value, uuid.UUID):
-            try:
-                value = uuid.UUID(value)
-            except AttributeError:
-                raise TypeError(self.error_messages["invalid"] % {"value": value})
+            value = super(UUIDField, self).to_python(value)
+
+        if connection.features.has_native_uuid_field:
+            return value
         return value.hex
 
     def from_db_value(self, value, expression, connection, context):
         return self.to_python(value)
 
     def to_python(self, value):
-        if isinstance(value, uuid.UUID):
-            return value.hex
-        return value
-
-    def get_default(self):
-        """
-        Returns the default value for this field.
-        """
-        if self.has_default():
-            if callable(self.default):
-                default = self.default()
-                if isinstance(default, uuid.UUID):
-                    return default.hex
-                return default
-            if isinstance(self.default, uuid.UUID):
-                return self.default.hex
-            return self.default
-        return None
+        value = super(UUIDField, self).to_python(value)
+        return value.hex if isinstance(value, uuid.UUID) else value
 
 
 class UUIDModelMixin(models.Model):
