@@ -8,8 +8,6 @@ from collections import defaultdict
 from django.core import exceptions
 from django.core.serializers.json import DjangoJSONEncoder
 from django.db import connection
-from django.db import connections
-from django.db import router
 from django.db import transaction
 from django.db.models import CharField
 from django.db.models import Q
@@ -46,6 +44,7 @@ from morango.sync.backends.utils import load_backend
 from morango.sync.backends.utils import TemporaryTable
 from morango.sync.context import LocalSessionContext
 from morango.sync.context import NetworkSessionContext
+from morango.sync.utils import lock_partitions
 from morango.sync.utils import mute_signals
 from morango.sync.utils import validate_and_create_buffer_data
 from morango.utils import _assert
@@ -55,17 +54,6 @@ from morango.utils import SETTINGS
 logger = logging.getLogger(__name__)
 
 DBBackend = load_backend(connection)
-
-# if postgres, get serializable db connection
-db_name = router.db_for_write(Store)
-USING_DB = db_name
-if "postgresql" in transaction.get_connection(USING_DB).vendor:
-    USING_DB = db_name + "-serializable"
-    _assert(
-        USING_DB in connections,
-        "Please add a `default-serializable` database connection in your django settings file, \
-            which copies all the configuration settings of the `default` db connection",
-    )
 
 SQL_UNION_MAX = 500
 
@@ -115,7 +103,9 @@ def _serialize_into_store(profile, filter=None):
     # ensure that we write and retrieve the counter in one go for consistency
     current_id = InstanceIDModel.get_current_instance_and_increment_counter()
 
-    with transaction.atomic(using=USING_DB):
+    with transaction.atomic():
+        lock_partitions(DBBackend, sync_filter=filter, shared=False)
+
         # create Q objects for filtering by prefixes
         prefix_condition = None
         if filter:
@@ -430,7 +420,9 @@ def _deserialize_from_store(profile, skip_erroring=False, filter=None):
     excluded_list = []
     deleted_list = []
 
-    with transaction.atomic(using=USING_DB):
+    with transaction.atomic():
+        lock_partitions(DBBackend, sync_filter=filter, shared=False)
+
         # iterate through classes which are in foreign key dependency order
         for model in syncable_models.get_models(profile):
             deferred_fks = defaultdict(list)
@@ -590,7 +582,7 @@ def _deserialize_from_store(profile, skip_erroring=False, filter=None):
                 ).update(dirty_bit=False)
 
 
-@transaction.atomic(using=USING_DB)
+@transaction.atomic()
 def _queue_into_buffer_v1(transfersession):
     """
     Takes a chunk of data from the store to be put into the buffer to be sent to another morango instance. This is the legacy
@@ -603,6 +595,8 @@ def _queue_into_buffer_v1(transfersession):
     filter_prefixes = Filter(transfersession.filter)
     server_fsic = json.loads(transfersession.server_fsic)
     client_fsic = json.loads(transfersession.client_fsic)
+
+    lock_partitions(DBBackend, sync_filter=filter_prefixes, shared=True)
 
     if transfersession.push:
         fsics = calculate_directional_fsic_diff(client_fsic, server_fsic)
@@ -711,7 +705,7 @@ def _queue_into_buffer_v1(transfersession):
         )
 
 
-@transaction.atomic(using=USING_DB)
+@transaction.atomic()
 def _queue_into_buffer_v2(transfersession, chunk_size=200):
     """
     Takes a chunk of data from the store to be put into the buffer to be sent to another morango instance.
@@ -725,6 +719,8 @@ def _queue_into_buffer_v2(transfersession, chunk_size=200):
     sync_filter = Filter(transfersession.filter)
     server_fsic = json.loads(transfersession.server_fsic)
     client_fsic = json.loads(transfersession.client_fsic)
+
+    lock_partitions(DBBackend, sync_filter=sync_filter, shared=True)
 
     assert "sub" in server_fsic
     assert "super" in server_fsic
@@ -854,7 +850,7 @@ def _queue_into_buffer_v2(transfersession, chunk_size=200):
         )
 
 
-@transaction.atomic(using=USING_DB)
+@transaction.atomic()
 def _dequeue_into_store(transfer_session, fsic, v2_format=False):
     """
     Takes data from the buffers and merges into the store and record max counters.
@@ -862,6 +858,9 @@ def _dequeue_into_store(transfer_session, fsic, v2_format=False):
     ALGORITHM: Incrementally insert and delete on a case by case basis to ensure subsequent cases
     are not affected by previous cases.
     """
+
+    lock_partitions(DBBackend, sync_filter=Filter(transfer_session.filter), shared=False)
+
     with connection.cursor() as cursor:
         DBBackend._dequeuing_delete_rmcb_records(cursor, transfer_session.id)
         DBBackend._dequeuing_delete_buffered_records(cursor, transfer_session.id)

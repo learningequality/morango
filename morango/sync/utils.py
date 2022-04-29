@@ -230,3 +230,21 @@ class SyncSignalGroup(SyncSignal):
         Fires the `completed` signal.
         """
         self.completed.fire()
+
+
+def lock_partitions(backend, sync_filter=None, shared=False):
+    """
+    Lock all partitions for a filter, and really lock everything if the filter is null
+
+    :type backend: morango.sync.backends.base.BaseSQLWrapper
+    :type sync_filter: morango.models.certificates.Filter|None
+    :type shared: bool
+    """
+    if sync_filter is None:
+        backend._lock_all_partitions(shared=shared)
+    else:
+        # parse the unique partitions in the filter
+        partitions = set(f.split(":")[0] for f in sync_filter)
+        # for every unique partition, acquire a lock
+        for partition in partitions:
+            backend._lock_partition(partition)

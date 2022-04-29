@@ -176,3 +176,22 @@ class BaseSQLWrapper(object):
             name=name, fields=", ".join(field_sqls)
         )
         cursor.execute(sql, fields_params)
+
+    def _lock_all_partitions(self, shared=False):
+        """
+        Execute a lock within the database for all partitions, if the backend supports it. The lock
+        should block until acquired
+
+        :param shared: Whether or not the lock is exclusive or shared
+        """
+        pass
+
+    def _lock_partition(self, partition, shared=False):
+        """
+        Execute a lock within the database for a specific partition, if the database supports it.
+        The lock should block until acquired
+
+        :param partition: The partition prefix string to lock
+        :param shared: Whether or not the lock is exclusive or shared
+        """
+        pass

@@ -1,9 +1,18 @@
+import binascii
+
 from .base import BaseSQLWrapper
 from .utils import get_pk_field
 from morango.models.core import Buffer
 from morango.models.core import RecordMaxCounter
 from morango.models.core import RecordMaxCounterBuffer
 from morango.models.core import Store
+
+
+# advisory lock integers for locking partitions
+LOCK_ALL_PARTITIONS = 1
+LOCK_PARTITION = 2
+
+SIGNED_MAX_INTEGER = 2147483647
 
 
 class SQLWrapper(BaseSQLWrapper):
@@ -268,3 +277,58 @@ class SQLWrapper(BaseSQLWrapper):
         )
 
         cursor.execute(insert_remaining_rmcb)
+
+    def _execute_lock(self, key1, key2=None, unlock=False, session=False, shared=False, wait=True):
+        """
+        Creates or destroys an advisory lock within postgres
+        :param key1: An int sent to the PG lock function
+        :param key2: A 2nd int sent to the PG lock function
+        :param unlock: A bool representing whether query should use `unlock`
+        :param session: A bool indicating if this should persist outside of transaction
+        :param shared: A bool indicating if this should be shared, otherwise exclusive
+        :param wait: A bool indicating if it should use a `try` PG function
+        """
+        if not session:
+            if not self.connection.in_atomic_block:
+                raise NotImplementedError("Advisory lock requires transaction")
+            if unlock:
+                raise NotImplementedError("Transaction level locks unlock automatically")
+
+        keys = [key1]
+        if key2 is not None:
+            keys.append(key2)
+
+        query = "SELECT pg{_try}_advisory_{xact_}{lock}{_shared}({keys}) AS lock;".format(
+            _try="" if wait else "_try",
+            xact_="" if session else "xact_",
+            lock="unlock" if unlock else "lock",
+            _shared="_shared" if shared else "",
+            keys=", ".join(["%s" for i in range(0, 2 if key2 is not None else 1)])
+        )
+
+        with self.connection.cursor() as c:
+            c.execute(query, keys)
+
+    def _lock_all_partitions(self, shared=False):
+        """
+        Execute a lock within the database for all partitions, if the database supports it.
+
+        :param shared: Whether the lock is exclusive or shared
+        """
+        self._execute_lock(LOCK_ALL_PARTITIONS, shared=shared)
+
+    def _lock_partition(self, partition, shared=False):
+        """
+        Execute a lock within the database for a specific partition, if the database supports it.
+
+        :param partition: The partition prefix string to lock
+        :param shared: Whether the lock is exclusive or shared
+        """
+        # Postgres advisory locks use integers, so we have to convert the partition string into
+        # an integer. To do this we use crc32, which returns an unsigned integer. When using two
+        # keys for advisory locks, the two keys are signed integers, so we have to adjust the crc32
+        # value so that it doesn't exceed the maximum signed integer. Turning the partition str into
+        # a crc32 value could produce the same integer for different partitions, but for the
+        # purposes of locking to manage concurrency, this shouldn't be an issue.
+        partition_int = binascii.crc32(partition.encode("utf-8")) - SIGNED_MAX_INTEGER
+        self._execute_lock(LOCK_PARTITION, key2=partition_int, shared=shared)

@@ -2,6 +2,9 @@
 
 List of the most important changes for each release.
 
+## 0.6.12
+- Replace serializable transaction isolation using a separate DB connection for Postgres with advisory locking.
+
 ## 0.6.11
 - Added deferred processing of foreign keys to allow bulk processing and to improve performance.
 - Eliminated extraneous SQL queries for the transfer session when querying for buffers.
