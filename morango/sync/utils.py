@@ -243,8 +243,8 @@ def lock_partitions(backend, sync_filter=None, shared=False):
     if sync_filter is None:
         backend._lock_all_partitions(shared=shared)
     else:
-        # parse the unique partitions in the filter
-        partitions = set(f.split(":")[0] for f in sync_filter)
+        # parse the first 32 chars to obtain the primary partitions in the filter
+        partitions = set(f[:32] for f in sync_filter)
         # for every unique partition, acquire a lock
         for partition in partitions:
             backend._lock_partition(partition, shared=shared)

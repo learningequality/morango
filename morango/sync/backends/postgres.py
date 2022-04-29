@@ -6,6 +6,7 @@ from morango.models.core import Buffer
 from morango.models.core import RecordMaxCounter
 from morango.models.core import RecordMaxCounterBuffer
 from morango.models.core import Store
+from morango.utils import SETTINGS
 
 
 # advisory lock integers for locking partitions
@@ -20,6 +21,12 @@ class SQLWrapper(BaseSQLWrapper):
     create_temporary_table_template = (
         "CREATE TEMP TABLE {name} ({fields}) ON COMMIT DROP"
     )
+
+    def _set_transaction_repeatable_read(self):
+        """Set the current transaction isolation level"""
+        from psycopg2.extensions import ISOLATION_LEVEL_REPEATABLE_READ
+        if not SETTINGS.MORANGO_TEST_POSTGRESQL:
+            self.connection.connection.set_isolation_level(ISOLATION_LEVEL_REPEATABLE_READ)
 
     def _prepare_with_values(self, name, fields, db_values):
         placeholder_list = self._create_placeholder_list(fields, db_values)
@@ -303,7 +310,7 @@ class SQLWrapper(BaseSQLWrapper):
             xact_="" if session else "xact_",
             lock="unlock" if unlock else "lock",
             _shared="_shared" if shared else "",
-            keys=", ".join(["%s" for i in range(0, 2 if key2 is not None else 1)])
+            keys=", ".join(["%s"] * len(keys))
         )
 
         with self.connection.cursor() as c:

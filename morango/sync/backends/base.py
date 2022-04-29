@@ -10,6 +10,10 @@ class BaseSQLWrapper(object):
     def __init__(self, connection):
         self.connection = connection
 
+    def _set_transaction_repeatable_read(self):
+        """Set the current transaction isolation level"""
+        pass
+
     def _create_placeholder_list(self, fields, db_values):
         # number of rows to update
         num_of_rows = len(db_values) // len(fields)

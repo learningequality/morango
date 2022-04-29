@@ -43,3 +43,4 @@ MORANGO_CLEANUP_OPERATIONS = (
     "morango.sync.operations:CleanupOperation",
     "morango.sync.operations:NetworkCleanupOperation",
 )
+MORANGO_TEST_POSTGRESQL = False
