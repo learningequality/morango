@@ -324,6 +324,11 @@ class SQLWrapper(BaseSQLWrapper):
         :param partition: The partition prefix string to lock
         :param shared: Whether the lock is exclusive or shared
         """
+        # first we open a shared lock on all partitions, so that we don't interfere with concurrent
+        # locks on all partitions or operations that could attempt to open a lock on all partitions
+        # while we've locked only some partitions
+        self._lock_all_partitions(shared=True)
+
         # Postgres advisory locks use integers, so we have to convert the partition string into
         # an integer. To do this we use crc32, which returns an unsigned integer. When using two
         # keys for advisory locks, the two keys are signed integers, so we have to adjust the crc32

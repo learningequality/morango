@@ -247,4 +247,4 @@ def lock_partitions(backend, sync_filter=None, shared=False):
         partitions = set(f.split(":")[0] for f in sync_filter)
         # for every unique partition, acquire a lock
         for partition in partitions:
-            backend._lock_partition(partition)
+            backend._lock_partition(partition, shared=shared)
