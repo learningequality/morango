@@ -1,4 +1,5 @@
 import binascii
+import logging
 
 from .base import BaseSQLWrapper
 from .utils import get_pk_field
@@ -15,6 +16,8 @@ LOCK_PARTITION = 2
 
 SIGNED_MAX_INTEGER = 2147483647
 
+logger = logging.getLogger(__name__)
+
 
 class SQLWrapper(BaseSQLWrapper):
     backend = "postgresql"
@@ -22,10 +25,30 @@ class SQLWrapper(BaseSQLWrapper):
         "CREATE TEMP TABLE {name} ({fields}) ON COMMIT DROP"
     )
 
+    def _transaction_has_savepoint(self):
+        """
+        Determine if we're in a transaction and whether savepoints have been created during it
+        :return:
+        """
+        if not self.connection.in_atomic_block:
+            return False
+        for savepoint_id in self.connection.savepoint_ids:
+            if savepoint_id is not None:
+                return True
+        return False
+
     def _set_transaction_repeatable_read(self):
         """Set the current transaction isolation level"""
         from psycopg2.extensions import ISOLATION_LEVEL_REPEATABLE_READ
-        if not SETTINGS.MORANGO_TEST_POSTGRESQL:
+
+        # setting the transaction isolation must be either done at the BEGIN statement, or before
+        # any reading/writing operations have taken place, which includes creating savepoints
+        if self._transaction_has_savepoint():
+            # if we're running tests, we should simply ignore this warning, since the test suites
+            # manage their own connections
+            if not SETTINGS.MORANGO_TEST_POSTGRESQL:
+                logger.warning("Unable to set transaction isolation when savepoints have been created")
+        else:
             self.connection.connection.set_isolation_level(ISOLATION_LEVEL_REPEATABLE_READ)
 
     def _prepare_with_values(self, name, fields, db_values):
