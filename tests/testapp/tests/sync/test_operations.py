@@ -3,6 +3,7 @@ import uuid
 
 import factory
 import mock
+import pytest
 from django.db import connection
 from django.test import override_settings
 from django.test import TestCase
@@ -29,6 +30,7 @@ from morango.sync.backends.utils import load_backend
 from morango.sync.context import LocalSessionContext
 from morango.sync.controller import MorangoProfileController
 from morango.sync.controller import SessionController
+from morango.sync.operations import _begin_transaction
 from morango.sync.operations import _dequeue_into_store
 from morango.sync.operations import _deserialize_from_store
 from morango.sync.operations import _queue_into_buffer_v1
@@ -68,6 +70,21 @@ def assertRecordsNotBuffered(records):
     for i in records:
         assert i.id not in buffer_ids
         assert i.id not in rmcb_ids
+
+
+@pytest.mark.django_db(transaction=False)
+def test_begin_transaction():
+    """
+    Assert that we can start a transaction using our util and make some writes without
+    raising errors, specifically
+    """
+    # the utility we're testing here avoids setting the isolation level when this setting is True
+    # because tests usually run within their own transaction. By the time the isolation level
+    # is attempted to be set within a test, there have been reads and writes and the isolation
+    # cannot be changed
+    with override_settings(MORANGO_TEST_POSTGRESQL=False):
+        with _begin_transaction(None):
+            create_dummy_store_data()
 
 
 @override_settings(MORANGO_SERIALIZE_BEFORE_QUEUING=False, MORANGO_DISABLE_FSIC_V2_FORMAT=True)

@@ -4,7 +4,6 @@ from time import sleep
 from morango.constants import transfer_stages
 from morango.constants import transfer_statuses
 from morango.registry import session_middleware
-
 from morango.sync.operations import _deserialize_from_store
 from morango.sync.operations import _serialize_into_store
 from morango.sync.operations import OperationLogger
