@@ -10,6 +10,14 @@ class BaseSQLWrapper(object):
     def __init__(self, connection):
         self.connection = connection
 
+    def _is_transaction_isolation_error(self, error):
+        """
+        Determine if an error is related to transaction isolation
+        :param error: An exception
+        :return: A bool whether the error is a transaction isolation error
+        """
+        return False
+
     def _set_transaction_repeatable_read(self):
         """Set the current transaction isolation level"""
         pass

@@ -13,6 +13,7 @@ from django.db import transaction
 from django.db.models import CharField
 from django.db.models import Q
 from django.db.models import signals
+from django.db.utils import OperationalError
 from django.utils import timezone
 from rest_framework.exceptions import ValidationError
 
@@ -91,18 +92,23 @@ def _self_referential_fk(model):
 
 
 @contextmanager
-def _begin_transaction(sync_filter, shared_lock=False):
+def _begin_transaction(sync_filter, isolated=False, shared_lock=False):
     """
     Starts a transaction, sets the transaction isolation level to repeatable read, and locks
     affected partitions
 
+    :param sync_filter: The filter for filtering applicable records of the sync
     :type sync_filter: morango.models.certificates.Filter|None
+    :param isolated: Whether to alter the transaction isolation to repeatable-read
+    :type isolated: bool
+    :param shared_lock: Whether the advisory lock should be exclusive or shared
     :type shared_lock: bool
     """
     # we can't allow django to create savepoints because we can't change the isolation level within
     # subtransactions (after a savepoint has been created)
-    with transaction.atomic(savepoint=False):
-        DBBackend._set_transaction_repeatable_read()
+    with transaction.atomic(savepoint=not isolated):
+        if isolated:
+            DBBackend._set_transaction_repeatable_read()
         lock_partitions(DBBackend, sync_filter=sync_filter, shared=shared_lock)
         yield
 
@@ -121,7 +127,7 @@ def _serialize_into_store(profile, filter=None):
     # ensure that we write and retrieve the counter in one go for consistency
     current_id = InstanceIDModel.get_current_instance_and_increment_counter()
 
-    with _begin_transaction(filter):
+    with _begin_transaction(filter, isolated=True):
         # create Q objects for filtering by prefixes
         prefix_condition = None
         if filter:
@@ -436,7 +442,7 @@ def _deserialize_from_store(profile, skip_erroring=False, filter=None):
     excluded_list = []
     deleted_list = []
 
-    with _begin_transaction(filter):
+    with _begin_transaction(filter, isolated=True):
         # iterate through classes which are in foreign key dependency order
         for model in syncable_models.get_models(profile):
             deferred_fks = defaultdict(list)
@@ -1026,7 +1032,14 @@ class SerializeOperation(LocalOperation):
         self._assert(context.filter is not None)
 
         if context.is_producer and SETTINGS.MORANGO_SERIALIZE_BEFORE_QUEUING:
-            _serialize_into_store(context.sync_session.profile, filter=context.filter)
+            try:
+                _serialize_into_store(context.sync_session.profile, filter=context.filter)
+            except OperationalError as e:
+                # if we run into a transaction isolation error, we return a pending status to force
+                # retrying through the controller flow
+                if DBBackend._is_transaction_isolation_error(e):
+                    return transfer_statuses.PENDING
+                raise e
 
         fsic = json.dumps(
             DatabaseMaxCounter.calculate_filter_specific_instance_counters(
@@ -1214,9 +1227,16 @@ class ReceiverDeserializeOperation(LocalOperation):
 
         records_transferred = context.transfer_session.records_transferred or 0
         if SETTINGS.MORANGO_DESERIALIZE_AFTER_DEQUEUING and records_transferred > 0:
-            # we first serialize to avoid deserialization merge conflicts
-            _serialize_into_store(context.sync_session.profile, filter=context.filter)
-            _deserialize_from_store(context.sync_session.profile, filter=context.filter)
+            try:
+                # we first serialize to avoid deserialization merge conflicts
+                _serialize_into_store(context.sync_session.profile, filter=context.filter)
+                _deserialize_from_store(context.sync_session.profile, filter=context.filter)
+            except OperationalError as e:
+                # if we run into a transaction isolation error, we return a pending status to force
+                # retrying through the controller flow
+                if DBBackend._is_transaction_isolation_error(e):
+                    return transfer_statuses.PENDING
+                raise e
 
         return transfer_statuses.COMPLETED
 

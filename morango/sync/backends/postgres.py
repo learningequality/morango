@@ -37,6 +37,20 @@ class SQLWrapper(BaseSQLWrapper):
                 return True
         return False
 
+    def _is_transaction_isolation_error(self, error):
+        """
+        Determine if an error is related to transaction isolation
+        :param error: An exception
+        :return: A bool whether the error is a transaction isolation error
+        """
+        from psycopg2.extensions import TransactionRollbackError
+
+        # Django can wrap errors, adding it to the `__cause__` attribute
+        for e in (error, getattr(error, '__cause__', None)):
+            if isinstance(e, TransactionRollbackError) and "concurrent update" in str(e):
+                return True
+        return False
+
     def _set_transaction_repeatable_read(self):
         """Set the current transaction isolation level"""
         from psycopg2.extensions import ISOLATION_LEVEL_REPEATABLE_READ
