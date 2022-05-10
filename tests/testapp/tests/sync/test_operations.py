@@ -87,6 +87,10 @@ def _concurrent_store_write(thread_event, store_id):
 class TransactionIsolationTestCase(TransactionTestCase):
     serialized_rollback = True
 
+    def _fixture_setup(self):
+        """Don't setup fixtures for this test case"""
+        pass
+
     @override_settings(MORANGO_TEST_POSTGRESQL=False)
     def test_begin_transaction(self):
         """
@@ -97,7 +101,7 @@ class TransactionIsolationTestCase(TransactionTestCase):
         # because tests usually run within their own transaction. By the time the isolation level
         # is attempted to be set within a test, there have been reads and writes and the isolation
         # cannot be changed
-        with _begin_transaction(None):
+        with _begin_transaction(None, isolated=True):
             create_dummy_store_data()
 
     @pytest.mark.skipif(
