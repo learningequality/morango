@@ -45,7 +45,7 @@ class SQLWrapper(BaseSQLWrapper):
         """
         # Django can wrap errors, adding it to the `__cause__` attribute
         for e in (error, getattr(error, '__cause__', None)):
-            if "could not serialize access due to concurrent update" in str(e):
+            if "could not serialize access due to concurrent" in str(e):
                 return True
         return False
 
