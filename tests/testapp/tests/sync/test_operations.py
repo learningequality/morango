@@ -1,12 +1,16 @@
 import json
+import threading
 import uuid
+from time import sleep
 
 import factory
 import mock
 import pytest
+from django.conf import settings
 from django.db import connection
 from django.test import override_settings
 from django.test import TestCase
+from django.test import TransactionTestCase
 from django.utils import timezone
 from facility_profile.models import Facility
 from facility_profile.models import MyUser
@@ -17,6 +21,7 @@ from ..helpers import create_dummy_store_data
 from morango.constants import transfer_statuses
 from morango.constants.capabilities import FSIC_V2_FORMAT
 from morango.errors import MorangoLimitExceeded
+from morango.models.certificates import Filter
 from morango.models.core import Buffer
 from morango.models.core import DatabaseIDModel
 from morango.models.core import DatabaseMaxCounter
@@ -72,19 +77,66 @@ def assertRecordsNotBuffered(records):
         assert i.id not in rmcb_ids
 
 
-@pytest.mark.django_db(transaction=False)
-def test_begin_transaction():
-    """
-    Assert that we can start a transaction using our util and make some writes without
-    raising errors, specifically
-    """
-    # the utility we're testing here avoids setting the isolation level when this setting is True
-    # because tests usually run within their own transaction. By the time the isolation level
-    # is attempted to be set within a test, there have been reads and writes and the isolation
-    # cannot be changed
-    with override_settings(MORANGO_TEST_POSTGRESQL=False):
-        with _begin_transaction(None):
+def _concurrent_store_write(thread_event, store_id):
+    while not thread_event.is_set():
+        sleep(.1)
+    Store.objects.filter(id=store_id).delete()
+    connection.close()
+
+
+class TransactionIsolationTestCase(TransactionTestCase):
+    serialized_rollback = True
+
+    def _fixture_setup(self):
+        """Don't setup fixtures for this test case"""
+        pass
+
+    @override_settings(MORANGO_TEST_POSTGRESQL=False)
+    def test_begin_transaction(self):
+        """
+        Assert that we can start a transaction using our util and make some writes without
+        raising errors, specifically
+        """
+        # the utility we're testing here avoids setting the isolation level when this setting is True
+        # because tests usually run within their own transaction. By the time the isolation level
+        # is attempted to be set within a test, there have been reads and writes and the isolation
+        # cannot be changed
+        with _begin_transaction(None, isolated=True):
             create_dummy_store_data()
+
+    @pytest.mark.skipif(
+        not getattr(settings, "MORANGO_TEST_POSTGRESQL", False), reason="Not supported"
+    )
+    def test_transaction_isolation_handling(self):
+        store = Store.objects.create(
+            id=uuid.uuid4().hex,
+            last_saved_instance=uuid.uuid4().hex,
+            last_saved_counter=1,
+            partition=uuid.uuid4().hex,
+            profile="facilitydata",
+            source_id="qqq",
+            model_name="qqq",
+        )
+
+        concurrent_event = threading.Event()
+        concurrent_thread = threading.Thread(
+            target=_concurrent_store_write,
+            args=(concurrent_event, store.id),
+        )
+        concurrent_thread.start()
+
+        try:
+            with _begin_transaction(Filter(store.partition), isolated=True):
+                s = Store.objects.get(id=store.id)
+                concurrent_event.set()
+                sleep(.2)
+                s.last_saved_counter += 1
+                s.save()
+            raise AssertionError("Didn't raise transactional error")
+        except Exception as e:
+            self.assertTrue(DBBackend._is_transaction_isolation_error(e))
+        finally:
+            concurrent_thread.join(5)
 
 
 @override_settings(MORANGO_SERIALIZE_BEFORE_QUEUING=False, MORANGO_DISABLE_FSIC_V2_FORMAT=True)

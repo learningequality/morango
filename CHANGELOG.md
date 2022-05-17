@@ -2,6 +2,9 @@
 
 List of the most important changes for each release.
 
+## 0.6.13
+- Capture and retry transaction isolation errors that occur when conflicting concurrent updates are made during the transaction
+
 ## 0.6.12
 - Replace serializable transaction isolation using a separate DB connection for Postgres with advisory locking.
 
