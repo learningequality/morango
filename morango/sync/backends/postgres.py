@@ -43,9 +43,11 @@ class SQLWrapper(BaseSQLWrapper):
         :param error: An exception
         :return: A bool whether the error is a transaction isolation error
         """
+        from psycopg2.extensions import TransactionRollbackError
+
         # Django can wrap errors, adding it to the `__cause__` attribute
         for e in (error, getattr(error, '__cause__', None)):
-            if "could not serialize access due to concurrent" in str(e):
+            if isinstance(e, TransactionRollbackError):
                 return True
         return False
 
