@@ -2,8 +2,8 @@
 `SyncableModelRegistry` holds all syncable models for a project, on a per profile basis.
 This class is registered at app load time for morango in `apps.py`.
 """
-import sys
 import inspect
+import sys
 from collections import OrderedDict
 
 from django.db.models.fields.related import ForeignKey
@@ -196,6 +196,7 @@ class SessionMiddlewareOperations(list):
     Iterable list class that holds and initializes a list of transfer operations as configured
     through Morango settings, and associate the group with a transfer stage by `related_stage`
     """
+
     __slots__ = ("related_stage",)
 
     def __init__(self, related_stage):
@@ -230,7 +231,9 @@ class SessionMiddlewareOperations(list):
                 return result
         else:
             raise NotImplementedError(
-                "Operation for {} stage has no middleware".format(self.related_stage)
+                "Operation for {} stage has no applicable middleware for context '{}'".format(
+                    self.related_stage, context.__class__.__name__
+                )
             )
 
 

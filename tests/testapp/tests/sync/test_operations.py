@@ -144,7 +144,7 @@ class QueueStoreIntoBufferV1TestCase(TestCase):
     def setUp(self):
         super(QueueStoreIntoBufferV1TestCase, self).setUp()
         self.data = create_dummy_store_data()
-        self.transfer_session = self.data["sc"].current_transfer_session
+        self.transfer_session = self.data["tx"]
         self.context = mock.Mock(
             spec=LocalSessionContext,
             transfer_session=self.transfer_session,
@@ -347,7 +347,7 @@ class QueueStoreIntoBufferV2TestCase(TestCase):
     def setUp(self):
         super(QueueStoreIntoBufferV2TestCase, self).setUp()
         self.data = create_dummy_store_data()
-        self.transfer_session = self.data["sc"].current_transfer_session
+        self.transfer_session = self.data["tx"]
         self.context = mock.Mock(
             spec=LocalSessionContext,
             transfer_session=self.transfer_session,
@@ -689,20 +689,18 @@ class DequeueBufferIntoStoreTestCase(TestCase):
         conn = mock.Mock(spec="morango.sync.syncsession.NetworkSyncConnection")
         conn.server_info = dict(capabilities=[])
         self.data["mc"] = MorangoProfileController("facilitydata")
-        self.data["sc"] = TransferClient(conn, "host", SessionController.build())
         session = SyncSession.objects.create(
             id=uuid.uuid4().hex, profile="", last_activity_timestamp=timezone.now()
         )
-        self.data["sc"].current_transfer_session = TransferSession.objects.create(
+        self.transfer_session = TransferSession.objects.create(
             id=uuid.uuid4().hex,
             sync_session=session,
             push=True,
             last_activity_timestamp=timezone.now(),
         )
-        self.transfer_session = self.data["sc"].current_transfer_session
         self.data.update(
             create_buffer_and_store_dummy_data(
-                self.data["sc"].current_transfer_session.id
+                self.transfer_session.id
             )
         )
         self.context = mock.Mock(
@@ -714,12 +712,12 @@ class DequeueBufferIntoStoreTestCase(TestCase):
         )
 
     def assert_store_records_tagged_with_last_session(self, store_ids):
-        session_id = self.data["sc"].current_transfer_session.id
+        session_id = self.transfer_session.id
         for store_id in store_ids:
             assert Store.objects.get(id=store_id).last_transfer_session_id == session_id
 
     def assert_store_records_not_tagged_with_last_session(self, store_ids):
-        session_id = self.data["sc"].current_transfer_session.id
+        session_id = self.transfer_session.id
         for store_id in store_ids:
             try:
                 assert (
@@ -734,13 +732,12 @@ class DequeueBufferIntoStoreTestCase(TestCase):
             self.data[key] for key in ["model2", "model3", "model4", "model5", "model7"]
         ]
         self.assert_store_records_not_tagged_with_last_session(store_ids)
-        transfer_session = self.data["sc"].current_transfer_session
-        _dequeue_into_store(transfer_session, transfer_session.client_fsic, v2_format=False)
+        _dequeue_into_store(self.transfer_session, self.transfer_session.client_fsic, v2_format=False)
         # this one is a reverse fast forward, so it doesn't modify the store record and shouldn't be tagged
         self.assert_store_records_not_tagged_with_last_session([self.data["model1"]])
         self.assert_store_records_tagged_with_last_session(store_ids)
         tagged_actual = set(
-            self.data["sc"].current_transfer_session.get_touched_record_ids_for_model(
+            self.transfer_session.get_touched_record_ids_for_model(
                 "facility"
             )
         )

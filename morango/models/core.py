@@ -449,7 +449,7 @@ class Store(AbstractStore):
 
     class Meta:
         indexes = [
-            models.Index(fields=['partition'], name='idx_morango_store_partition'),
+            models.Index(fields=["partition"], name="idx_morango_store_partition"),
         ]
 
     def _deserialize_store_model(self, fk_cache, defer_fks=False):  # noqa: C901
@@ -777,7 +777,9 @@ class RecordMaxCounterBuffer(AbstractCounter):
     model_uuid = UUIDField(db_index=True)
 
 
-ForeignKeyReference = namedtuple("ForeignKeyReference", ["from_field", "from_pk", "to_pk"])
+ForeignKeyReference = namedtuple(
+    "ForeignKeyReference", ["from_field", "from_pk", "to_pk"]
+)
 
 
 class SyncableModel(UUIDModelMixin):
@@ -908,7 +910,7 @@ class SyncableModel(UUIDModelMixin):
                 ForeignKeyReference(
                     from_field=field.attname,
                     from_pk=self.pk,
-                    to_pk=getattr(self, field.attname)
+                    to_pk=getattr(self, field.attname),
                 )
             )
 

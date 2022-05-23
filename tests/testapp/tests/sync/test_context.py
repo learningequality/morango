@@ -1,20 +1,22 @@
-import mock
 import pickle
+
+import mock
 from django.test import SimpleTestCase
 from django.test import TestCase
 
 from ..helpers import create_dummy_store_data
 from ..helpers import TestSessionContext
-from morango.constants import capabilities
 from morango.constants import transfer_stages
 from morango.constants import transfer_statuses
 from morango.errors import MorangoContextUpdateError
 from morango.models.certificates import Filter
 from morango.models.core import SyncSession
 from morango.models.core import TransferSession
-from morango.sync.context import SessionContext
+from morango.sync.context import CompositeSessionContext
 from morango.sync.context import LocalSessionContext
 from morango.sync.context import NetworkSessionContext
+from morango.sync.context import SessionContext
+from morango.sync.controller import SessionController
 
 
 class SessionContextTestCase(SimpleTestCase):
@@ -153,12 +155,19 @@ class SessionContextTestCase(SimpleTestCase):
 
 
 class LocalSessionContextTestCase(SimpleTestCase):
-    @mock.patch("morango.sync.context.CAPABILITIES", {"testing"})
-    @mock.patch("morango.sync.context.parse_capabilities_from_server_request")
-    def test_init(self, mock_parse_capabilities):
-        mock_parse_capabilities.return_value = {"testing"}
+    def test_init(self):
         request = mock.Mock(spec="django.http.request.HttpRequest")
         context = LocalSessionContext(request=request)
+
+        self.assertEqual(request, context.request)
+        self.assertTrue(context.is_server)
+
+    @mock.patch("morango.sync.context.CAPABILITIES", {"testing"})
+    @mock.patch("morango.sync.context.parse_capabilities_from_server_request")
+    def test_from_request(self, mock_parse_capabilities):
+        mock_parse_capabilities.return_value = {"testing"}
+        request = mock.Mock(spec="django.http.request.HttpRequest")
+        context = LocalSessionContext.from_request(request)
 
         self.assertEqual(request, context.request)
         self.assertTrue(context.is_server)
@@ -186,22 +195,18 @@ class LocalSessionContextTestCase(SimpleTestCase):
 
 
 class NetworkSessionContextTestCase(SimpleTestCase):
-    @mock.patch("morango.sync.context.CAPABILITIES", {"testing"})
     def test_init(self):
         conn = mock.Mock(
             spec="morango.sync.syncsession.NetworkSyncConnection",
-            server_info=mock.Mock(),
         )
-        conn.server_info.get.return_value = {"testing"}
         context = NetworkSessionContext(conn)
         self.assertEqual(conn, context.connection)
-        self.assertIn("testing", context.capabilities)
 
 
 class ContextPicklingTestCase(TestCase):
     def test_basic(self):
         data = create_dummy_store_data()
-        transfer_session = data["sc"].current_transfer_session
+        transfer_session = data["tx"]
         transfer_session.filter = "abc123"
         transfer_session.save()
 
@@ -249,3 +254,68 @@ class ContextPicklingTestCase(TestCase):
         self.assertEqual(context.stage_status, unpickled_context.stage_status)
         self.assertEqual(context.capabilities, unpickled_context.capabilities)
 
+
+class CompositeSessionContextTestCase(SimpleTestCase):
+    def setUp(self):
+        super(CompositeSessionContextTestCase, self).setUp()
+        self.sub_context_a = mock.Mock(spec=LocalSessionContext, transfer_session=None)
+        self.sub_context_b = mock.Mock(spec=NetworkSessionContext, transfer_session=None)
+        self.context = CompositeSessionContext([self.sub_context_a, self.sub_context_b])
+        self.stages = (transfer_stages.INITIALIZING, transfer_stages.QUEUING)
+
+    def test_state_behavior(self):
+        for stage in self.stages:
+            self.context.update(stage=stage, stage_status=transfer_statuses.PENDING)
+
+            self.sub_context_a.update_state.assert_called_with(stage=stage, stage_status=transfer_statuses.PENDING)
+            self.sub_context_b.update_state.assert_called_with(stage=stage, stage_status=transfer_statuses.PENDING)
+
+            self.sub_context_a.update_state.reset_mock()
+            self.sub_context_b.update_state.reset_mock()
+
+            primed_context = self.context.prime()
+            self.assertIs(primed_context, self.sub_context_a)
+
+            # pretend the initialization stage ran successfully
+            if stage == transfer_stages.INITIALIZING:
+                transfer_session = TransferSession(
+                    sync_session=SyncSession(),
+                    transfer_stage=transfer_stages.INITIALIZING,
+                )
+                self.sub_context_a.transfer_session = transfer_session
+
+            self.context.update(stage_status=transfer_statuses.COMPLETED)
+            self.sub_context_a.update_state.assert_not_called()
+            self.sub_context_b.update_state.assert_not_called()
+
+            self.context.update(stage=stage, stage_status=transfer_statuses.PENDING)
+            self.sub_context_a.update_state.assert_not_called()
+            self.sub_context_b.update_state.assert_not_called()
+
+            primed_context = self.context.prime()
+            self.assertIs(primed_context, self.sub_context_b)
+
+            self.context.update(stage_status=transfer_statuses.COMPLETED)
+            self.sub_context_a.update_state.assert_called_once_with(stage=None, stage_status=transfer_statuses.COMPLETED)
+            self.sub_context_b.update_state.assert_called_once_with(stage=None, stage_status=transfer_statuses.COMPLETED)
+
+            self.sub_context_a.update_state.reset_mock()
+            self.sub_context_b.update_state.reset_mock()
+
+    def test_integration(self):
+        middleware = [
+            mock.Mock(return_value=transfer_statuses.COMPLETED, related_stage=stage)
+            for stage in self.stages
+        ]
+        controller = SessionController(middleware, mock.Mock(), context=self.context)
+
+        for i, stage in enumerate(self.stages):
+            middleware[i].reset_mock()
+            result = controller.proceed_to(stage)
+            self.assertEqual(result, transfer_statuses.PENDING)
+            middleware[i].assert_called_once_with(self.sub_context_a)
+
+            middleware[i].reset_mock()
+            result = controller.proceed_to(stage)
+            self.assertEqual(result, transfer_statuses.COMPLETED)
+            middleware[i].assert_called_once_with(self.sub_context_b)

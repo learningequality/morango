@@ -13,24 +13,24 @@ from morango.constants import transfer_stages
 from morango.constants import transfer_statuses
 from morango.constants.capabilities import ALLOW_CERTIFICATE_PUSHING
 from morango.errors import CertificateSignatureInvalid
-from morango.errors import MorangoServerDoesNotAllowNewCertPush
-from morango.errors import MorangoResumeSyncError
 from morango.errors import MorangoError
+from morango.errors import MorangoResumeSyncError
+from morango.errors import MorangoServerDoesNotAllowNewCertPush
 from morango.models.certificates import Certificate
 from morango.models.certificates import Filter
 from morango.models.certificates import Key
 from morango.models.certificates import ScopeDefinition
 from morango.models.core import SyncSession
 from morango.models.fields.crypto import SharedKey
-from morango.sync.controller import MorangoProfileController
 from morango.sync.context import LocalSessionContext
 from morango.sync.context import NetworkSessionContext
+from morango.sync.controller import MorangoProfileController
 from morango.sync.session import SessionWrapper
 from morango.sync.syncsession import NetworkSyncConnection
-from morango.sync.syncsession import TransferClient
 from morango.sync.syncsession import PullClient
 from morango.sync.syncsession import PushClient
 from morango.sync.syncsession import SyncSessionClient
+from morango.sync.syncsession import TransferClient
 
 
 def mock_patch_decorator(func):
@@ -349,44 +349,27 @@ class TransferClientTestCase(BaseTransferClientTestCase):
         self.assertEqual(self.session, self.client.sync_session)
         self.assertEqual(self.conn, self.client.sync_connection)
         self.assertEqual(self.controller, self.client.controller)
-        self.assertIsInstance(self.client.local_context, LocalSessionContext)
-        self.assertEqual(self.session, self.client.local_context.sync_session)
-        self.assertIsInstance(self.client.remote_context, NetworkSessionContext)
-        self.assertEqual(self.session, self.client.remote_context.sync_session)
-        self.assertEqual(self.conn, self.client.remote_context.connection)
+        self.assertIsInstance(self.client.context.children[0], LocalSessionContext)
+        self.assertEqual(self.session, self.client.context.children[0].sync_session)
+        self.assertEqual(self.session, self.client.context.sync_session)
+        self.assertIsInstance(self.client.context.children[1], NetworkSessionContext)
+        self.assertEqual(self.session, self.client.context.sync_session)
+        self.assertEqual(self.conn, self.client.context.children[1].connection)
 
-    def test_proceed_to_and_wait_for__push(self):
+    def test_proceed_to_and_wait_for(self):
         mock_proceed = self.controller.proceed_to_and_wait_for
         mock_proceed.return_value = transfer_statuses.COMPLETED
-        self.client.local_context.is_push = True
         self.client.proceed_to_and_wait_for(transfer_stages.QUEUING)
         mock_proceed_calls = mock_proceed.call_args_list
-        self.assertEqual(2, len(mock_proceed_calls))
+        self.assertEqual(1, len(mock_proceed_calls))
         self.assertEqual(transfer_stages.QUEUING, mock_proceed_calls[0][0][0])
-        self.assertEqual(self.client.local_context, mock_proceed_calls[0][1].get("context"))
-        self.assertEqual(transfer_stages.QUEUING, mock_proceed_calls[1][0][0])
-        self.assertEqual(self.client.remote_context, mock_proceed_calls[1][1].get("context"))
-
-    def test_proceed_to_and_wait_for__pull(self):
-        mock_proceed = self.controller.proceed_to_and_wait_for
-        mock_proceed.return_value = transfer_statuses.COMPLETED
-        self.client.local_context.is_push = False
-        self.client.proceed_to_and_wait_for(transfer_stages.QUEUING)
-        mock_proceed_calls = mock_proceed.call_args_list
-        self.assertEqual(2, len(mock_proceed_calls))
-        self.assertEqual(transfer_stages.QUEUING, mock_proceed_calls[0][0][0])
-        self.assertEqual(self.client.local_context, mock_proceed_calls[0][1].get("context"))
-        self.assertEqual(transfer_stages.QUEUING, mock_proceed_calls[1][0][0])
-        self.assertEqual(self.client.remote_context, mock_proceed_calls[1][1].get("context"))
 
     def test_proceed_to_and_wait_for__error(self):
-        self.client.local_context.is_push = False
-        self.controller.last_error = Exception("Oops")
         self.controller.proceed_to_and_wait_for.return_value = transfer_statuses.ERRORED
         with self.assertRaises(MorangoError):
             self.client.proceed_to_and_wait_for(transfer_stages.QUEUING)
         self.controller.proceed_to_and_wait_for.assert_called_once_with(
-            transfer_stages.QUEUING, context=self.client.local_context, max_interval=1
+            transfer_stages.QUEUING, callback=mock.ANY
         )
 
     @mock.patch("morango.sync.syncsession.TransferClient.proceed_to_and_wait_for")
@@ -395,30 +378,56 @@ class TransferClientTestCase(BaseTransferClientTestCase):
         self.client.signals.session.started.connect(session_started_handler)
         queuing_handler = mock.Mock()
         self.client.signals.session.connect(queuing_handler)
-        self.client.local_context.transfer_session = self.transfer_session
+        self.client.context.transfer_session = self.transfer_session
 
         sync_filter = self.transfer_session.get_filter()
         self.client.initialize(sync_filter)
-        self.assertEqual(sync_filter, self.client.local_context.filter)
-        self.assertEqual(sync_filter, self.client.remote_context.filter)
-        self.controller.proceed_to_and_wait_for.assert_any_call(
-            transfer_stages.INITIALIZING, context=self.client.local_context, max_interval=1
+        self.assertEqual(sync_filter, self.client.context.filter)
+        mock_proceed.assert_any_call(
+            transfer_stages.INITIALIZING, error_msg=mock.ANY
         )
-        self.assertEqual(self.transfer_session, self.client.remote_context.transfer_session)
+        self.client.context.transfer_session = None
+        self.client.context.children[0].transfer_session = self.transfer_session
+        self.client.context.update(stage_status=transfer_statuses.COMPLETED)
+        self.assertEqual(self.transfer_session, self.client.context.transfer_session)
+        for context in self.client.context.children:
+            self.assertEqual(self.transfer_session, context.transfer_session)
         session_started_handler.assert_called_once_with(transfer_session=self.transfer_session)
         mock_proceed.assert_any_call(transfer_stages.QUEUING)
         queuing_handler.assert_any_call(transfer_session=self.transfer_session)
 
-    @mock.patch("morango.sync.syncsession.TransferClient._transfer")
-    def test_run(self, mock_transfer):
+    def test_run(self):
         mock_start = mock.Mock()
+        mock_progress = mock.Mock()
         mock_end = mock.Mock()
         self.client.signals.transferring.started.connect(mock_start)
+        self.client.signals.transferring.in_progress.connect(mock_progress)
         self.client.signals.transferring.completed.connect(mock_end)
+
+        self.controller.proceed_to_and_wait_for.side_effect = [
+            transfer_statuses.PENDING,
+            transfer_statuses.COMPLETED,
+        ]
         self.client.run()
-        mock_transfer.assert_called_once()
+
         mock_start.assert_called_once()
         mock_end.assert_called_once()
+
+        self.controller.proceed_to_and_wait_for.assert_any_call(
+            transfer_stages.TRANSFERRING, callback=mock.ANY,
+        )
+        mock_fire = self.controller.proceed_to_and_wait_for.call_args_list[0][1].get("callback")
+        mock_fire()
+        mock_progress.assert_called_once()
+
+    def test_run__error(self):
+        self.controller.proceed_to_and_wait_for.return_value = transfer_statuses.ERRORED
+
+        with self.assertRaises(MorangoError):
+            self.client.run()
+        self.controller.proceed_to_and_wait_for.assert_any_call(
+            transfer_stages.TRANSFERRING, callback=mock.ANY
+        )
 
     @mock.patch("morango.sync.syncsession.TransferClient.proceed_to_and_wait_for")
     def test_finalize(self, mock_proceed):
@@ -433,32 +442,3 @@ class TransferClientTestCase(BaseTransferClientTestCase):
         mock_proceed.assert_any_call(transfer_stages.CLEANUP)
         mock_start.assert_called_once()
         mock_end.assert_called_once()
-
-    def test_transfer(self):
-        mock_callback = mock.Mock()
-        self.controller.proceed_to.side_effect = [
-            transfer_statuses.PENDING,
-            transfer_statuses.COMPLETED,
-        ]
-        self.client._transfer(callback=mock_callback)
-        self.controller.proceed_to.assert_any_call(
-            transfer_stages.TRANSFERRING, context=self.client.remote_context
-        )
-        self.assertEqual(2, len(mock_callback.call_args_list))
-
-    def test_transfer__error(self):
-        mock_callback = mock.Mock()
-        self.controller.last_error = Exception("Oops")
-        self.controller.proceed_to.side_effect = [
-            transfer_statuses.PENDING,
-            transfer_statuses.ERRORED,
-        ]
-
-        with self.assertRaises(MorangoError):
-            self.client._transfer(callback=mock_callback)
-        self.controller.proceed_to.assert_any_call(
-            transfer_stages.TRANSFERRING, context=self.client.remote_context
-        )
-        self.assertEqual(2, len(mock_callback.call_args_list))
-
-

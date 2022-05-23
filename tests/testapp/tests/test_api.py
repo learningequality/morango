@@ -1,18 +1,17 @@
 import json
 import sys
 import uuid
+from test.support import EnvironmentVarGuard
 
-from django.test.utils import CaptureQueriesContext
 from django.db import connection
-
-from django.urls import reverse
+from django.test.utils import CaptureQueriesContext
 from django.test.utils import override_settings
+from django.urls import reverse
 from django.urls.exceptions import NoReverseMatch
 from django.utils import timezone
 from django.utils.functional import SimpleLazyObject
 from facility_profile.models import MyUser
 from rest_framework.test import APITestCase as BaseTestCase
-from test.support import EnvironmentVarGuard
 
 from morango.api.serializers import BufferSerializer
 from morango.api.serializers import CertificateSerializer
@@ -797,7 +796,8 @@ class TransferSessionEndpointTestCase(CertificateTestCaseMixin, APITestCase):
 
         transfersession = TransferSession.objects.get()
         transfersession.update_state(
-            stage=transfer_stages.DESERIALIZING, stage_status=transfer_statuses.COMPLETED
+            stage=transfer_stages.DESERIALIZING,
+            stage_status=transfer_statuses.COMPLETED,
         )
         self.assertEqual(transfersession.active, True)
 
@@ -810,7 +810,8 @@ class TransferSessionEndpointTestCase(CertificateTestCaseMixin, APITestCase):
         transfersession = TransferSession.objects.get()
         transfersession.records_total = None
         transfersession.update_state(
-            stage=transfer_stages.DESERIALIZING, stage_status=transfer_statuses.COMPLETED
+            stage=transfer_stages.DESERIALIZING,
+            stage_status=transfer_statuses.COMPLETED,
         )
 
         self._delete_transfer_session(transfersession)
@@ -1065,7 +1066,7 @@ class BufferEndpointTestCase(CertificateTestCaseMixin, APITestCase):
         buffers = Buffer.objects.filter(transfer_session_id=transfer_session_id)
 
         with CaptureQueriesContext(connection) as ctx:
-            result = BufferSerializer(instance=buffers[0]).data
+            BufferSerializer(instance=buffers[0]).data
             for q in ctx.captured_queries:
                 self.assertFalse('morango_transfersession' in q['sql'])
 
@@ -1151,14 +1152,18 @@ class BufferEndpointTestCase(CertificateTestCaseMixin, APITestCase):
                 limit=5,
                 offset=offset,
             )
-            response = self.client.get(reverse("buffers-list"), get_params, format="json")
+            response = self.client.get(
+                reverse("buffers-list"), get_params, format="json"
+            )
             self.assertEqual(response.status_code, 200)
             data = json.loads(response.content.decode())
             model_uuids = {d["model_uuid"] for d in data["results"]}
             self.assertFalse(model_uuids & returned_uuids)
             returned_uuids.update(model_uuids)
             if last_transfer_session_id:
-                Buffer.objects.filter(transfer_session_id=last_transfer_session_id).delete()
+                Buffer.objects.filter(
+                    transfer_session_id=last_transfer_session_id
+                ).delete()
             last_transfer_session_id = self.create_records_for_pulling(count=10)
             offset += 5
 
@@ -1195,7 +1200,9 @@ class MorangoInfoTestCase(APITestCase):
         self.assertIn("this_is_a_test", self.m_info.data)
         self.assertEqual(self.m_info.data["this_is_a_test"], "yes")
 
-    @override_settings(MORANGO_INSTANCE_INFO="facility_profile.custom:CUSTOM_INSTANCE_INFO")
+    @override_settings(
+        MORANGO_INSTANCE_INFO="facility_profile.custom:CUSTOM_INSTANCE_INFO"
+    )
     def test_custom_instance_info__import_path(self):
         self.m_info = self.client.get(
             reverse("morangoinfo-detail", kwargs={"pk": 1}), format="json"

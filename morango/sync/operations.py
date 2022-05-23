@@ -625,13 +625,17 @@ def _queue_into_buffer_v1(transfersession):
         if not fsics:
             return
 
-        profile_condition = ["profile = '{}'".format(transfersession.sync_session.profile)]
+        profile_condition = [
+            "profile = '{}'".format(transfersession.sync_session.profile)
+        ]
         partition_conditions = []
         # create condition for filtering by partitions
         for prefix in filter_prefixes:
             partition_conditions += ["partition LIKE '{}%'".format(prefix)]
         if filter_prefixes:
-            partition_conditions = [_join_with_logical_operator(partition_conditions, "OR")]
+            partition_conditions = [
+                _join_with_logical_operator(partition_conditions, "OR")
+            ]
 
         chunk_size = 200
         fsics = list(fsics.items())
@@ -666,7 +670,8 @@ def _queue_into_buffer_v1(transfersession):
 
             # combine conditions and filter by profile
             where_condition = _join_with_logical_operator(
-                profile_condition + last_saved_by_conditions + partition_conditions, "AND"
+                profile_condition + last_saved_by_conditions + partition_conditions,
+                "AND",
             )
 
             # execute raw sql to take all records that match condition, to be put into buffer for transfer
@@ -764,7 +769,9 @@ def _queue_into_buffer_v2(transfersession, chunk_size=200):
         if not fsics:
             return
 
-        profile_condition = ["profile = '{}'".format(transfersession.sync_session.profile)]
+        profile_condition = [
+            "profile = '{}'".format(transfersession.sync_session.profile)
+        ]
 
         fsics_len = sum(len(fsics[part]) for part in fsics) + len(fsics)
         # subtract one because when partitions overflow chunks they add up to an extra item per chunk
@@ -807,7 +814,9 @@ def _queue_into_buffer_v2(transfersession, chunk_size=200):
                     + ")"
                 )
 
-            partition_conditions = [_join_with_logical_operator(partition_conditions, "OR")]
+            partition_conditions = [
+                _join_with_logical_operator(partition_conditions, "OR")
+            ]
 
             # combine conditions and filter by profile
             where_condition = _join_with_logical_operator(
@@ -1122,6 +1131,38 @@ class PullProducerOperation(LocalOperation):
         if records_transferred == context.transfer_session.records_total:
             return transfer_statuses.COMPLETED
         return transfer_statuses.PENDING
+
+
+class PullReceiverOperation(LocalOperation):
+    """
+    Operation that ensures we don't run into unhandled stages when the sync is a pull,
+    and the local instance is receiving the pulled data
+    """
+
+    def handle(self, context):
+        """
+        :type context: LocalSessionContext
+        """
+        self._assert(context.is_pull)
+        self._assert(context.is_receiver)
+        self._assert(context.request is None)
+        return transfer_statuses.COMPLETED
+
+
+class PushProducerOperation(LocalOperation):
+    """
+    Operation that ensures we don't run into unhandled stages when the sync is a push,
+    but we're the local instance is the one pushing data
+    """
+
+    def handle(self, context):
+        """
+        :type context: LocalSessionContext
+        """
+        self._assert(context.is_push)
+        self._assert(context.is_producer)
+        self._assert(context.request is None)
+        return transfer_statuses.COMPLETED
 
 
 class PushReceiverOperation(LocalOperation):

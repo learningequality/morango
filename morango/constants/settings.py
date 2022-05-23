@@ -23,7 +23,9 @@ MORANGO_QUEUE_OPERATIONS = (
 )
 MORANGO_TRANSFERRING_OPERATIONS = (
     "morango.sync.operations:PullProducerOperation",
+    "morango.sync.operations:PushProducerOperation",
     "morango.sync.operations:PushReceiverOperation",
+    "morango.sync.operations:PullReceiverOperation",
     "morango.sync.operations:NetworkPushTransferOperation",
     "morango.sync.operations:NetworkPullTransferOperation",
 )

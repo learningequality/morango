@@ -92,7 +92,7 @@ def create_dummy_store_data():
         profile="facilitydata",
         last_activity_timestamp=timezone.now(),
     )
-    data["sc"].current_transfer_session = TransferSession.objects.create(
+    data["tx"] = TransferSession.objects.create(
         id=uuid.uuid4().hex,
         sync_session=session,
         push=True,
@@ -418,13 +418,10 @@ class BaseTransferClientTestCase(BaseClientTestCase):
             )
 
         client = super(BaseTransferClientTestCase, self).build_client(client_class=client_class, controller=controller)
-        client.current_transfer_session = self.transfer_session
-        if client.local_context.is_push is None:
-            client.local_context.update(is_push=self.transfer_session.push)
-            client.remote_context.update(is_push=self.transfer_session.push)
+        if client.context.is_push is None:
+            client.context.update(is_push=self.transfer_session.push)
         if update_context:
-            client.local_context.update(transfer_session=self.transfer_session)
-            client.remote_context.update(transfer_session=self.transfer_session)
+            client.context.update(transfer_session=self.transfer_session)
         return client
 
 

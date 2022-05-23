@@ -1,16 +1,16 @@
-import json
 import contextlib
-import pytest
-import mock
+import json
+from test.support import EnvironmentVarGuard
 
+import mock
+import pytest
 from django.conf import settings
 from django.db import connections
 from django.test.testcases import LiveServerTestCase
-from facility_profile.models import SummaryLog
 from facility_profile.models import InteractionLog
 from facility_profile.models import MyUser
+from facility_profile.models import SummaryLog
 from requests.exceptions import Timeout
-from test.support import EnvironmentVarGuard
 
 from morango.errors import MorangoError
 from morango.models.certificates import Certificate
@@ -142,10 +142,10 @@ class PushPullClientTestCase(LiveServerTestCase):
     def assertLastActivityUpdate(self, transfer_session=None):
         """A signal callable that asserts `last_activity_timestamp`s are updated"""
         if self.last_transfer_activity is not None:
-            self.assertLess(
+            self.assertLessEqual(
                 self.last_transfer_activity, transfer_session.last_activity_timestamp
             )
-            self.assertLess(
+            self.assertLessEqual(
                 self.last_session_activity,
                 transfer_session.sync_session.last_activity_timestamp,
             )
@@ -175,7 +175,7 @@ class PushPullClientTestCase(LiveServerTestCase):
         self.assertEqual(0, TransferSession.objects.filter(active=True).count())
         client.initialize(self.filter)
         self.assertEqual(1, TransferSession.objects.filter(active=True).count())
-        transfer_session = client.local_context.transfer_session
+        transfer_session = client.context.transfer_session
         self.assertNotEqual(0, transfer_session.records_total)
         self.assertEqual(0, transfer_session.records_transferred)
         self.assertLessEqual(
@@ -214,7 +214,7 @@ class PushPullClientTestCase(LiveServerTestCase):
         self.assertEqual(0, TransferSession.objects.filter(active=True).count())
         client.initialize(self.filter)
         self.assertEqual(1, TransferSession.objects.filter(active=True).count())
-        transfer_session = client.local_context.transfer_session
+        transfer_session = client.context.transfer_session
         self.assertNotEqual(0, transfer_session.records_total)
         self.assertEqual(0, transfer_session.records_transferred)
         client.run()
@@ -243,7 +243,7 @@ class PushPullClientTestCase(LiveServerTestCase):
         # first pull
         pull_client = self.client.get_pull_client()
         pull_client.initialize(self.filter)
-        transfer_session = pull_client.local_context.transfer_session
+        transfer_session = pull_client.context.transfer_session
         self.assertNotEqual(0, transfer_session.records_total)
         self.assertEqual(0, transfer_session.records_transferred)
         pull_client.run()
@@ -257,7 +257,7 @@ class PushPullClientTestCase(LiveServerTestCase):
         # now do a push after pull, but nothing to actually transfer
         push_client = self.client.get_push_client()
         push_client.initialize(self.filter)
-        transfer_session = push_client.local_context.transfer_session
+        transfer_session = push_client.context.transfer_session
         self.assertEqual(0, transfer_session.records_total)
         self.assertEqual(0, transfer_session.records_transferred)
         push_client.run()
@@ -267,7 +267,7 @@ class PushPullClientTestCase(LiveServerTestCase):
         # second pass for pull, only do initialize to make sure nothing gets queued for sync
         second_pull_client = self.client.get_pull_client()
         second_pull_client.initialize(self.filter)
-        transfer_session = second_pull_client.local_context.transfer_session
+        transfer_session = second_pull_client.context.transfer_session
         self.assertEqual(0, transfer_session.records_total)
 
     def test_second_pull_with_instance_id_no_longer_in_store(self):
@@ -280,7 +280,7 @@ class PushPullClientTestCase(LiveServerTestCase):
         # first pull
         pull_client = self.client.get_pull_client()
         pull_client.initialize(self.filter)
-        transfer_session = pull_client.local_context.transfer_session
+        transfer_session = pull_client.context.transfer_session
         self.assertEqual(1, transfer_session.records_total)
         self.assertEqual(0, transfer_session.records_transferred)
         pull_client.run()
@@ -300,7 +300,7 @@ class PushPullClientTestCase(LiveServerTestCase):
         # now do another pull, which shouldn't have anything new to bring down
         second_pull_client = self.client.get_pull_client()
         second_pull_client.initialize(self.filter)
-        transfer_session = second_pull_client.local_context.transfer_session
+        transfer_session = second_pull_client.context.transfer_session
         self.assertEqual(0, transfer_session.records_total)
 
     def test_resume(self):
@@ -318,7 +318,7 @@ class PushPullClientTestCase(LiveServerTestCase):
         self.assertEqual(0, TransferSession.objects.filter(active=True).count())
         client.initialize(self.filter)
         self.assertEqual(1, TransferSession.objects.filter(active=True).count())
-        transfer_session = client.local_context.transfer_session
+        transfer_session = client.context.transfer_session
         self.assertNotEqual(0, transfer_session.records_total)
         self.assertEqual(0, transfer_session.records_transferred)
         self.assertLessEqual(1, Buffer.objects.filter(transfer_session=transfer_session).count())
@@ -336,7 +336,7 @@ class PushPullClientTestCase(LiveServerTestCase):
         self.assertEqual(1, TransferSession.objects.filter(active=True).count())
         resume_client.initialize(self.filter)
         self.assertEqual(1, TransferSession.objects.filter(active=True).count())
-        transfer_session = resume_client.local_context.transfer_session
+        transfer_session = resume_client.context.transfer_session
         self.assertNotEqual(0, transfer_session.records_total)
         self.assertEqual(0, transfer_session.records_transferred)
         self.assertLessEqual(1, Buffer.objects.filter(transfer_session=transfer_session).count())
