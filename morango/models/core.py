@@ -122,7 +122,7 @@ class InstanceIDModel(models.Model):
     hostname = models.TextField()
     sysversion = models.TextField()
     node_id = models.CharField(max_length=20, blank=True)
-    database = models.ForeignKey(DatabaseIDModel)
+    database = models.ForeignKey(DatabaseIDModel, on_delete=models.CASCADE)
     counter = models.IntegerField(default=0)
     current = models.BooleanField(default=True)
     db_path = models.CharField(max_length=1000)
@@ -219,10 +219,10 @@ class SyncSession(models.Model):
 
     # track the certificates being used by each side for this session
     client_certificate = models.ForeignKey(
-        Certificate, blank=True, null=True, related_name="syncsessions_client"
+        Certificate, blank=True, null=True, related_name="syncsessions_client", on_delete=models.CASCADE
     )
     server_certificate = models.ForeignKey(
-        Certificate, blank=True, null=True, related_name="syncsessions_server"
+        Certificate, blank=True, null=True, related_name="syncsessions_server", on_delete=models.CASCADE
     )
 
     # track the morango profile this sync session is happening for
@@ -280,7 +280,7 @@ class TransferSession(models.Model):
     bytes_sent = models.BigIntegerField(default=0, null=True, blank=True)
     bytes_received = models.BigIntegerField(default=0, null=True, blank=True)
 
-    sync_session = models.ForeignKey(SyncSession)
+    sync_session = models.ForeignKey(SyncSession, on_delete=models.CASCADE)
 
     # track when the transfer session started and the last time there was activity on it
     start_timestamp = models.DateTimeField(default=timezone.now)
@@ -527,7 +527,7 @@ class Buffer(AbstractStore):
     dequeuing into the local store.
     """
 
-    transfer_session = models.ForeignKey(TransferSession)
+    transfer_session = models.ForeignKey(TransferSession, on_delete=models.CASCADE)
     model_uuid = UUIDField()
 
     class Meta:
@@ -761,7 +761,7 @@ class RecordMaxCounter(AbstractCounter):
     during the sync process.
     """
 
-    store_model = models.ForeignKey(Store)
+    store_model = models.ForeignKey(Store, on_delete=models.CASCADE)
 
     class Meta:
         unique_together = ("store_model", "instance_id")
@@ -773,7 +773,7 @@ class RecordMaxCounterBuffer(AbstractCounter):
     until they are sent or received by another morango instance.
     """
 
-    transfer_session = models.ForeignKey(TransferSession)
+    transfer_session = models.ForeignKey(TransferSession, on_delete=models.CASCADE)
     model_uuid = UUIDField(db_index=True)
 
 
