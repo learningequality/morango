@@ -91,6 +91,9 @@ class TransactionIsolationTestCase(TransactionTestCase):
         """Don't setup fixtures for this test case"""
         pass
 
+    def _fixture_teardown(self):
+        pass
+
     @override_settings(MORANGO_TEST_POSTGRESQL=False)
     def test_begin_transaction(self):
         """
@@ -101,13 +104,27 @@ class TransactionIsolationTestCase(TransactionTestCase):
         # because tests usually run within their own transaction. By the time the isolation level
         # is attempted to be set within a test, there have been reads and writes and the isolation
         # cannot be changed
+        self.assertFalse(connection.in_atomic_block)
         with _begin_transaction(None, isolated=True):
-            create_dummy_store_data()
+            session = SyncSession.objects.create(
+                id=uuid.uuid4().hex,
+                profile="facilitydata",
+                last_activity_timestamp=timezone.now(),
+            )
+            transfer_session = TransferSession.objects.create(
+                id=uuid.uuid4().hex,
+                sync_session=session,
+                push=True,
+                last_activity_timestamp=timezone.now(),
+            )
+            create_buffer_and_store_dummy_data(transfer_session.id)
 
     @pytest.mark.skipif(
         not getattr(settings, "MORANGO_TEST_POSTGRESQL", False), reason="Not supported"
     )
     def test_transaction_isolation_handling(self):
+        from psycopg2.extensions import ISOLATION_LEVEL_REPEATABLE_READ
+
         store = Store.objects.create(
             id=uuid.uuid4().hex,
             last_saved_instance=uuid.uuid4().hex,
@@ -125,18 +142,23 @@ class TransactionIsolationTestCase(TransactionTestCase):
         )
         concurrent_thread.start()
 
-        try:
-            with _begin_transaction(Filter(store.partition), isolated=True):
-                s = Store.objects.get(id=store.id)
-                concurrent_event.set()
-                sleep(.2)
-                s.last_saved_counter += 1
-                s.save()
-            raise AssertionError("Didn't raise transactional error")
-        except Exception as e:
-            self.assertTrue(DBBackend._is_transaction_isolation_error(e))
-        finally:
-            concurrent_thread.join(5)
+        # this test is only for postgres, but we don't want the code to know it's a test
+        with override_settings(MORANGO_TEST_POSTGRESQL=False):
+            try:
+                self.assertNotEqual(connection.connection.isolation_level, ISOLATION_LEVEL_REPEATABLE_READ)
+                with _begin_transaction(Filter(store.partition), isolated=True):
+                    self.assertEqual(connection.connection.isolation_level, ISOLATION_LEVEL_REPEATABLE_READ)
+                    s = Store.objects.get(id=store.id)
+                    concurrent_event.set()
+                    sleep(.2)
+                    s.last_saved_counter += 1
+                    s.save()
+                raise AssertionError("Didn't raise transactional error")
+            except Exception as e:
+                self.assertTrue(DBBackend._is_transaction_isolation_error(e))
+                self.assertNotEqual(connection.connection.isolation_level, ISOLATION_LEVEL_REPEATABLE_READ)
+            finally:
+                concurrent_thread.join(5)
 
 
 @override_settings(MORANGO_SERIALIZE_BEFORE_QUEUING=False, MORANGO_DISABLE_FSIC_V2_FORMAT=True)

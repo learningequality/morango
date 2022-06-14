@@ -1,8 +1,10 @@
 import binascii
 import logging
+from contextlib import contextmanager
 
 from .base import BaseSQLWrapper
 from .utils import get_pk_field
+from morango.errors import MorangoDatabaseError
 from morango.models.core import Buffer
 from morango.models.core import RecordMaxCounter
 from morango.models.core import RecordMaxCounterBuffer
@@ -25,18 +27,6 @@ class SQLWrapper(BaseSQLWrapper):
         "CREATE TEMP TABLE {name} ({fields}) ON COMMIT DROP"
     )
 
-    def _transaction_has_savepoint(self):
-        """
-        Determine if we're in a transaction and whether savepoints have been created during it
-        :return:
-        """
-        if not self.connection.in_atomic_block:
-            return False
-        for savepoint_id in self.connection.savepoint_ids:
-            if savepoint_id is not None:
-                return True
-        return False
-
     def _is_transaction_isolation_error(self, error):
         """
         Determine if an error is related to transaction isolation
@@ -51,19 +41,32 @@ class SQLWrapper(BaseSQLWrapper):
                 return True
         return False
 
+    @contextmanager
     def _set_transaction_repeatable_read(self):
         """Set the current transaction isolation level"""
         from psycopg2.extensions import ISOLATION_LEVEL_REPEATABLE_READ
 
-        # setting the transaction isolation must be either done at the BEGIN statement, or before
-        # any reading/writing operations have taken place, which includes creating savepoints
-        if self._transaction_has_savepoint():
-            # if we're running tests, we should simply ignore this warning, since the test suites
-            # manage their own connections
-            if not SETTINGS.MORANGO_TEST_POSTGRESQL:
-                logger.warning("Unable to set transaction isolation when savepoints have been created")
+        # if we're running tests, we should skip modifying the isolation since the test suites
+        # manage their own connections
+        if SETTINGS.MORANGO_TEST_POSTGRESQL:
+            yield
         else:
-            self.connection.connection.set_isolation_level(ISOLATION_LEVEL_REPEATABLE_READ)
+            # setting the transaction isolation must be either done at the BEGIN statement, or
+            # before any reading/writing operations have taken place, which includes creating
+            # savepoints
+            if self.connection.in_atomic_block:
+                raise MorangoDatabaseError("Unable to set transaction isolation during a transaction")
+
+            for savepoint_id in self.connection.savepoint_ids:
+                if savepoint_id is not None:
+                    raise MorangoDatabaseError("Unable to set transaction isolation when savepoints have been created")
+
+            existing_isolation_level = self.connection.connection.isolation_level
+            try:
+                self.connection.connection.set_isolation_level(ISOLATION_LEVEL_REPEATABLE_READ)
+                yield
+            finally:
+                self.connection.connection.set_isolation_level(existing_isolation_level)
 
     def _prepare_with_values(self, name, fields, db_values):
         placeholder_list = self._create_placeholder_list(fields, db_values)

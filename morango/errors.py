@@ -76,3 +76,7 @@ class MorangoInvalidFSICPartition(MorangoError):
 
 class MorangoSkipOperation(MorangoError):
     pass
+
+
+class MorangoDatabaseError(MorangoError):
+    pass
