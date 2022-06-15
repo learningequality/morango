@@ -491,8 +491,6 @@ class CompositeSessionContext(SessionContext):
         """Re-apply dict state after serialization"""
         self.children = state.get("children", [])
         self._counter = state.get("counter", 0)
-
-        stage = state.get("stage", None)
-        stage_status = state.get("stage_status", None)
-        self.update_state(stage=stage, stage_status=stage_status)
+        self._stage = state.get("stage", None)
+        self._stage_status = state.get("stage_status", None)
         self.error = state.get("error", None)

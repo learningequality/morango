@@ -254,6 +254,31 @@ class ContextPicklingTestCase(TestCase):
         self.assertEqual(context.stage_status, unpickled_context.stage_status)
         self.assertEqual(context.capabilities, unpickled_context.capabilities)
 
+    def test_composite(self):
+        request = mock.Mock(spec="django.http.request.HttpRequest")
+        local = LocalSessionContext(request=request)
+
+        conn = mock.Mock(spec="morango.sync.syncsession.NetworkSyncConnection",
+                         server_info=dict(capabilities={}))
+        network = NetworkSessionContext(conn)
+
+        composite = CompositeSessionContext([local, network])
+        for _ in range(2):
+            composite.update_state(
+                stage=transfer_stages.INITIALIZING, stage_status=transfer_statuses.COMPLETED
+            )
+        composite.update_state(
+            stage=transfer_stages.SERIALIZING, stage_status=transfer_statuses.COMPLETED
+        )
+        self.assertEqual(3, composite._counter)
+        pickled_context = pickle.dumps(composite)
+        unpickled_context = pickle.loads(pickled_context)
+        self.assertEqual(composite._counter, unpickled_context._counter)
+        self.assertEqual(composite.stage, unpickled_context.stage)
+        self.assertEqual(composite.stage_status, unpickled_context.stage_status)
+        for i, context_type in enumerate([LocalSessionContext, NetworkSessionContext]):
+            self.assertIsInstance(unpickled_context.children[i], context_type)
+
 
 class CompositeSessionContextTestCase(SimpleTestCase):
     def setUp(self):
