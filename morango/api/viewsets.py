@@ -1,7 +1,7 @@
 import json
+import logging
 import platform
 import uuid
-import logging
 
 from django.core.exceptions import ValidationError
 from django.utils import timezone
@@ -30,8 +30,8 @@ from morango.models.core import TransferSession
 from morango.models.fields.crypto import SharedKey
 from morango.sync.context import LocalSessionContext
 from morango.sync.controller import SessionController
-from morango.utils import CAPABILITIES
 from morango.utils import _assert
+from morango.utils import CAPABILITIES
 from morango.utils import parse_capabilities_from_server_request
 
 
@@ -368,8 +368,8 @@ class TransferSessionViewSet(
         if scope_error_msg:
             return response.Response(scope_error_msg, status=status.HTTP_403_FORBIDDEN)
 
-        context = LocalSessionContext(
-            request=request,
+        context = LocalSessionContext.from_request(
+            request,
             sync_session=syncsession,
             sync_filter=requested_filter,
             is_push=is_a_push,
@@ -416,8 +416,8 @@ class TransferSessionViewSet(
         if update_stage is not None:
             # if client is trying to update `transfer_stage`, then we use the controller to proceed
             # to the stage, but wait for completion if both do not support async
-            context = LocalSessionContext(
-                request=request,
+            context = LocalSessionContext.from_request(
+                request,
                 transfer_session=self.get_object(),
             )
             # special case for transferring, not to wait since it's a chunked process
@@ -431,8 +431,8 @@ class TransferSessionViewSet(
         return super(TransferSessionViewSet, self).update(request, *args, **kwargs)
 
     def perform_destroy(self, transfer_session):
-        context = LocalSessionContext(
-            request=self.request,
+        context = LocalSessionContext.from_request(
+            self.request,
             transfer_session=transfer_session,
         )
         if self.async_allowed():
@@ -482,8 +482,8 @@ class BufferViewSet(mixins.ListModelMixin, viewsets.GenericViewSet):
                 status=status.HTTP_403_FORBIDDEN,
             )
 
-        context = LocalSessionContext(
-            request=request, transfer_session=transfer_session
+        context = LocalSessionContext.from_request(
+            request, transfer_session=transfer_session
         )
         result = session_controller.proceed_to(
             transfer_stages.TRANSFERRING, context=context
@@ -509,13 +509,15 @@ class MorangoInfoViewSet(viewsets.ViewSet):
         (id_model, _) = InstanceIDModel.get_or_create_current_instance()
         # include custom instance info as well
         m_info = id_model.instance_info.copy()
-        m_info.update({
-            "instance_hash": id_model.get_proquint(),
-            "instance_id": id_model.id,
-            "system_os": platform.system(),
-            "version": morango.__version__,
-            "capabilities": CAPABILITIES,
-        })
+        m_info.update(
+            {
+                "instance_hash": id_model.get_proquint(),
+                "instance_id": id_model.id,
+                "system_os": platform.system(),
+                "version": morango.__version__,
+                "capabilities": CAPABILITIES,
+            }
+        )
         return response.Response(m_info)
 
 

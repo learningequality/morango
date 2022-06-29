@@ -4,8 +4,8 @@ from morango.errors import MorangoContextUpdateError
 from morango.models.certificates import Filter
 from morango.models.core import SyncSession
 from morango.models.core import TransferSession
-from morango.utils import parse_capabilities_from_server_request
 from morango.utils import CAPABILITIES
+from morango.utils import parse_capabilities_from_server_request
 
 
 class SessionContext(object):
@@ -21,6 +21,7 @@ class SessionContext(object):
         "capabilities",
         "error",
     )
+    max_backoff_interval = 5
 
     def __init__(
         self,
@@ -54,6 +55,13 @@ class SessionContext(object):
             self.is_push = transfer_session.push or self.is_push
             if transfer_session.filter:
                 self.filter = transfer_session.get_filter()
+
+    def prepare(self):
+        """
+        Perform any processing of the session context prior to passing it to the middleware,
+        and return the context as it should be passed to the middleware
+        """
+        return self
 
     def update(
         self,
@@ -186,6 +194,7 @@ class LocalSessionContext(SessionContext):
         "request",
         "is_server",
     )
+    max_backoff_interval = 1
 
     def __init__(self, request=None, **kwargs):
         """
@@ -194,13 +203,21 @@ class LocalSessionContext(SessionContext):
             passed in.
         :type request: django.http.request.HttpRequest
         """
-        capabilities = kwargs.pop("capabilities", [])
-        if request is not None:
-            capabilities = parse_capabilities_from_server_request(request)
-
-        super(LocalSessionContext, self).__init__(capabilities=capabilities, **kwargs)
+        super(LocalSessionContext, self).__init__(**kwargs)
         self.request = request
         self.is_server = request is not None
+
+    @classmethod
+    def from_request(cls, request, **kwargs):
+        """
+        Parse capabilities from request and instantiate the LocalSessionContext
+        :param request: The request object
+        :type request: django.http.request.HttpRequest
+        :param kwargs: Any other keyword args for the constructor
+        :rtype: LocalSessionContext
+        """
+        kwargs.update(capabilities=parse_capabilities_from_server_request(request))
+        return LocalSessionContext(request=request, **kwargs)
 
     @property
     def _has_transfer_session(self):
@@ -288,9 +305,7 @@ class NetworkSessionContext(SessionContext):
         :type connection: NetworkSyncConnection
         """
         self.connection = connection
-        super(NetworkSessionContext, self).__init__(
-            capabilities=self.connection.server_info.get("capabilities", []), **kwargs
-        )
+        super(NetworkSessionContext, self).__init__(**kwargs)
 
         # since this is network context, keep local reference to state vars
         self._stage = transfer_stages.INITIALIZING
@@ -317,3 +332,165 @@ class NetworkSessionContext(SessionContext):
         """
         self._stage = stage or self._stage
         self._stage_status = stage_status or self._stage_status
+
+
+class CompositeSessionContext(SessionContext):
+    """
+    A composite context class that acts as a facade for more than one context, to facilitate
+    "simpler" operation on local and remote contexts simultaneously
+    """
+
+    __slots__ = (
+        "children",
+        "_counter",
+        "_stage",
+        "_stage_status",
+    )
+
+    def __init__(self, contexts, *args, **kwargs):
+        """
+        :param contexts: A list of context objects
+        :param args: Args to pass to the parent constructor
+        :param kwargs: Keyword args to pass to the parent constructor
+        """
+        self.children = contexts
+        self._counter = 0
+        self._stage = transfer_stages.INITIALIZING
+        self._stage_status = transfer_statuses.PENDING
+        super(CompositeSessionContext, self).__init__(*args, **kwargs)
+        self._update_attrs(**kwargs)
+
+    @property
+    def max_backoff_interval(self):
+        """
+        The maximum amount of time to wait between retries
+        :return: A number of seconds
+        """
+        return self.prepare().max_backoff_interval
+
+    @property
+    def stage(self):
+        """
+        The stage of the transfer context
+        :return: A transfer_stages.* constant
+        :rtype: str
+        """
+        return self._stage
+
+    @property
+    def stage_status(self):
+        """
+        The status of the transfer context's stage
+        :return: A transfer_statuses.* constant
+        :rtype: str
+        """
+        return self._stage_status
+
+    def _update_attrs(self, **kwargs):
+        """
+        Updates all contexts by applying key/value arguments as attributes. This avoids using the
+        contexts' update methods because some validation is already handled in this class.
+        """
+        for context in self.children:
+            for attr, value in kwargs.items():
+                set_attr = "filter" if attr == "sync_filter" else attr
+                setattr(context, set_attr, value)
+
+    def prepare(self):
+        """
+        Preparing this context will return the current sub context that needs completion
+        """
+        return self.children[self._counter % len(self.children)]
+
+    def update(self, stage=None, stage_status=None, **kwargs):
+        """
+        Updates the context object and its state
+        :param stage: The str transfer stage
+        :param stage_status: The str transfer stage status
+        :param kwargs: Other arguments to update the context with
+        """
+        # update ourselves, but exclude stage and stage_status
+        super(CompositeSessionContext, self).update(**kwargs)
+        # update children contexts directly, but exclude stage and stage_status
+        self._update_attrs(**kwargs)
+        # handle state changes after updating children
+        self.update_state(stage=stage, stage_status=stage_status)
+
+        # During the initializing stage, we want to make sure to synchronize the transfer session
+        # object between the composite and children contexts, using whatever child context's
+        # transfer session object that was updated on the context during initialization
+        current_stage = stage or self._stage
+        if not self.transfer_session and current_stage == transfer_stages.INITIALIZING:
+            try:
+                transfer_session = next(
+                    c.transfer_session for c in self.children if c.transfer_session
+                )
+                # prepare an updates dictionary, so we can update everything at once
+                updates = dict(transfer_session=transfer_session)
+
+                # if the transfer session is being resumed, we'd detect a different stage here,
+                # and thus we reset the counter, so we can be sure to start fresh at that stage
+                # on the next invocation of the middleware
+                if (
+                    transfer_session.transfer_stage
+                    and transfer_session.transfer_stage != current_stage
+                ):
+                    self._counter = 0
+                    updates.update(
+                        stage=transfer_session.transfer_stage,
+                        stage_status=transfer_statuses.PENDING,
+                    )
+
+                # recurse into update with transfer session and possibly state updates too
+                self.update(**updates)
+            except StopIteration:
+                pass
+
+    def update_state(self, stage=None, stage_status=None):
+        """
+        Updates the state of the transfer
+        :type stage: transfer_stages.*|None
+        :type stage_status: transfer_statuses.*|None
+        """
+        # parent's update method can pass through None values
+        if stage is None and stage_status is None:
+            return
+
+        # advance the composite's stage when we move forward only
+        if stage is not None and transfer_stages.stage(stage) > transfer_stages.stage(
+            self._stage
+        ):
+            self._stage = stage
+
+        # when finishing a stage without an error, we'll increment the counter by one such that
+        # `prepare` returns the next context to process
+        if stage_status == transfer_statuses.COMPLETED:
+            self._counter += 1
+
+        # when we've completed a loop through all contexts (modulus is zero), we want to bring
+        # all the contexts' states up to date
+        if (
+            self._counter % len(self.children) == 0
+            or stage_status == transfer_statuses.ERRORED
+        ):
+            for context in self.children:
+                context.update_state(stage=stage, stage_status=stage_status)
+            if stage_status is not None:
+                self._stage_status = stage_status
+
+    def __getstate__(self):
+        """Return dict of simplified data for serialization"""
+        return dict(
+            children=self.children,
+            counter=self._counter,
+            stage=self._stage,
+            stage_status=self._stage_status,
+        )
+
+    def __setstate__(self, state):
+        """Re-apply dict state after serialization"""
+        self.children = state.get("children", [])
+        self._counter = state.get("counter", 0)
+        self._stage = state.get("stage", None)
+        self._stage_status = state.get("stage_status", None)
+        self.error = state.get("error", None)

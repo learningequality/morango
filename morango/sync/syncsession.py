@@ -1,9 +1,9 @@
 """
 The main module to be used for initiating the synchronization of data between morango instances.
 """
-import os
 import json
 import logging
+import os
 import socket
 import uuid
 from io import BytesIO
@@ -11,11 +11,11 @@ from io import BytesIO
 from django.utils import timezone
 from django.utils.six import iteritems
 from django.utils.six import raise_from
+from django.utils.six.moves.urllib.parse import urljoin
+from django.utils.six.moves.urllib.parse import urlparse
 from requests.adapters import HTTPAdapter
 from requests.exceptions import HTTPError
 from requests.packages.urllib3.util.retry import Retry
-from django.utils.six.moves.urllib.parse import urljoin
-from django.utils.six.moves.urllib.parse import urlparse
 
 from .session import SessionWrapper
 from morango.api.serializers import CertificateSerializer
@@ -33,9 +33,10 @@ from morango.models.certificates import Certificate
 from morango.models.certificates import Key
 from morango.models.core import InstanceIDModel
 from morango.models.core import SyncSession
-from morango.sync.controller import SessionController
+from morango.sync.context import CompositeSessionContext
 from morango.sync.context import LocalSessionContext
 from morango.sync.context import NetworkSessionContext
+from morango.sync.controller import SessionController
 from morango.sync.utils import SyncSignal
 from morango.sync.utils import SyncSignalGroup
 from morango.utils import CAPABILITIES
@@ -575,10 +576,8 @@ class TransferClient(object):
         "sync_connection",
         "sync_session",
         "controller",
-        "current_transfer_session",
         "signals",
-        "local_context",
-        "remote_context",
+        "context",
     )
 
     def __init__(self, sync_connection, sync_session, controller):
@@ -590,51 +589,48 @@ class TransferClient(object):
         self.sync_connection = sync_connection
         self.sync_session = sync_session
         self.controller = controller
-        self.current_transfer_session = None
         self.signals = SyncClientSignals()
 
-        # TODO: come up with strategy to use only one context here
-        self.remote_context = NetworkSessionContext(
-            sync_connection, sync_session=sync_session
+        capabilities = sync_connection.server_info.get("capabilities", [])
+        self.context = CompositeSessionContext(
+            [LocalSessionContext(), NetworkSessionContext(sync_connection)],
+            sync_session=sync_session,
+            capabilities=capabilities,
         )
-        self.local_context = LocalSessionContext(
-            sync_session=sync_session, capabilities=self.remote_context.capabilities
-        )
+        self.controller.context = self.context
 
-    def proceed_to_and_wait_for(self, stage):
-        contexts = (self.local_context, self.remote_context)
-        for context in contexts:
-            max_interval = 1 if context is self.local_context else 5
-            result = self.controller.proceed_to_and_wait_for(
-                stage, context=context, max_interval=max_interval
+    @property
+    def current_transfer_session(self):
+        return self.context.transfer_session
+
+    def proceed_to_and_wait_for(self, stage, error_msg=None, callback=None):
+        """
+        Raises an exception if an ERROR result is received from calling `proceed_to_and_wait_for`
+        :param stage: The stage to proceed to
+        :param error_msg: An error message str to use as the exception message if it errors
+        :param callback: A callback to pass along to the controller
+        """
+        result = self.controller.proceed_to_and_wait_for(stage, callback=callback)
+        if result == transfer_statuses.ERRORED:
+            raise_from(
+                MorangoError(
+                    error_msg or "Stage `{}` failed".format(self.context.stage)
+                ),
+                self.context.error,
             )
-            if result == transfer_statuses.ERRORED:
-                raise_from(
-                    MorangoError("Stage `{}` failed".format(stage)),
-                    context.error,
-                )
 
     def initialize(self, sync_filter):
         """
         :param sync_filter: Filter
         """
         # set filter on controller
-        self.local_context.update(sync_filter=sync_filter)
-        self.remote_context.update(sync_filter=sync_filter)
+        self.context.update(sync_filter=sync_filter)
 
-        # initialize the transfer session locally
-        status = self.controller.proceed_to_and_wait_for(
-            transfer_stages.INITIALIZING, context=self.local_context, max_interval=1
+        # initialize the transfer session
+        self.proceed_to_and_wait_for(
+            transfer_stages.INITIALIZING,
+            error_msg="Failed to initialize transfer session",
         )
-        if status == transfer_statuses.ERRORED:
-            raise_from(
-                MorangoError("Failed to initialize transfer session"),
-                self.local_context.error,
-            )
-
-        # copy the transfer session to local state and update remote controller context
-        self.current_transfer_session = self.local_context.transfer_session
-        self.remote_context.update(transfer_session=self.current_transfer_session)
 
         self.signals.session.started.fire(
             transfer_session=self.current_transfer_session
@@ -643,21 +639,21 @@ class TransferClient(object):
         # backwards compatibility for the queuing signal as it included both serialization
         # and queuing originally
         with self.signals.queuing.send(transfer_session=self.current_transfer_session):
-            # proceeding to serialization on remote will trigger initialization as well
-            self.proceed_to_and_wait_for(transfer_stages.SERIALIZING)
+            # proceeding to queuing on remote will trigger initialization and serialization as well
             self.proceed_to_and_wait_for(transfer_stages.QUEUING)
 
     def run(self):
+        """
+        Execute the transferring portion of the sync
+        """
         with self.signals.transferring.send(
             transfer_session=self.current_transfer_session
         ) as status:
-            self._transfer(callback=status.in_progress.fire)
+            self.proceed_to_and_wait_for(
+                transfer_stages.TRANSFERRING, callback=status.in_progress.fire
+            )
 
     def finalize(self):
-        # if not initialized, we don't need to finalize
-        if not self.current_transfer_session:
-            return
-
         with self.signals.dequeuing.send(
             transfer_session=self.current_transfer_session
         ):
@@ -667,26 +663,6 @@ class TransferClient(object):
         self.signals.session.completed.fire(
             transfer_session=self.current_transfer_session
         )
-        self.current_transfer_session = None
-
-    def _transfer(self, callback=None):
-        result = transfer_statuses.PENDING
-
-        while result not in transfer_statuses.FINISHED_STATES:
-            result = self.controller.proceed_to(
-                transfer_stages.TRANSFERRING, context=self.remote_context
-            )
-            self.local_context.update(
-                stage=transfer_stages.TRANSFERRING, stage_status=result
-            )
-            if callback is not None:
-                callback()
-
-        if result == transfer_statuses.ERRORED:
-            raise_from(
-                MorangoError("Failure occurred during transfer"),
-                self.remote_context.error,
-            )
 
 
 class PushClient(TransferClient):
@@ -696,8 +672,7 @@ class PushClient(TransferClient):
 
     def __init__(self, *args, **kwargs):
         super(PushClient, self).__init__(*args, **kwargs)
-        self.local_context.update(is_push=True)
-        self.remote_context.update(is_push=True)
+        self.context.update(is_push=True)
 
 
 class PullClient(TransferClient):
@@ -707,5 +682,4 @@ class PullClient(TransferClient):
 
     def __init__(self, *args, **kwargs):
         super(PullClient, self).__init__(*args, **kwargs)
-        self.local_context.update(is_push=False)
-        self.remote_context.update(is_push=False)
+        self.context.update(is_push=False)
