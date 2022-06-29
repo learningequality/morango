@@ -298,8 +298,8 @@ class CompositeSessionContextTestCase(SimpleTestCase):
             self.sub_context_a.update_state.reset_mock()
             self.sub_context_b.update_state.reset_mock()
 
-            primed_context = self.context.prime()
-            self.assertIs(primed_context, self.sub_context_a)
+            prepared_context = self.context.prepare()
+            self.assertIs(prepared_context, self.sub_context_a)
 
             # pretend the initialization stage ran successfully
             if stage == transfer_stages.INITIALIZING:
@@ -317,8 +317,8 @@ class CompositeSessionContextTestCase(SimpleTestCase):
             self.sub_context_a.update_state.assert_not_called()
             self.sub_context_b.update_state.assert_not_called()
 
-            primed_context = self.context.prime()
-            self.assertIs(primed_context, self.sub_context_b)
+            prepared_context = self.context.prepare()
+            self.assertIs(prepared_context, self.sub_context_b)
 
             self.context.update(stage_status=transfer_statuses.COMPLETED)
             self.sub_context_a.update_state.assert_called_once_with(stage=None, stage_status=transfer_statuses.COMPLETED)

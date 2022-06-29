@@ -198,7 +198,7 @@ class SessionController(object):
         :param context: Override controller context, or provide it if missing
         :type context: morango.sync.context.SessionContext|None
         :param max_interval: The max time, in seconds, between repeat calls to `.proceed_to`
-        :param callback: A callable to invoke on every retry
+        :param callback: A callable to invoke after every attempt
         :return: transfer_status.* - The status of proceeding to that stage,
             which should be `ERRORED` or `COMPLETE`
         :rtype: str
@@ -231,21 +231,21 @@ class SessionController(object):
         stage = middleware.related_stage
         signal = getattr(self.signals, stage)
         at_stage = context.stage == stage
-        primed_context = None
+        prepared_context = None
 
         try:
             context.update(stage=stage, stage_status=transfer_statuses.PENDING)
 
-            # we'll use the primed context for passing to the middleware and any signal handlers
-            primed_context = context.prime()
+            # we'll use the prepared context for passing to the middleware and any signal handlers
+            prepared_context = context.prepare()
 
             # only fire "started" when we first try to invoke the stage
             # NOTE: this means that signals.started is not equivalent to transfer_stage.STARTED
             if not at_stage:
-                signal.started.fire(context=primed_context)
+                signal.started.fire(context=prepared_context)
 
-            # invoke the middleware with the primed context
-            result = middleware(primed_context)
+            # invoke the middleware with the prepared context
+            result = middleware(prepared_context)
 
             # don't update stage result if context's stage was updated during operation
             if context.stage == stage:
@@ -253,9 +253,9 @@ class SessionController(object):
 
             # fire signals based off middleware invocation result; the progress signal if incomplete
             if result == transfer_statuses.COMPLETED:
-                signal.completed.fire(context=primed_context)
+                signal.completed.fire(context=prepared_context)
             else:
-                signal.in_progress.fire(context=primed_context)
+                signal.in_progress.fire(context=prepared_context)
 
             # context should take precedence over result, and was likely updated
             return context.stage_status
@@ -264,5 +264,5 @@ class SessionController(object):
             logger.error(e)
             context.update(stage_status=transfer_statuses.ERRORED, error=e)
             # fire completed signal, after context update. handlers can use context to detect error
-            signal.completed.fire(context=primed_context or context)
+            signal.completed.fire(context=prepared_context or context)
             return transfer_statuses.ERRORED

@@ -56,7 +56,7 @@ class SessionContext(object):
             if transfer_session.filter:
                 self.filter = transfer_session.get_filter()
 
-    def prime(self):
+    def prepare(self):
         """
         Perform any processing of the session context prior to passing it to the middleware,
         and return the context as it should be passed to the middleware
@@ -366,7 +366,7 @@ class CompositeSessionContext(SessionContext):
         The maximum amount of time to wait between retries
         :return: A number of seconds
         """
-        return self.prime().max_backoff_interval
+        return self.prepare().max_backoff_interval
 
     @property
     def stage(self):
@@ -396,9 +396,9 @@ class CompositeSessionContext(SessionContext):
                 set_attr = "filter" if attr == "sync_filter" else attr
                 setattr(context, set_attr, value)
 
-    def prime(self):
+    def prepare(self):
         """
-        Priming this context will return the current sub context that needs completion
+        Preparing this context will return the current sub context that needs completion
         """
         return self.children[self._counter % len(self.children)]
 
@@ -463,7 +463,7 @@ class CompositeSessionContext(SessionContext):
             self._stage = stage
 
         # when finishing a stage without an error, we'll increment the counter by one such that
-        # `prime` returns the next context to process
+        # `prepare` returns the next context to process
         if stage_status == transfer_statuses.COMPLETED:
             self._counter += 1
 
