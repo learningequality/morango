@@ -91,9 +91,6 @@ class TransactionIsolationTestCase(TransactionTestCase):
         """Don't setup fixtures for this test case"""
         pass
 
-    def _fixture_teardown(self):
-        pass
-
     @override_settings(MORANGO_TEST_POSTGRESQL=False)
     def test_begin_transaction(self):
         """
@@ -118,6 +115,12 @@ class TransactionIsolationTestCase(TransactionTestCase):
                 last_activity_timestamp=timezone.now(),
             )
             create_buffer_and_store_dummy_data(transfer_session.id)
+
+        # manual cleanup
+        self.assertNotEqual(0, Store.objects.all().count())
+        # will cascade delete
+        SyncSession.objects.all().delete()
+        Store.objects.all().delete()
 
     @pytest.mark.skipif(
         not getattr(settings, "MORANGO_TEST_POSTGRESQL", False), reason="Not supported"

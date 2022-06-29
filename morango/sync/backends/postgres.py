@@ -61,12 +61,25 @@ class SQLWrapper(BaseSQLWrapper):
                 if savepoint_id is not None:
                     raise MorangoDatabaseError("Unable to set transaction isolation when savepoints have been created")
 
-            existing_isolation_level = self.connection.connection.isolation_level
+            # ensure the postgres database wrapper loads the isolation level, which requires it to
+            # connection to the database.
+            # @see django.db.backends.postgresql.base.DatabaseWrapper.get_new_connection
+            self.connection.ensure_connection()
+            existing_autocommit = self.connection.autocommit
+            existing_isolation_level = self.connection.isolation_level
+
             try:
-                self.connection.connection.set_isolation_level(ISOLATION_LEVEL_REPEATABLE_READ)
+                self.connection.isolation_level = ISOLATION_LEVEL_REPEATABLE_READ
+                self.connection.connection.set_session(isolation_level=ISOLATION_LEVEL_REPEATABLE_READ, autocommit=False)
                 yield
             finally:
-                self.connection.connection.set_isolation_level(existing_isolation_level)
+                self.connection.isolation_level = existing_isolation_level
+                if existing_isolation_level is None:
+                    self.connection.connection.set_isolation_level(existing_isolation_level)
+                else:
+                    # this method cannot accept None values, as they will be ignored
+                    self.connection.connection.set_session(isolation_level=existing_isolation_level)
+                self.connection.connection.set_session(autocommit=existing_autocommit)
 
     def _prepare_with_values(self, name, fields, db_values):
         placeholder_list = self._create_placeholder_list(fields, db_values)
