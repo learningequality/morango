@@ -129,10 +129,10 @@ class SessionController(object):
         When invoking the middleware, if the status result is:
             PENDING: The controller will continue to invoke the middleware again when this method
                 is called repeatedly, until the status result changes
-            STARTED: The controller will not invoke any middleware until the the status changes,
+            STARTED: The controller will not invoke any middleware until the status changes,
                 and assumes the "started" operation will update the state itself
             COMPLETED: The controller will proceed to invoke the middleware for the next stage
-            ERRORED: The controller will not invoke any middleware until the the status changes,
+            ERRORED: The controller will not invoke any middleware until the status changes,
                 which would require codified resolution of the error outside of the controller
 
         :param target_stage: transfer_stage.* - The transfer stage to proceed to

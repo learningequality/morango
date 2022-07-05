@@ -1,3 +1,5 @@
+from contextlib import contextmanager
+
 from morango.models.core import Buffer
 from morango.models.core import RecordMaxCounter
 from morango.models.core import RecordMaxCounterBuffer
@@ -18,9 +20,10 @@ class BaseSQLWrapper(object):
         """
         return False
 
+    @contextmanager
     def _set_transaction_repeatable_read(self):
         """Set the current transaction isolation level"""
-        pass
+        yield
 
     def _create_placeholder_list(self, fields, db_values):
         # number of rows to update

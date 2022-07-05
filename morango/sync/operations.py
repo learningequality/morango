@@ -22,6 +22,7 @@ from morango.constants import transfer_stages
 from morango.constants import transfer_statuses
 from morango.constants.capabilities import ASYNC_OPERATIONS
 from morango.constants.capabilities import FSIC_V2_FORMAT
+from morango.errors import MorangoDatabaseError
 from morango.errors import MorangoInvalidFSICPartition
 from morango.errors import MorangoLimitExceeded
 from morango.errors import MorangoResumeSyncError
@@ -104,13 +105,17 @@ def _begin_transaction(sync_filter, isolated=False, shared_lock=False):
     :param shared_lock: Whether the advisory lock should be exclusive or shared
     :type shared_lock: bool
     """
-    # we can't allow django to create savepoints because we can't change the isolation level within
-    # subtransactions (after a savepoint has been created)
-    with transaction.atomic(savepoint=not isolated):
-        if isolated:
-            DBBackend._set_transaction_repeatable_read()
-        lock_partitions(DBBackend, sync_filter=sync_filter, shared=shared_lock)
-        yield
+    if isolated:
+        # when isolation is requested, we modify the transaction isolation of the connection for the
+        # duration of the transaction
+        with DBBackend._set_transaction_repeatable_read():
+            with transaction.atomic(savepoint=False):
+                lock_partitions(DBBackend, sync_filter=sync_filter, shared=shared_lock)
+                yield
+    else:
+        with transaction.atomic():
+            lock_partitions(DBBackend, sync_filter=sync_filter, shared=shared_lock)
+            yield
 
 
 def _serialize_into_store(profile, filter=None):
