@@ -2,6 +2,10 @@
 
 List of the most important changes for each release.
 
+## 0.6.14
+- Fixes issue that caused discrepancies between the client's and server's sync state
+- Fixes issue with transaction isolation persisting longer than intended
+
 ## 0.6.13
 - Capture and retry transaction isolation errors that occur when conflicting concurrent updates are made during the transaction
 
