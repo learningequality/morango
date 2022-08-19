@@ -19,7 +19,7 @@ from morango.utils import SETTINGS
 
 def _get_foreign_key_classes(m):
     return set(
-        [field.rel.to for field in m._meta.fields if isinstance(field, ForeignKey)]
+        [field.related_model for field in m._meta.fields if isinstance(field, ForeignKey)]
     )
 
 

@@ -32,7 +32,7 @@ class Facility(MorangoMPTTModel, FacilityDataSyncableModel):
 
     name = models.CharField(max_length=100)
     now_date = models.DateTimeField(default=timezone.now)
-    parent = TreeForeignKey('self', null=True, blank=True, related_name='children', db_index=True)
+    parent = TreeForeignKey('self', null=True, blank=True, related_name='children', db_index=True, on_delete=models.CASCADE)
 
     def calculate_source_id(self, *args, **kwargs):
         return self.name
@@ -42,7 +42,7 @@ class Facility(MorangoMPTTModel, FacilityDataSyncableModel):
 
     def clean_fields(self, *args, **kwargs):
         # reference parent here just to trigger a non-validation error to make sure we handle it
-        parent = self.parent
+        _ = self.parent
         super(Facility, self).clean_fields(*args, **kwargs)
 
 
@@ -69,7 +69,7 @@ class MyUser(AbstractBaseUser, FacilityDataSyncableModel):
         return '{id}:user'.format(id=self.ID_PLACEHOLDER)
 
     def has_morango_certificate_scope_permission(self, scope_definition_id, scope_params):
-        return self.is_superuser        
+        return self.is_superuser
 
     @staticmethod
     def compute_namespaced_id(partition_value, source_id_value, model_name):
@@ -80,7 +80,7 @@ class SummaryLog(FacilityDataSyncableModel):
     # Morango syncing settings
     morango_model_name = "contentsummarylog"
 
-    user = models.ForeignKey(MyUser)
+    user = models.ForeignKey(MyUser, on_delete=models.CASCADE)
     content_id = UUIDField(db_index=True, default=uuid.uuid4)
 
     def calculate_source_id(self, *args, **kwargs):
@@ -94,7 +94,7 @@ class InteractionLog(FacilityDataSyncableModel):
     # Morango syncing settings
     morango_model_name = "contentinteractionlog"
 
-    user = models.ForeignKey(MyUser, blank=True, null=True)
+    user = models.ForeignKey(MyUser, blank=True, null=True, on_delete=models.CASCADE)
     content_id = UUIDField(db_index=True, default=uuid.uuid4)
 
     def calculate_source_id(self, *args, **kwargs):

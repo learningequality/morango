@@ -35,13 +35,13 @@ class Certificate(mptt.models.MPTTModel, UUIDModelMixin):
 
     uuid_input_fields = ("public_key", "profile", "salt")
 
-    parent = models.ForeignKey("Certificate", blank=True, null=True)
+    parent = models.ForeignKey("Certificate", blank=True, null=True, on_delete=models.CASCADE)
 
     # the Morango profile with which this certificate is associated
     profile = models.CharField(max_length=20)
 
     # scope of this certificate, and version of the scope, along with associated params
-    scope_definition = models.ForeignKey("ScopeDefinition")
+    scope_definition = models.ForeignKey("ScopeDefinition", on_delete=models.CASCADE)
     scope_version = models.IntegerField()
     scope_params = (
         models.TextField()
