@@ -30,6 +30,9 @@ from django.utils.html import strip_tags
 cwd = os.getcwd()
 project_root = os.path.dirname(cwd)
 
+# Insert the testapp directory in tests to use the settings
+# from the test.
+sys.path.insert(0, os.path.join(project_root, "tests/testapp"))
 # Insert the project root dir as the first element in the PYTHONPATH.
 # This lets us ensure that the source package is imported, and that its
 # version is used.
@@ -37,7 +40,7 @@ sys.path.insert(0, project_root)
 
 import morango  # noqa
 
-os.environ.setdefault("DJANGO_SETTINGS_MODULE", "morango.settings")
+os.environ.setdefault("DJANGO_SETTINGS_MODULE", "testapp.settings")
 
 django.setup()
 
