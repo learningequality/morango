@@ -1,4 +1,5 @@
 import logging
+import math
 from time import sleep
 
 from morango.constants import transfer_stages
@@ -207,11 +208,16 @@ class SessionController(object):
         tries = 0
         context = context or self.context
         max_interval = max_interval or context.max_backoff_interval
+        # solve for the number of tries at which our sleep time will always be max_interval
+        max_interval_tries = math.ceil(math.log(max_interval / 0.3 + 1) / math.log(2))
 
         while result not in transfer_statuses.FINISHED_STATES:
             if tries > 0:
                 # exponential backoff up to max_interval
-                sleep(min(0.3 * (2 ** tries - 1), max_interval))
+                if tries >= max_interval_tries:
+                    sleep(max_interval)
+                else:
+                    sleep(0.3 * (2 ** tries - 1))
             result = self.proceed_to(target_stage, context=context)
             tries += 1
             if callable(callback):

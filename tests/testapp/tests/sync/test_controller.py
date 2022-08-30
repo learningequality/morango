@@ -795,6 +795,26 @@ class SessionControllerTestCase(SimpleTestCase):
             result = self.controller.proceed_to_and_wait_for(transfer_stages.CLEANUP, max_interval=0.1)
             self.assertEqual(result, transfer_statuses.ERRORED)
 
+    @mock.patch("morango.sync.controller.sleep")
+    def test_proceed_to_and_wait_for__tries_overflow(self, mock_sleep):
+        tries = [0]
+
+        def mock_proceed_to(*args, **kwargs):
+            # regression test against issue where 2**1024 or greater causes overflow error
+            # when multiplied by a float
+            if tries[0] > 1024:
+                return transfer_statuses.COMPLETED
+            tries[0] += 1
+            return transfer_statuses.PENDING
+
+        try:
+            with self._mock_method('proceed_to') as proceed_to:
+                proceed_to.side_effect = mock_proceed_to
+                result = self.controller.proceed_to_and_wait_for(transfer_stages.CLEANUP, max_interval=0.1)
+                self.assertEqual(result, transfer_statuses.COMPLETED)
+        except OverflowError:
+            self.fail("Overflow error raised!")
+
     def test_invoke_middleware(self):
         context = TestSessionContext()
         self.controller.context = context
