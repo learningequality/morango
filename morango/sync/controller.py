@@ -209,7 +209,7 @@ class SessionController(object):
         context = context or self.context
         max_interval = max_interval or context.max_backoff_interval
         # solve for the number of tries at which our sleep time will always be max_interval
-        max_interval_tries = round(1 + ((math.log(max_interval) - math.log(0.3)) / math.log(2)))
+        max_interval_tries = math.ceil(math.log(max_interval / 0.3 + 1) / math.log(2))
 
         while result not in transfer_statuses.FINISHED_STATES:
             if tries > 0:
