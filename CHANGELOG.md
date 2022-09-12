@@ -2,6 +2,9 @@
 
 List of the most important changes for each release.
 
+## O.6.15
+- Fixes issue casuing overflow error during lengthy syncs
+
 ## 0.6.14
 - Fixes issue that caused discrepancies between the client's and server's sync state
 - Fixes issue with transaction isolation persisting longer than intended
