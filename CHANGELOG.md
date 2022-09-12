@@ -2,7 +2,7 @@
 
 List of the most important changes for each release.
 
-## O.6.15
+## 0.6.15
 - Fixes issue casuing overflow error during lengthy syncs
 
 ## 0.6.14
