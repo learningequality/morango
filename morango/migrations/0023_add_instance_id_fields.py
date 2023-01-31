@@ -9,7 +9,7 @@ from django.db import models
 class Migration(migrations.Migration):
 
     dependencies = [
-        ('morango', '0022_auto_20230131_1853'),
+        ('morango', '0022_rename_instance_fields'),
     ]
 
     operations = [
