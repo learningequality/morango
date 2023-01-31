@@ -236,7 +236,7 @@ class SyncSessionViewSet(
 
     def create(self, request):
 
-        instance_id, _ = InstanceIDModel.get_or_create_current_instance()
+        server_instance, _ = InstanceIDModel.get_or_create_current_instance()
 
         # verify and save the certificate chain to our cert store
         try:
@@ -287,6 +287,12 @@ class SyncSessionViewSet(
                 "Nonce is not valid", status=status.HTTP_403_FORBIDDEN
             )
 
+        client_instance_json = request.data.get("instance")
+        client_instance_id = None
+        if client_instance_json:
+            client_instance = json.loads(client_instance_json)
+            client_instance_id = client_instance.get("id")
+
         # build the data to be used for creation the syncsession
         data = {
             "id": request.data.get("id"),
@@ -301,9 +307,11 @@ class SyncSessionViewSet(
             "connection_path": request.data.get("connection_path"),
             "client_ip": get_ip(request) or "",
             "server_ip": request.data.get("server_ip") or "",
-            "client_instance": request.data.get("instance"),
-            "server_instance": json.dumps(
-                serializers.InstanceIDSerializer(instance_id).data
+            "client_instance_id": client_instance_id,
+            "client_instance_json": client_instance_json,
+            "server_instance_id": server_instance.id,
+            "server_instance_json": json.dumps(
+                serializers.InstanceIDSerializer(server_instance).data
             ),
         }
 
@@ -313,7 +321,7 @@ class SyncSessionViewSet(
 
         resp_data = {
             "signature": server_cert.sign(message),
-            "server_instance": data["server_instance"],
+            "server_instance": data["server_instance_json"],
         }
 
         return response.Response(resp_data, status=status.HTTP_201_CREATED)
