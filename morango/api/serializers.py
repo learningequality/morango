@@ -60,6 +60,9 @@ class NonceSerializer(serializers.ModelSerializer):
 
 
 class SyncSessionSerializer(serializers.ModelSerializer):
+    client_instance = serializers.CharField(source='client_instance_json')
+    server_instance = serializers.CharField(source='server_instance_json')
+
     class Meta:
         model = SyncSession
         fields = (

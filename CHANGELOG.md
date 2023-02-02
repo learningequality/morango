@@ -2,8 +2,12 @@
 
 List of the most important changes for each release.
 
+## 0.6.16
+- Added dedicated `client_instance_id` and `server_instance_id` fields to `SyncSession`
+- Renamed `client_instance` and `server_instance` fields on `SyncSession` to `client_instance_json` and `server_instance_json` respectively
+
 ## 0.6.15
-- Fixes issue casuing overflow error during lengthy syncs
+- Fixes issue causing overflow error during lengthy syncs
 
 ## 0.6.14
 - Fixes issue that caused discrepancies between the client's and server's sync state

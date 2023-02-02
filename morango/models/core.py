@@ -240,9 +240,12 @@ class SyncSession(models.Model):
     client_ip = models.CharField(max_length=100, blank=True)
     server_ip = models.CharField(max_length=100, blank=True)
 
-    # serialized copies of the client and server instance model fields, for debugging/tracking purposes
-    client_instance = models.TextField(default="{}")
-    server_instance = models.TextField(default="{}")
+    # track the instance IDs for convenient querying, as well as serialized copies of
+    # the client and server instance model fields for debugging/tracking purposes
+    client_instance_id = models.UUIDField(null=True, blank=True)
+    client_instance_json = models.TextField(default="{}")
+    server_instance_id = models.UUIDField(null=True, blank=True)
+    server_instance_json = models.TextField(default="{}")
 
     # used to store other data we may need to know about this sync session
     extra_fields = models.TextField(default="{}")
@@ -252,11 +255,11 @@ class SyncSession(models.Model):
 
     @cached_property
     def client_instance_data(self):
-        return json.loads(self.client_instance)
+        return json.loads(self.client_instance_json)
 
     @cached_property
     def server_instance_data(self):
-        return json.loads(self.server_instance)
+        return json.loads(self.server_instance_json)
 
 
 class TransferSession(models.Model):

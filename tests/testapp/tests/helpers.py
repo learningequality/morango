@@ -10,6 +10,7 @@ import mock
 from django.core.serializers.json import DjangoJSONEncoder
 from django.db import connection
 from django.db.migrations.executor import MigrationExecutor
+from django.db.migrations.recorder import MigrationRecorder
 from django.test.testcases import LiveServerTestCase
 from django.utils import timezone
 from facility_profile.models import Facility
@@ -450,6 +451,14 @@ class TestMigrationsMixin(object):
     migrate_to = None
     app = None
 
+    @classmethod
+    def setUpClass(cls):
+        super(TestMigrationsMixin, cls).setUpClass()
+
+        # get the latest migration before starting
+        latest_migration = MigrationRecorder.Migration.objects.filter(app=cls.app).last()
+        cls.latest_migration = (cls.app, latest_migration.name)
+
     def setUp(self):
         assert (
             self.migrate_from and self.migrate_to
@@ -476,3 +485,12 @@ class TestMigrationsMixin(object):
 
     def setUpBeforeMigration(self, apps):
         pass
+
+    @classmethod
+    def tearDownClass(cls):
+        # revert migration back to latest migration
+        executor = MigrationExecutor(connection)
+        executor.loader.build_graph()
+        executor.migrate([cls.latest_migration])
+
+        super(TestMigrationsMixin, cls).tearDownClass()

@@ -225,6 +225,14 @@ class NetworkSyncConnection(Connection):
         if not server_cert.verify(message, session_resp.json().get("signature")):
             raise CertificateSignatureInvalid()
 
+        client_instance = InstanceIDModel.get_or_create_current_instance()[0]
+
+        server_instance_json = session_resp.json().get("server_instance") or "{}"
+        server_instance_id = None
+        if server_instance_json:
+            server_instance = json.loads(server_instance_json)
+            server_instance_id = server_instance.get("id")
+
         # build the data to be used for creating our own syncsession
         data = {
             "id": data["id"],
@@ -239,12 +247,14 @@ class NetworkSyncConnection(Connection):
             "connection_path": self.base_url,
             "client_ip": data["client_ip"],
             "server_ip": data["server_ip"],
-            "client_instance": json.dumps(
+            "client_instance_id": client_instance.id,
+            "client_instance_json": json.dumps(
                 InstanceIDSerializer(
-                    InstanceIDModel.get_or_create_current_instance()[0]
+                    client_instance
                 ).data
             ),
-            "server_instance": session_resp.json().get("server_instance") or "{}",
+            "server_instance_id": server_instance_id,
+            "server_instance_json": session_resp.json().get("server_instance") or "{}",
             "process_id": os.getpid(),
         }
         sync_session = SyncSession.objects.create(**data)
