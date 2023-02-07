@@ -1,2 +1,2 @@
 psycopg2==2.7.4
-cryptography==2.3
+cryptography==39.0.1
