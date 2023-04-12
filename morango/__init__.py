@@ -2,5 +2,9 @@ from __future__ import absolute_import
 from __future__ import print_function
 from __future__ import unicode_literals
 
+from .compat import monkey_patch_collections
+
 default_app_config = "morango.apps.MorangoConfig"
-__version__ = "0.6.16"
+__version__ = "0.7.0"
+
+monkey_patch_collections()
