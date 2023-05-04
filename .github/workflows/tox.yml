@@ -19,7 +19,7 @@ jobs:
         name: Python unit tests
         needs: pre_job
         if: ${{ needs.pre_job.outputs.should_skip != 'true' }}
-        runs-on: ubuntu-18.04
+        runs-on: ubuntu-20.04
         strategy:
             max-parallel: 5
             matrix:
@@ -46,7 +46,7 @@ jobs:
         name: Python unit tests + cryptography
         needs: pre_job
         if: ${{ needs.pre_job.outputs.should_skip != 'true' }}
-        runs-on: ubuntu-18.04
+        runs-on: ubuntu-20.04
         strategy:
             max-parallel: 5
             matrix:
@@ -79,7 +79,7 @@ jobs:
         name: Python postgres unit tests
         needs: pre_job
         if: ${{ needs.pre_job.outputs.should_skip != 'true' }}
-        runs-on: ubuntu-18.04
+        runs-on: ubuntu-20.04
         services:
             # Label used to access the service container
             postgres:
