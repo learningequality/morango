@@ -1,6 +1,5 @@
 import contextlib
 import json
-from test.support import EnvironmentVarGuard
 
 import mock
 import pytest
@@ -12,6 +11,7 @@ from facility_profile.models import MyUser
 from facility_profile.models import SummaryLog
 from requests.exceptions import Timeout
 
+from ..compat import EnvironmentVarGuard
 from morango.errors import MorangoError
 from morango.models.certificates import Certificate
 from morango.models.certificates import Filter
@@ -21,7 +21,6 @@ from morango.models.core import Buffer
 from morango.models.core import InstanceIDModel
 from morango.models.core import TransferSession
 from morango.sync.controller import MorangoProfileController
-
 
 SECOND_TEST_DATABASE = "default2"
 SECOND_SYSTEM_ID = "default2"
