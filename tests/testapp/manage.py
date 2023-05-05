@@ -2,6 +2,10 @@
 import os
 import sys
 
+import morango # noqa F401
+# Import morango to ensure that we do the monkey patching needed
+# for Django 1.11 to work with Python 3.10+
+
 if __name__ == "__main__":
     os.environ.setdefault("DJANGO_SETTINGS_MODULE", "testapp.settings")
 

@@ -1,7 +1,6 @@
 import contextlib
 import json
 import uuid
-from test.support import EnvironmentVarGuard
 
 import factory
 import mock
@@ -12,6 +11,7 @@ from facility_profile.models import InteractionLog
 from facility_profile.models import MyUser
 from facility_profile.models import SummaryLog
 
+from ..compat import EnvironmentVarGuard
 from ..helpers import serialized_facility_factory
 from ..helpers import TestSessionContext
 from morango.constants import transfer_stages
