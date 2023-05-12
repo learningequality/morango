@@ -23,4 +23,11 @@ The **database-max counter** table tracks a mapping of scope filter strings to l
 
 Morango sends **filter-max counters** to determine what data is already shared before syncing to efficiently determine the difference in data. Filter-max counters are the highest counters associated with every instance ID for both a filter and its supersets.
 
-Examples:
+**Example** (in pseudocode)
+
+#. Instance A creates a model, e.g.  exam_x. It registers it in its store:  ``{ "model" : "exam_x", "counter" : 1 }``
+#. It then syncs this exam to instance B and registers it in its store: ``{ "model" : "exam_x", "counter" : 1, "max_counters": { "B" : 1 }}``
+#. After some time, instance A updates the model because the exam changed. It registers this in the store: ``{ "model" : "exam_x", "counter" : 2, "max_counters": { "B" : 1 }}``
+#. The next time instance A syncs with instance B, it registers that the counter of ``exam_x`` is bigger than the ``max_counter`` of instance B.
+#. This triggers a transfer_session in which the model ``exam_x`` is transferred to instance B and then updated in the store: ``{ "model" : "exam_x", "counter" : 2, "max_counters": { "B" : 2 }}``
+
