@@ -1,30 +1,29 @@
 Dev Setup
 ========
 
-Installation
-Dependencies
+Before getting started, ensure you have the following dependencies installed:
 
-Tests
-SQLite
-Postgres
-Integrationtest->Kolibri
+- ``python`` (2.7 or 3.6 - 3.11)
+- ``swig``
+- ``openssl``
+- ``docker-compose`` (for testing against postgres backends)
 
-Soft-deletion
--------------
+Optionally create a virtual environment with your Python setup for this project, then run the following commands::
 
-Typically, deletion merely hides records, rather than actually erasing data.
-
-When a record for a subclass of ``SyncableModel`` is deleted, its ID is added to the ``DeletedModels`` table. When a subsequent serialization occurs, this information is used to turn on the ``deleted`` flag in the store for that record. When syncing with other Morango instances, the soft deletion will propagate to the store record of other instances.
-
-This is considered a "soft-delete" in the store because the data is not actually cleared.
+    pip install -r requirements/dev.txt
+    pip install -r requirements/test.txt
+    # for testing with postgres: this might require a local install of a postgres package
+    pip install -r requirements/postgres.txt
 
 
-Hard-deletion
--------------
+Testing
+-------
 
-There are times, such as GDPR removal requests, when it's necessary to actually to erase data.
+Tests can be launched as follows::
 
-This is handled using a ``HardDeletedModels`` table. Subclasses of ``SyncableModel`` should override the ``delete`` method to take a ``hard_delete`` boolean, and add the record to the ``HardDeletedModels`` table when this is passed.
+    make test
+    # launch against a postgres backend
+    make test-with-postgres
 
-On serialization, Morango clears the ``serialized`` field entry in the store for records in ``HardDeletedModels`` and turns on the ``hard_deleted`` flag. Upon syncing with other Morango instances, the hard deletion will propagate to the store record of other instances.
+The integration tests can be found in the `Kolibri repository <https://github.com/learningequality/kolibri/blob/develop/kolibri/core/auth/test/test_morango_integration.py>`_.
 
