@@ -22,3 +22,5 @@ Morango instances use **record-max counters** to keep track of the maximum versi
 The **database-max counter** table tracks a mapping of scope filter strings to lists of (instance ID, counter) pairs. These (instance ID, counter) pairs reflect different Morango instances that have been previously synced at some counter value.
 
 Morango sends **filter-max counters** to determine what data is already shared before syncing to efficiently determine the difference in data. Filter-max counters are the highest counters associated with every instance ID for both a filter and its supersets.
+
+Examples:
