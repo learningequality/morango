@@ -10,6 +10,7 @@ The **database ID** identifies the actual database being used by a Morango insta
 
 Each syncable model instance within the database is identified by a unique **model source ID**. This is calculated randomly by default and takes the calculated partition and Morango model name into account. Models can also define their own behavior by overriding ``calculate_source_id``.
 
+.. _counters:
 Counters
 --------
 

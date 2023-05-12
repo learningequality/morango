@@ -25,11 +25,13 @@ In the illustration below, the application layer (on the right) is where app dat
 
 .. image:: ./sync_process.png
 
-Store vs. Buffer
+**Store, Buffer \& Dirty Bit**
 
-Dirty-Bit
+Both store and buffer are tables in the backend database (generally either SQLite or Postgres). Check `Counters <../counters#counters>`__ for the update logic.
 
-Example:
+* **Store**: Holds every Serializable Models in the instance and synced instances including counters / maxcounters.
+* **Buffer**: Holds Serializable Models marked for transfer (sending or receiving) during a sync session.
+* **Dirty Bit**: Flag in store that is set, when a Serializable Model was updated during a dequeue from the Buffer. Gets unset as soon as the Django Model gets updated and is consistent with the store again.
 
 Orchestration
 -------------
