@@ -25,6 +25,11 @@ In the illustration below, the application layer (on the right) is where app dat
 
 .. image:: ./sync_process.png
 
+Store vs. Buffer
+
+Dirty-Bit
+
+Example:
 
 Orchestration
 -------------
