@@ -132,6 +132,8 @@ In Kolibri, on the ``FacilityDataset`` model, we generate the certificate as a f
 There's flexibility in the application layer for determining the validity of a root certificate, and it's specified on a per-profile basis. For the ``facilitydata`` profile, Kolibri leverages its ``auth`` models for this.
 
 
+.. _operations:
+
 Session controller, contexts, and operations
 --------------------------------------------
 
