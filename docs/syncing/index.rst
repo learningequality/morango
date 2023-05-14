@@ -13,6 +13,11 @@ The **outgoing buffer** and **incoming buffer** mirror the schema of the store. 
 Process
 -------
 
+By default, Kolibri instances are listening for other Kolibri instances in the same network, while at the same time, exposing an URL to which other instances can request a connection. The connection is established via a REST call to the endpoint. For the exact request flow, see the `documentation <https://kolibri-dev.readthedocs.io/en/develop/dataflow/index.html#data-flow>`_.
+After a connection request the two instances exchange certificates, which are used to authenticate the other instance. If the certificates are valid, the sync session is started. One instance is the **client** (i.e. Student) and the other is the **server** (i.
+e. Teacher). The server instance verifies that the client has the proper permissions to sync with it, and then the client and server exchange exactly the data, for which the client has the permissions to sync. The certificate verification takes place in `morango/api/permissions.py <https://github.com/learningequality/morango/blob/release-v0.6.x/morango/api/permissions.py>`_
+
+
 Syncing is the actual exchange of data in a sync session. The general steps for syncing data are:
 
 1. **Serialization** - serializing data that is associated with Django models in the Application layer, and storing it in JSON format in a record in the Store. The serialized data in the store is versioned via a counter (described in `Counters <../counters#counters>`__).
