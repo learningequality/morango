@@ -1,4 +1,4 @@
-SHELL := /bin/bash
+SHELL := bash
 
 .ONESHELL:
 .PHONY: help clean clean-pyc release dist
