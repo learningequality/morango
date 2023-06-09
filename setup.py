@@ -32,7 +32,7 @@ setup(
         "rsa>=3.4.2,<3.5",
         "djangorestframework==3.9.1",
         "django-ipware>=1.1.6,<1.2",
-        "future==0.16.0",
+        "future==0.18.3",
         "requests",
         "ifcfg",
     ],
