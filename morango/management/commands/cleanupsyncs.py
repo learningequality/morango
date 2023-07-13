@@ -1,5 +1,6 @@
 import datetime
 import logging
+import uuid
 
 from django.core.management.base import BaseCommand
 from django.db import transaction
@@ -29,6 +30,36 @@ class Command(BaseCommand):
             default=6,
             help="Number of hours of inactivity after which a session should be considered stale",
         )
+        parser.add_argument(
+            "--client_instance_id",
+            type=uuid.UUID,
+            default=None,
+            help="Filters the SyncSession models to those with matching 'client_instance_id'",
+        )
+        parser.add_argument(
+            "--server_instance_id",
+            type=uuid.UUID,
+            default=None,
+            help="Filters the SyncSession models to those with matching 'server_instance_id'",
+        )
+        parser.add_argument(
+            "--sync_filter",
+            type=str,
+            default=None,
+            help="Filters the TransferSession models to those with 'filters' starting with 'sync_filter'",
+        )
+        parser.add_argument(
+            "--push",
+            type=bool,
+            default=None,
+            help="Filters the TransferSession models to those with 'push' set to True",
+        )
+        parser.add_argument(
+            "--pull",
+            type=bool,
+            default=None,
+            help="Filters the TransferSession models to those with 'push' set to False",
+        )
 
     def handle(self, *args, **options):
 
@@ -41,12 +72,27 @@ class Command(BaseCommand):
         if options["ids"]:
             sync_sessions = sync_sessions.filter(id__in=options["ids"])
 
+        if options["client_instance_id"]:
+            sync_sessions = sync_sessions.filter(client_instance_id=options["client_instance_id"])
+
+        if options["server_instance_id"]:
+            sync_sessions = sync_sessions.filter(server_instance_id=options["server_instance_id"])
+
         # retrieve all sessions still marked as active but with no activity since the cutoff
         transfer_sessions = TransferSession.objects.filter(
             sync_session_id__in=sync_sessions.values("id"),
             active=True,
             last_activity_timestamp__lt=cutoff,
         )
+
+        if options["sync_filter"]:
+            transfer_sessions = transfer_sessions.filter(filter__startswith=options["sync_filter"])
+
+        if options["push"] == True and not options["pull"]:
+            transfer_sessions = transfer_sessions.filter(push=True)
+
+        if options["pull"] == True and not options["push"]:
+            transfer_sessions = transfer_sessions.filter(push=False)
 
         transfer_count = transfer_sessions.count()
 
