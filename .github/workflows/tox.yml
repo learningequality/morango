@@ -23,8 +23,7 @@ jobs:
         strategy:
             max-parallel: 5
             matrix:
-                python-version: [2.7, 3.6, 3.7, 3.8, 3.9, '3.10', '3.11']
-
+                python-version: [3.6, 3.7, 3.8, 3.9, '3.10', '3.11']
         steps:
             - uses: actions/checkout@v2
             - name: Set up Python ${{ matrix.python-version }}
@@ -42,6 +41,26 @@ jobs:
                   key: ${{ runner.os }}-tox-py${{ matrix.python-version }}-${{ hashFiles('setup.py', 'requirements/*.txt') }}
             - name: Test with tox
               run: tox -e py${{ matrix.python-version }}
+    unit_test27:
+        name: Python unit tests (2.7)
+        needs: pre_job
+        if: ${{ needs.pre_job.outputs.should_skip != 'true' }}
+        runs-on: ubuntu-20.04
+        container:
+            image: python:2.7.18-buster
+        steps:
+            - uses: actions/checkout@v2
+            - name: Install tox
+              run: |
+                python -m pip install --upgrade pip
+                pip install tox
+            - name: tox env cache
+              uses: actions/cache@v2
+              with:
+                  path: ${{ github.workspace }}/.tox/py2.7
+                  key: ${{ runner.os }}-tox-py2.7-${{ hashFiles('setup.py', 'requirements/*.txt') }}
+            - name: Test with tox
+              run: tox -e py2.7
     cryptography:
         name: Python unit tests + cryptography
         needs: pre_job
@@ -51,7 +70,7 @@ jobs:
             max-parallel: 5
             matrix:
                 # only crypto 3.3 seems to work
-                python-version: [ 2.7, 3.6, 3.7, 3.8, 3.9, '3.10', '3.11' ]
+                python-version: [ 3.6, 3.7, 3.8, 3.9, '3.10', '3.11' ]
                 crypto-version: [ 3.3 ]
 
         steps:
@@ -75,6 +94,30 @@ jobs:
                     key: ${{ runner.os }}-tox-py${{ matrix.python-version }}-crypto${{ matrix.crypto-version }}-${{ hashFiles('setup.py', 'requirements/*.txt') }}
             -   name: Test with tox
                 run: tox -e py${{ matrix.python-version }}-cryptography${{ matrix.crypto-version }}
+    cryptography27:
+        name: Python unit tests (2.7) + cryptography
+        needs: pre_job
+        if: ${{ needs.pre_job.outputs.should_skip != 'true' }}
+        runs-on: ubuntu-20.04
+        container:
+            image: python:2.7.18-buster
+        steps:
+            -   uses: actions/checkout@v2
+            -   name: Install system dependencies
+                run: |
+                    sudo apt-get -y -qq update
+                    sudo apt-get install -y openssl libssl-dev
+            -   name: Install tox
+                run: |
+                    python -m pip install --upgrade pip
+                    pip install tox
+            -   name: tox env cache
+                uses: actions/cache@v2
+                with:
+                    path: ${{ github.workspace }}/.tox/py2.7
+                    key: ${{ runner.os }}-tox-py2.7-crypto3.3-${{ hashFiles('setup.py', 'requirements/*.txt') }}
+            -   name: Test with tox
+                run: tox -e py2.7-cryptography3.3
     postgres:
         name: Python postgres unit tests
         needs: pre_job
