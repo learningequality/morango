@@ -1,8 +1,15 @@
 # Release Notes
 
 List of the most important changes for each release.
+## 0.7.1
+- Ported changes from 0.6.17
+
 ## 0.6.17
 - Added `client-instance-id`, `server-instance-id`, `sync-filter`, `push` and `pull` arguments to `cleanupsyncs` management command
+
+## 0.7.0
+- Dropped support for Python 3.4 and 3.5
+- Upgraded cryptography to latest version that still supports Python 2.7 - 3.3.2
 
 ## 0.6.16
 - Added dedicated `client_instance_id` and `server_instance_id` fields to `SyncSession`
