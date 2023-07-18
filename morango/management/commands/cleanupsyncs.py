@@ -31,19 +31,19 @@ class Command(BaseCommand):
             help="Number of hours of inactivity after which a session should be considered stale",
         )
         parser.add_argument(
-            "--client_instance_id",
+            "--client-instance-id",
             type=uuid.UUID,
             default=None,
             help="Filters the SyncSession models to those with matching 'client_instance_id'",
         )
         parser.add_argument(
-            "--server_instance_id",
+            "--server-instance-id",
             type=uuid.UUID,
             default=None,
             help="Filters the SyncSession models to those with matching 'server_instance_id'",
         )
         parser.add_argument(
-            "--sync_filter",
+            "--sync-filter",
             type=str,
             default=None,
             help="Filters the TransferSession models to those with 'filters' starting with 'sync_filter'",
