@@ -260,12 +260,16 @@ class NetworkSyncConnection(Connection):
         sync_session = SyncSession.objects.create(**data)
         return SyncSessionClient(self, sync_session)
 
-    def resume_sync_session(self, sync_session_id, chunk_size=None):
+    def resume_sync_session(self, sync_session_id, chunk_size=None, ignore_existing_process=False):
         """
         Resumes an existing sync session given an ID
 
         :param sync_session_id: The UUID of the `SyncSession` to resume
         :param chunk_size: An optional parameter specifying the size for each transferred chunk
+        :type chunk_size: int
+        :param ignore_existing_process:An optional parameter specifying whether to ignore an
+            existing active process ID
+        :type ignore_existing_process: bool
         :return: A SyncSessionClient instance
         :rtype: SyncSessionClient
         """
@@ -281,7 +285,8 @@ class NetworkSyncConnection(Connection):
 
         # check that process of existing session isn't still running
         if (
-            sync_session.process_id
+            not ignore_existing_process
+            and sync_session.process_id
             and sync_session.process_id != os.getpid()
             and pid_exists(sync_session.process_id)
         ):
