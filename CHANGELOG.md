@@ -3,6 +3,7 @@
 List of the most important changes for each release.
 ## 0.6.17
 - Added `client-instance-id`, `server-instance-id`, `sync-filter`, `push` and `pull` arguments to `cleanupsyncs` management command
+- Added option for resuming a sync to ignore the `SyncSession`'s existing `process_id`
 
 ## 0.6.16
 - Added dedicated `client_instance_id` and `server_instance_id` fields to `SyncSession`
