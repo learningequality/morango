@@ -14,8 +14,8 @@ on:
 
 jobs:
   deploy:
-   runs-on: ubuntu-22.04
-   steps:
+    runs-on: ubuntu-22.04
+    steps:
     - uses: actions/checkout@v2
     - name: Set up Python
       uses: actions/setup-python@v2
