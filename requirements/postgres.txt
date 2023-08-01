@@ -1,2 +1,2 @@
 psycopg2-binary==2.8.6
-cryptography==3.3.2
+cryptography==41.0.3
