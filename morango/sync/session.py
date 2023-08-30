@@ -1,11 +1,13 @@
 import logging
 
 from requests import exceptions
+from morango import __version__
 from requests.sessions import Session
 from requests.utils import super_len
 from requests.packages.urllib3.util.url import parse_url
 
 from morango.utils import serialize_capabilities_to_client_request
+from morango.utils import SETTINGS
 
 
 logger = logging.getLogger(__name__)
@@ -34,6 +36,15 @@ class SessionWrapper(Session):
 
     bytes_sent = 0
     bytes_received = 0
+
+    def __init__(self):
+        super(SessionWrapper, self).__init__()
+        user_agent_header = "morango/{}".format(__version__)
+        if SETTINGS.CUSTOM_INSTANCE_INFO is not None:
+            instances = list(SETTINGS.CUSTOM_INSTANCE_INFO)
+            if instances:
+                user_agent_header += " " + "{}/{}".format(instances[0], SETTINGS.CUSTOM_INSTANCE_INFO.get(instances[0]))
+        self.headers["User-Agent"] = "{} {}".format(user_agent_header, self.headers["User-Agent"])
 
     def request(self, method, url, **kwargs):
         response = None
