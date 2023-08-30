@@ -24,6 +24,19 @@ class SessionWrapperTestCase(TestCase):
         head_length = len("HTTP/1.1 200 OK") + _length_of_headers(headers)
         self.assertEqual(wrapper.bytes_received, 1024 + head_length)
 
+    def test_request_user_agent(self):
+        from morango import __version__ as morango_version
+        from requests import __version__ as requests_version
+
+        wrapper = SessionWrapper()
+        expected_user_agent = "morango/{} python-requests/{}".format(morango_version, requests_version)
+        self.assertEqual(wrapper.headers["User-Agent"], expected_user_agent)
+
+        with self.settings(CUSTOM_INSTANCE_INFO={"kolibri": "0.16.0"}):
+            wrapper = SessionWrapper()
+            expected_user_agent = "morango/{} kolibri/0.16.0 python-requests/{}".format(morango_version, requests_version)
+            self.assertEqual(wrapper.headers["User-Agent"], expected_user_agent)
+
     @mock.patch("morango.sync.session.logger")
     @mock.patch("morango.sync.session.Session.request")
     def test_request__not_ok(self, mocked_super_request, mocked_logger):
