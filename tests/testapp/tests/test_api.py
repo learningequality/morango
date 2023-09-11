@@ -1,7 +1,6 @@
 import json
 import sys
 import uuid
-from test.support import EnvironmentVarGuard
 
 from django.db import connection
 from django.test.utils import CaptureQueriesContext
@@ -13,6 +12,7 @@ from django.utils.functional import SimpleLazyObject
 from facility_profile.models import MyUser
 from rest_framework.test import APITestCase as BaseTestCase
 
+from .compat import EnvironmentVarGuard
 from morango.api.serializers import BufferSerializer
 from morango.api.serializers import CertificateSerializer
 from morango.api.serializers import InstanceIDSerializer
