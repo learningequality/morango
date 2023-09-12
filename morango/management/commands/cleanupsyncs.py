@@ -88,10 +88,10 @@ class Command(BaseCommand):
         if options["sync_filter"]:
             transfer_sessions = transfer_sessions.filter(filter__startswith=options["sync_filter"])
 
-        if options["push"] == True and not options["pull"]:
+        if options["push"] and not options["pull"]:
             transfer_sessions = transfer_sessions.filter(push=True)
 
-        if options["pull"] == True and not options["push"]:
+        if options["pull"] and not options["push"]:
             transfer_sessions = transfer_sessions.filter(push=False)
 
         transfer_count = transfer_sessions.count()

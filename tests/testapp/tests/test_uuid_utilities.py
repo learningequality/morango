@@ -1,14 +1,14 @@
 import hashlib
-import mock
 import sys
 import uuid
 
+import mock
 from django.test import TestCase
 from facility_profile.models import Facility
 from facility_profile.models import InteractionLog
 from facility_profile.models import MyUser
-from test.support import EnvironmentVarGuard
 
+from .compat import EnvironmentVarGuard
 from morango.errors import InvalidMorangoSourceId
 from morango.models.core import DatabaseIDModel
 from morango.models.core import InstanceIDModel
@@ -157,9 +157,9 @@ class InstanceIDModelTestCase(TestCase):
             env["MORANGO_SYSTEM_ID"] = "magicsysid"
 
             DatabaseIDModel.objects.all().update(current=False)
-            database_id = DatabaseIDModel.objects.create(
+            DatabaseIDModel.objects.create(
                 id="7fe445b75cea11858c00fb97bdee8878", current=True
-            ).id
+            )
 
             self.assertEqual(get_0_5_system_id(), "54940f560a55bbf7d86b")
             self.assertEqual(get_0_5_mac_address(), "804f4c20d3b2b5a29b95")
@@ -196,7 +196,6 @@ class InstanceIDModelTestCase(TestCase):
             expected_id = sha2_uuid(database_id, system_id, node_id)
 
             self.assertEqual(instance.id, expected_id)
-
 
     @mock.patch(
         "ifcfg.interfaces",

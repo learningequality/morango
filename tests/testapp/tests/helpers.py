@@ -3,7 +3,6 @@ Helper functions for use across syncing related functionality.
 """
 import json
 import uuid
-from test.support import EnvironmentVarGuard
 
 import factory
 import mock
@@ -18,6 +17,7 @@ from facility_profile.models import InteractionLog
 from facility_profile.models import MyUser
 from facility_profile.models import SummaryLog
 
+from .compat import EnvironmentVarGuard
 from morango.api.serializers import BufferSerializer
 from morango.models.core import AbstractStore
 from morango.models.core import Buffer
