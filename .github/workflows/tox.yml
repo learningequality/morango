@@ -113,7 +113,11 @@ jobs:
         strategy:
             max-parallel: 3
             matrix:
-                python-version: [2.7, 3.4, 3.5]
+                # Packages are no longer available for the distribution that comes with the
+                # python:3.4 image, so we can't install the necessary dependencies. Eventually,
+                # this will happen to the others as well.
+                # EOL: [3.4]
+                python-version: [2.7, 3.5]
         container:
             image: python:${{ matrix.python-version }}
         steps:
