@@ -181,6 +181,14 @@ class SyncSignal(object):
         """
         self._handlers.append(handler)
 
+    def disconnect(self, handler):
+        """
+        Removes a callable handler that would be called when the signal is fired.
+
+        :type handler: function
+        """
+        self._handlers.remove(handler)
+
     def fire(self, **kwargs):
         """
         Fires the handler functions connected via `connect`.

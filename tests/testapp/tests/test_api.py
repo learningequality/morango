@@ -10,12 +10,14 @@ from django.urls.exceptions import NoReverseMatch
 from django.utils import timezone
 from django.utils.functional import SimpleLazyObject
 from facility_profile.models import MyUser
+from mock import Mock
 from rest_framework.test import APITestCase as BaseTestCase
 
 from .compat import EnvironmentVarGuard
 from morango.api.serializers import BufferSerializer
 from morango.api.serializers import CertificateSerializer
 from morango.api.serializers import InstanceIDSerializer
+from morango.api.viewsets import session_controller
 from morango.constants import transfer_stages
 from morango.constants import transfer_statuses
 from morango.models.certificates import Certificate
@@ -789,6 +791,19 @@ class TransferSessionEndpointTestCase(CertificateTestCaseMixin, APITestCase):
             expected_message="Requested syncsession does not exist",
             syncsession=syncsession,
         )
+
+    def test_transfersession_creation_calls_initializing_started_handler(self):
+        mock = Mock()
+        session_controller.signals.initializing.started.connect(mock)
+        try:
+
+            self.make_transfersession_creation_request(
+                filter=str(self.sub_subset_cert1_with_key.get_scope().write_filter),
+                push=True,
+            )
+            self.assertTrue(mock.called)
+        finally:
+            session_controller.signals.initializing.started.disconnect(mock)
 
     def test_transfersession_can_be_deleted(self):
 

@@ -383,6 +383,10 @@ class TransferSessionViewSet(
             is_push=is_a_push,
         )
 
+        # Manually fire the initializing started signal, as the default context
+        # stage is initializing, so otherwise this never gets fired.
+        session_controller.signals.initializing.started.fire(context=context)
+
         # If both client and ourselves allow async, we just return accepted status, and the client
         # should PATCH the transfer_session to the appropriate stage. If not async, we wait until
         # queuing is complete
