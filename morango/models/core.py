@@ -17,6 +17,7 @@ from django.db.models import F
 from django.db.models import Func
 from django.db.models import Max
 from django.db.models import Q
+from django.db.models import signals
 from django.db.models import TextField
 from django.db.models import Value
 from django.db.models.deletion import Collector
@@ -475,7 +476,11 @@ class Store(AbstractStore):
                 except klass_model.DoesNotExist:
                     pass
             else:
-                klass_model.objects.filter(id=self.id).delete()
+                # Import here to avoid circular import, as the utils module
+                # imports core models.
+                from morango.sync.utils import mute_signals
+                with mute_signals(signals.post_delete):
+                    klass_model.objects.filter(id=self.id).delete()
             return None, deferred_fks
         else:
             # load model into memory
