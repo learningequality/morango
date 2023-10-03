@@ -351,3 +351,46 @@ class PushPullClientTestCase(LiveServerTestCase):
         with second_environment():
             self.assertEqual(5, SummaryLog.objects.filter(user=self.remote_user).count())
             self.assertEqual(5, InteractionLog.objects.filter(user=self.remote_user).count())
+
+    def test_create_sync_delete_sync_recreate_sync(self):
+        with second_environment():
+            SummaryLog.objects.create(user=self.remote_user)
+            summ_log = SummaryLog.objects.first()
+            summ_log_id = summ_log.id
+            content_id = summ_log.content_id
+
+        self.assertEqual(0, SummaryLog.objects.filter(id=summ_log_id).count())
+
+        # first pull
+        pull_client = self.client.get_pull_client()
+        pull_client.initialize(self.filter)
+        transfer_session = pull_client.context.transfer_session
+        self.assertEqual(1, transfer_session.records_total)
+        self.assertEqual(0, transfer_session.records_transferred)
+        pull_client.run()
+        self.assertEqual(1, transfer_session.records_transferred)
+        pull_client.finalize()
+
+        # sanity check pull worked
+        self.assertEqual(1, SummaryLog.objects.filter(id=summ_log_id).count())
+
+        with second_environment():
+            SummaryLog.objects.get(id=summ_log_id).delete()
+
+        # now do another pull, which should pull in the deletion
+        second_pull_client = self.client.get_pull_client()
+        second_pull_client.initialize(self.filter)
+        second_pull_client.run()
+        second_pull_client.finalize()
+        self.assertEqual(0, SummaryLog.objects.filter(id=summ_log_id).count())
+
+        with second_environment():
+            sum_log = SummaryLog.objects.create(user=self.remote_user, content_id=content_id)
+            self.assertEqual(sum_log.id, summ_log_id)
+
+        # now do another pull, which should pull in the recreation
+        third_pull_client = self.client.get_pull_client()
+        third_pull_client.initialize(self.filter)
+        third_pull_client.run()
+        third_pull_client.finalize()
+        self.assertEqual(1, SummaryLog.objects.filter(id=summ_log_id).count())
