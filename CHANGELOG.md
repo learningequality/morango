@@ -1,6 +1,10 @@
 # Release Notes
 
 List of the most important changes for each release.
+
+## 0.6.18
+- Prevent creation of Deleted and HardDeleted models during deserialization to allow propagation of syncable objects that are recreated after a previous deletion without causing a merge conflict.
+
 ## 0.6.17
 - Added `client-instance-id`, `server-instance-id`, `sync-filter`, `push` and `pull` arguments to `cleanupsyncs` management command
 - Added option for resuming a sync to ignore the `SyncSession`'s existing `process_id`
