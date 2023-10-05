@@ -18,7 +18,6 @@ from morango.constants import transfer_stages
 from morango.constants import transfer_statuses
 from morango.models.certificates import Filter
 from morango.models.core import DeletedModels
-from morango.models.core import HardDeletedModels
 from morango.models.core import InstanceIDModel
 from morango.models.core import RecordMaxCounter
 from morango.models.core import Store
@@ -287,7 +286,7 @@ class SerializeIntoStoreTestCase(TestCase):
         )
         # make sure hard_deleted propagates to related models even if they are not hard_deleted
         self.mc.deserialize_from_store()
-        self.assertTrue(HardDeletedModels.objects.filter(id=log.id).exists())
+        self.assertFalse(SummaryLog.objects.filter(id=log.id).exists())
 
 
 class RecordMaxCounterUpdatesDuringSerialization(TestCase):
