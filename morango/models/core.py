@@ -469,18 +469,14 @@ class Store(AbstractStore):
         klass_model = syncable_models.get_model(self.profile, self.model_name)
         # if store model marked as deleted, attempt to delete in app layer
         if self.deleted:
-            # if hard deleted, propagate to related models
-            if self.hard_deleted:
-                try:
-                    klass_model.objects.get(id=self.id).delete(hard_delete=True)
-                except klass_model.DoesNotExist:
-                    pass
-            else:
-                # Import here to avoid circular import, as the utils module
-                # imports core models.
-                from morango.sync.utils import mute_signals
-                with mute_signals(signals.post_delete):
-                    klass_model.objects.filter(id=self.id).delete()
+            # Don't differentiate between deletion and hard deletion here,
+            # as we don't want to add additional tracking for models in either case,
+            # just to actually delete them.
+            # Import here to avoid circular import, as the utils module
+            # imports core models.
+            from morango.sync.utils import mute_signals
+            with mute_signals(signals.post_delete):
+                klass_model.objects.filter(id=self.id).delete()
             return None, deferred_fks
         else:
             # load model into memory
