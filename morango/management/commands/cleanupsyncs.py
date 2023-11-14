@@ -68,7 +68,8 @@ class Command(BaseCommand):
 
         sync_sessions = SyncSession.objects.filter(active=True)
 
-        # if ids arg was passed, filter down sessions to only those IDs if included by expiration filter
+        # if ids arg was passed, filter down sessions to only those IDs
+        # if included by expiration filter
         if options["ids"]:
             sync_sessions = sync_sessions.filter(id__in=options["ids"])
 
@@ -97,8 +98,7 @@ class Command(BaseCommand):
         transfer_count = transfer_sessions.count()
 
         # loop over the stale sessions one by one to close them out
-        for i in range(transfer_count):
-            transfer_session = transfer_sessions[0]
+        for i, transfer_session in enumerate(transfer_sessions):
             logger.info(
                 "TransferSession {} of {}: deleting {} Buffers and {} RMC Buffers...".format(
                     i + 1,
@@ -114,17 +114,21 @@ class Command(BaseCommand):
                 transfer_session.active = False
                 transfer_session.save()
 
+        # in order to close a sync session, it must have no active transfer sessions
+        # and must have no activity since the cutoff
+        sync_sessions = sync_sessions.filter(
+            last_activity_timestamp__lt=cutoff,
+        ).exclude(
+            transfersession__active=True,
+        )
         sync_count = sync_sessions.count()
 
-        # finally loop over sync sessions and close out if there are no other active transfer sessions
-        for i in range(sync_count):
-            sync_session = sync_sessions[0]
-            if not sync_session.transfersession_set.filter(active=True).exists():
-                logger.info(
-                    "Closing SyncSession {} of {}".format(
-                        i + 1,
-                        sync_count,
-                    )
+        for i, sync_session in enumerate(sync_sessions):
+            logger.info(
+                "Closing SyncSession {} of {}".format(
+                    i + 1,
+                    sync_count,
                 )
-                sync_session.active = False
-                sync_session.save()
+            )
+            sync_session.active = False
+            sync_session.save()
