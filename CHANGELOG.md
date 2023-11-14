@@ -2,6 +2,10 @@
 
 List of the most important changes for each release.
 
+## 0.6.19
+- The `cleanupsyncs` management command now only cleans up sync sessions if also inactive for `expiration` amount of time
+- Fixes issue accessing index on queryset in `cleanupsyncs` management command
+
 ## 0.6.18
 - Prevent creation of Deleted and HardDeleted models during deserialization to allow propagation of syncable objects that are recreated after a previous deletion without causing a merge conflict.
 

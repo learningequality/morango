@@ -136,9 +136,11 @@ class CleanupSyncsTestCase(TestCase):
         syncsession_new, transfersession_new = _create_sessions(push=False)
         call_command("cleanupsyncs", pull=not transfersession_old.push, expiration=0)
         self.assertTransferSessionIsCleared(transfersession_old)
-        self.assertSyncSessionIsActive(syncsession_old)
+        self.assertSyncSessionIsNotActive(syncsession_old)
         self.assertTransferSessionIsCleared(transfersession_new)
-        self.assertSyncSessionIsActive(syncsession_new)
+        self.assertSyncSessionIsNotActive(syncsession_new)
+        self.assertTransferSessionIsNotCleared(self.transfersession_old)
+        self.assertTransferSessionIsNotCleared(self.transfersession_new)
 
     def test_multiple_ids_as_list(self):
         ids = [self.syncsession_old.id, self.syncsession_new.id]
@@ -147,3 +149,29 @@ class CleanupSyncsTestCase(TestCase):
         self.assertSyncSessionIsNotActive(self.syncsession_old)
         self.assertTransferSessionIsCleared(self.transfersession_new)
         self.assertSyncSessionIsNotActive(self.syncsession_new)
+
+    def test_sync_session_cutoff(self):
+        """
+        Test that sync sessions are not cleared even if they have no active transfer sessions,
+        if they are still within the cutoff window.
+        """
+        sync_session, transfer_session = _create_sessions(34)
+        # recent successful transfer session
+        transfer_session.active = False
+        transfer_session.save()
+        # create old incomplete transfer session for same session
+        _, old_transfer_session = _create_sessions(38, sync_session=sync_session)
+
+        call_command("cleanupsyncs", expiration=36)
+        self.assertSyncSessionIsActive(sync_session)
+
+    def test_sync_session_cleanup_with_active_xfer(self):
+        sync_session, transfer_session = _create_sessions(38)
+        # recent successful transfer session
+        transfer_session.active = False
+        transfer_session.save()
+        # create old incomplete transfer session for same session
+        _, new_transfer_session = _create_sessions(34, sync_session=sync_session)
+
+        call_command("cleanupsyncs", expiration=36)
+        self.assertSyncSessionIsActive(sync_session)
