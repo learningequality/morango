@@ -164,3 +164,14 @@ class CleanupSyncsTestCase(TestCase):
 
         call_command("cleanupsyncs", expiration=36)
         self.assertSyncSessionIsActive(sync_session)
+
+    def test_sync_session_cleanup_with_active_xfer(self):
+        sync_session, transfer_session = _create_sessions(38)
+        # recent successful transfer session
+        transfer_session.active = False
+        transfer_session.save()
+        # create old incomplete transfer session for same session
+        _, new_transfer_session = _create_sessions(34, sync_session=sync_session)
+
+        call_command("cleanupsyncs", expiration=36)
+        self.assertSyncSessionIsActive(sync_session)
