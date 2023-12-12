@@ -275,6 +275,30 @@ class NetworkSyncConnectionTestCase(LiveServerTestCase):
                 with self.assertRaises(MorangoResumeSyncError):
                     self.network_connection.resume_sync_session(sync_session.id)
 
+    @mock.patch.object(SyncSession.objects, "create")
+    def test_resume_sync_session__still_running_but_ignore(self, mock_create):
+        def create(**data):
+            """Trickery to get around same DB being used for both client and server"""
+            return SyncSession.objects.get(pk=data.get("id"))
+
+        mock_create.side_effect = create
+
+        # first create a session
+        client = self.network_connection.create_sync_session(self.subset_cert, self.root_cert)
+        # reset process ID
+        sync_session = client.sync_session
+        sync_session.process_id = 123000111
+        sync_session.save()
+
+        with mock.patch("morango.sync.syncsession.pid_exists") as mock_pid_exists:
+            mock_pid_exists.return_value = True
+            with mock.patch("morango.sync.syncsession.os.getpid") as mock_getpid:
+                mock_getpid.return_value = 245111222
+                resume_client = self.network_connection.resume_sync_session(
+                    sync_session.id, ignore_existing_process=True
+                )
+                self.assertEqual(sync_session.id, resume_client.sync_session.id)
+
 
 class SyncSessionClientTestCase(BaseClientTestCase):
     def test_get_pull_client(self):

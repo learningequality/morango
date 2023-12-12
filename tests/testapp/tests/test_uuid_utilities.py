@@ -159,7 +159,7 @@ class InstanceIDModelTestCase(TestCase):
             DatabaseIDModel.objects.all().update(current=False)
             DatabaseIDModel.objects.create(
                 id="7fe445b75cea11858c00fb97bdee8878", current=True
-            ).id
+            )
 
             self.assertEqual(get_0_5_system_id(), "54940f560a55bbf7d86b")
             self.assertEqual(get_0_5_mac_address(), "804f4c20d3b2b5a29b95")
