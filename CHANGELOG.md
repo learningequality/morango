@@ -2,6 +2,11 @@
 
 List of the most important changes for each release.
 
+## 0.7.1
+ - Supersedes 0.7.0
+ - Drops support for Python 3.4 and 3.5
+ - Upgrades cryptography library to 3.3.2, the latest version that supports Python 2.7
+
 ## 0.6.19
 - The `cleanupsyncs` management command now only cleans up sync sessions if also inactive for `expiration` amount of time
 - Fixes issue accessing index on queryset in `cleanupsyncs` management command
