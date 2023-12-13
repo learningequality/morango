@@ -2,6 +2,20 @@
 
 List of the most important changes for each release.
 
+## 0.6.19
+- The `cleanupsyncs` management command now only cleans up sync sessions if also inactive for `expiration` amount of time
+- Fixes issue accessing index on queryset in `cleanupsyncs` management command
+
+## 0.6.18
+- Prevent creation of Deleted and HardDeleted models during deserialization to allow propagation of syncable objects that are recreated after a previous deletion without causing a merge conflict.
+
+## 0.6.17
+- Added `client-instance-id`, `server-instance-id`, `sync-filter`, `push` and `pull` arguments to `cleanupsyncs` management command
+- Added option for resuming a sync to ignore the `SyncSession`'s existing `process_id`
+- Added custom user agent to sync HTTP requests
+- Fixed documentation build issues
+- Makefile no longer defines shell with explicit path
+
 ## 0.6.16
 - Added dedicated `client_instance_id` and `server_instance_id` fields to `SyncSession`
 - Renamed `client_instance` and `server_instance` fields on `SyncSession` to `client_instance_json` and `server_instance_json` respectively
