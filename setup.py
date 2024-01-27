@@ -44,7 +44,6 @@ setup(
         'License :: OSI Approved :: MIT License',
         'Natural Language :: English',
         'Development Status :: 4 - Beta',
-        'Programming Language :: Python :: 2.7',
         'Programming Language :: Python :: 3.6',
         'Programming Language :: Python :: 3.7',
         'Programming Language :: Python :: 3.8',
@@ -52,4 +51,5 @@ setup(
         'Programming Language :: Python :: 3.10',
         'Programming Language :: Python :: 3.11',
     ],
+    python_requires=">=3.6,  <3.12",
 )
