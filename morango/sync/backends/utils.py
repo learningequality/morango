@@ -1,7 +1,6 @@
 import sqlite3
+from functools import lru_cache
 from importlib import import_module
-
-from django.utils.lru_cache import lru_cache
 
 from morango.errors import MorangoError
 
@@ -110,15 +109,15 @@ class TemporaryTable(object):
         """
         fields = []
         params = []
-        with self.connection.schema_editor() as schema_editor:
-            for field in self.fields:
-                # generates the SQL expression for the table column
-                field_sql, field_params = schema_editor.column_sql(
-                    self, field, include_default=True
-                )
-                field_sql_name = self.connection.ops.quote_name(field.column)
-                fields.append("{name} {sql}".format(name=field_sql_name, sql=field_sql))
-                params.extend(field_params)
+        schema_editor = self.connection.schema_editor()
+        for field in self.fields:
+            # generates the SQL expression for the table column
+            field_sql, field_params = schema_editor.column_sql(
+                self, field, include_default=True
+            )
+            field_sql_name = self.connection.ops.quote_name(field.column)
+            fields.append("{name} {sql}".format(name=field_sql_name, sql=field_sql))
+            params.extend(field_params)
         with self.connection.cursor() as c:
             self.backend._create_temporary_table(c, self.sql_name, fields, params)
 

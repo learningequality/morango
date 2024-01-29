@@ -418,7 +418,7 @@ class StoreQueryset(models.QuerySet):
             self.annotate(id_cast=Cast("id", TextField()))
             # remove dashes from char uuid
             .annotate(
-                fixed_id=Func(F("id_cast"), Value("-"), Value(""), function="replace")
+                fixed_id=Func(F("id_cast"), Value("-"), Value(""), function="replace", output_field=TextField())
             )
             # return as list
             .values_list("fixed_id", flat=True)
