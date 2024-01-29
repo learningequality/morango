@@ -344,7 +344,7 @@ class RSAKeyBaseField(models.TextField):
 
 
 class PublicKeyField(RSAKeyBaseField):
-    def from_db_value(self, value, expression, connection, context):
+    def from_db_value(self, value, expression, connection):
         if not value:
             return None
         return Key(public_key_string=value)
@@ -363,7 +363,7 @@ class PublicKeyField(RSAKeyBaseField):
 
 
 class PrivateKeyField(RSAKeyBaseField):
-    def from_db_value(self, value, expression, connection, context):
+    def from_db_value(self, value, expression, connection):
         if not value:
             return None
         return Key(private_key_string=value)
