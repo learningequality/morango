@@ -23,7 +23,6 @@ class SerializationTestCase(TestCase):
         for f in Facility._meta.concrete_fields:
             # we remove DateTimeField (for now) from this test because serializing and deserializing loses units of precision
             if isinstance(f, models.DateTimeField) or \
-                    f.attname in class_model._internal_mptt_fields_not_to_serialize or \
                     f.attname in class_model._morango_internal_fields_not_to_serialize:
                 continue
             self.assertEqual(getattr(self.bob, f.attname), getattr(self.bob_copy, f.attname))

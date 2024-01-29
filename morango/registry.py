@@ -7,7 +7,6 @@ import sys
 from collections import OrderedDict
 
 from django.db.models.fields.related import ForeignKey
-from django.utils import six
 
 from morango.constants import transfer_stages
 from morango.errors import InvalidMorangoModelConfiguration
@@ -111,36 +110,6 @@ class SyncableModelRegistry(object):
                     raise InvalidMorangoModelConfiguration(
                         "Syncing models with more than 1 self referential ForeignKey is not supported."
                     )
-                try:
-                    from mptt import models
-                    from morango.models.morango_mptt import (
-                        MorangoMPTTModel,
-                        MorangoMPTTTreeManager,
-                        MorangoTreeQuerySet,
-                    )
-
-                    # mptt syncable model checks
-                    if issubclass(model, models.MPTTModel):
-                        if not issubclass(model, MorangoMPTTModel):
-                            raise InvalidMorangoModelConfiguration(
-                                "{} that inherits from MPTTModel, should instead inherit from MorangoMPTTModel.".format(
-                                    name
-                                )
-                            )
-                        if not isinstance(model.objects, MorangoMPTTTreeManager):
-                            raise InvalidMorangoModelConfiguration(
-                                "Manager for {} must inherit from MorangoMPTTTreeManager.".format(
-                                    name
-                                )
-                            )
-                        if not isinstance(model.objects.none(), MorangoTreeQuerySet):
-                            raise InvalidMorangoModelConfiguration(
-                                "Queryset for {} model must inherit from MorangoTreeQuerySet.".format(
-                                    name
-                                )
-                            )
-                except ImportError:
-                    pass
                 # syncable model checks
                 if not isinstance(model.objects, SyncableModelManager):
                     raise InvalidMorangoModelConfiguration(
@@ -178,7 +147,7 @@ class SyncableModelRegistry(object):
                     self._insert_model_in_dependency_order(model, profile)
 
         # for each profile, create a dict mapping from morango_model_name to model class
-        for profile, model_list in six.iteritems(self.profile_models):
+        for profile, model_list in self.profile_models.items():
             mapping = OrderedDict()
             for model in model_list:
                 mapping[model.morango_model_name] = model

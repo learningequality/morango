@@ -4,12 +4,10 @@ from django.contrib.auth.models import AbstractBaseUser
 from django.contrib.auth.models import UserManager
 from django.db import models
 from django.utils import timezone
-from mptt.models import TreeForeignKey
 
 from morango.models.core import SyncableModel
 from morango.models.fields.uuids import UUIDField
 from morango.models.manager import SyncableModelManager
-from morango.models.morango_mptt import MorangoMPTTModel
 
 
 class FacilityDataSyncableModel(SyncableModel):
@@ -23,14 +21,14 @@ class SyncableUserModelManager(SyncableModelManager, UserManager):
     pass
 
 
-class Facility(MorangoMPTTModel, FacilityDataSyncableModel):
+class Facility(FacilityDataSyncableModel):
 
     # Morango syncing settings
     morango_model_name = "facility"
 
     name = models.CharField(max_length=100)
     now_date = models.DateTimeField(default=timezone.now)
-    parent = TreeForeignKey('self', null=True, blank=True, related_name='children', db_index=True, on_delete=models.CASCADE)
+    parent = models.ForeignKey('self', null=True, blank=True, related_name='children', db_index=True, on_delete=models.CASCADE)
 
     def calculate_source_id(self, *args, **kwargs):
         return self.name
@@ -100,43 +98,3 @@ class InteractionLog(FacilityDataSyncableModel):
 
     def calculate_partition(self, *args, **kwargs):
         return '{user_id}:user:interaction'.format(user_id=self.user.id)
-
-
-class ProxyParent(MorangoMPTTModel):
-
-    kind = models.CharField(max_length=20)
-
-    def save(self, *args, **kwargs):
-        self._ensure_kind()
-        super(ProxyParent, self).save(*args, **kwargs)
-
-    def _ensure_kind(self):
-        if self._KIND:
-            self.kind = self._KIND
-
-    def calculate_source_id(self, *args, **kwargs):
-        return None
-
-    def calculate_partition(self, *args, **kwargs):
-        return ''
-
-
-class ProxyManager(models.Manager):
-    pass
-
-
-class ProxyModel(ProxyParent):
-
-    morango_model_name = 'proxy'
-    _KIND = 'proxy'
-
-    objects = ProxyManager()
-
-    class Meta:
-        proxy = True
-
-    def calculate_source_id(self, *args, **kwargs):
-        return None
-
-    def calculate_partition(self, *args, **kwargs):
-        return ''

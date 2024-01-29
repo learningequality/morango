@@ -1,14 +1,13 @@
 import os
-import six
 from importlib import import_module
 
 from django.conf import settings
 
 from morango.constants import settings as default_settings
 from morango.constants.capabilities import ALLOW_CERTIFICATE_PUSHING
-from morango.constants.capabilities import GZIP_BUFFER_POST
 from morango.constants.capabilities import ASYNC_OPERATIONS
 from morango.constants.capabilities import FSIC_V2_FORMAT
+from morango.constants.capabilities import GZIP_BUFFER_POST
 
 
 def do_import(import_string):
@@ -32,7 +31,7 @@ class Settings(object):
     def __getattribute__(self, key):
         """Coalesces settings with the defaults"""
         value = getattr(settings, key, getattr(default_settings, key, None))
-        if key == "MORANGO_INSTANCE_INFO" and isinstance(value, six.string_types):
+        if key == "MORANGO_INSTANCE_INFO" and isinstance(value, str):
             value = dict(do_import(value))
         return value
 
