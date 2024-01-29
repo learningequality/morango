@@ -1,9 +1,5 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
-from __future__ import absolute_import
-from __future__ import print_function
-from __future__ import unicode_literals
-
 import io
 
 from setuptools import find_packages
@@ -32,7 +28,6 @@ setup(
         "rsa>=3.4.2,<3.5",
         "djangorestframework==3.9.1",
         "django-ipware>=1.1.6,<1.2",
-        "future==0.16.0",
         "requests",
         "ifcfg",
     ],
