@@ -17,10 +17,9 @@ import os
 import sys
 
 import django
+import sphinx_rtd_theme
 from django.utils.encoding import force_text
 from django.utils.html import strip_tags
-
-import sphinx_rtd_theme
 
 # If extensions (or modules to document with autodoc) are in another
 # directory, add these directories to sys.path here. If the directory is
@@ -171,6 +170,7 @@ pygments_style = 'sphinx'
 html_theme = "sphinx_rtd_theme"
 html_theme_path = [".", sphinx_rtd_theme.get_html_theme_path()]
 
+
 # Approach 2 for custom stylesheet:
 # adapted from: http://rackerlabs.github.io/docs-rackspace/tools/rtd-tables.html
 # and https://github.com/altair-viz/altair/pull/418/files
@@ -179,7 +179,7 @@ def setup(app):
     # Register the docstring processor with sphinx
     app.connect("autodoc-process-docstring", process_docstring)
     # Add our custom CSS overrides
-    app.add_stylesheet("theme_overrides.css")
+    app.add_css_file("theme_overrides.css")
 
 
 # Theme options are theme-specific and customize the look and feel of a
