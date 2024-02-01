@@ -3,8 +3,6 @@
 Each certificate has a ``private_key`` used for signing (child) certificates (thus giving certain permissions)
 and a ``public_key`` used for verifying that a certificate(s) was properly signed.
 """
-from __future__ import unicode_literals
-
 import json
 import string
 
@@ -14,7 +12,6 @@ from django.db import models
 from django.db import transaction
 from django.utils import timezone
 from django.utils.six import string_types
-from future.utils import python_2_unicode_compatible
 
 from .fields.crypto import Key
 from .fields.crypto import PrivateKeyField
@@ -30,7 +27,6 @@ from morango.errors import NonceExpired
 from morango.utils import _assert
 
 
-@python_2_unicode_compatible
 class Certificate(mptt.models.MPTTModel, UUIDModelMixin):
 
     uuid_input_fields = ("public_key", "profile", "salt")
@@ -329,7 +325,6 @@ class ScopeDefinition(models.Model):
         return string.Template(self.description).safe_substitute(params)
 
 
-@python_2_unicode_compatible
 class Filter(object):
     def __init__(self, template, params={}):
         # ensure params have been deserialized

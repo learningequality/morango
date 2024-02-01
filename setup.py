@@ -1,9 +1,5 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
-from __future__ import absolute_import
-from __future__ import print_function
-from __future__ import unicode_literals
-
 import io
 
 from setuptools import find_packages
@@ -32,7 +28,6 @@ setup(
         "rsa>=3.4.2,<3.5",
         "djangorestframework==3.9.1",
         "django-ipware>=1.1.6,<1.2",
-        "future==0.16.0",
         "requests",
         "ifcfg",
     ],
@@ -44,7 +39,6 @@ setup(
         'License :: OSI Approved :: MIT License',
         'Natural Language :: English',
         'Development Status :: 4 - Beta',
-        'Programming Language :: Python :: 2.7',
         'Programming Language :: Python :: 3.6',
         'Programming Language :: Python :: 3.7',
         'Programming Language :: Python :: 3.8',
@@ -52,4 +46,5 @@ setup(
         'Programming Language :: Python :: 3.10',
         'Programming Language :: Python :: 3.11',
     ],
+    python_requires=">=3.6,  <3.12",
 )
