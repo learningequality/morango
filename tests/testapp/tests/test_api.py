@@ -1,6 +1,6 @@
 import json
-import sys
 import uuid
+from base64 import encodebytes as b64encode
 
 from django.db import connection
 from django.test.utils import CaptureQueriesContext
@@ -10,7 +10,7 @@ from django.urls.exceptions import NoReverseMatch
 from django.utils import timezone
 from django.utils.functional import SimpleLazyObject
 from facility_profile.models import MyUser
-from rest_framework.test import APITestCase as BaseTestCase
+from rest_framework.test import APITestCase
 
 from .compat import EnvironmentVarGuard
 from morango.api.serializers import BufferSerializer
@@ -32,21 +32,6 @@ from morango.models.fields.crypto import SharedKey
 from morango.registry import syncable_models
 from morango.sync.syncsession import compress_string
 from morango.sync.utils import validate_and_create_buffer_data
-
-if sys.version_info >= (3,):
-    from base64 import encodebytes as b64encode
-
-    # A weird hack because of http://bugs.python.org/issue17866
-    class APITestCase(BaseTestCase):
-        def assertItemsEqual(self, *args, **kwargs):
-            self.assertCountEqual(*args, **kwargs)
-
-
-else:
-    from base64 import encodestring as b64encode
-
-    class APITestCase(BaseTestCase):
-        pass
 
 
 class CertificateTestCaseMixin(object):
