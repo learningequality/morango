@@ -926,8 +926,8 @@ class SyncableModel(UUIDModelMixin):
                 continue
             if f.attname in self._morango_internal_fields_not_to_serialize:
                 continue
-            if hasattr(f, "value_from_object_json_compatible"):
-                data[f.attname] = f.value_from_object_json_compatible(self)
+            if getattr(f, "morango_serialize_to_string", False):
+                data[f.attname] = f.value_to_string(self)
             else:
                 data[f.attname] = f.value_from_object(self)
         return data
@@ -938,7 +938,10 @@ class SyncableModel(UUIDModelMixin):
         kwargs = {}
         for f in cls._meta.concrete_fields:
             if f.attname in dict_model:
-                kwargs[f.attname] = dict_model[f.attname]
+                if getattr(f, "morango_serialize_to_string", False):
+                    kwargs[f.attname] = f.to_python(dict_model[f.attname])
+                else:
+                    kwargs[f.attname] = dict_model[f.attname]
         return cls(**kwargs)
 
     @classmethod
