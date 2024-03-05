@@ -24,7 +24,7 @@ SECRET_KEY = '-#()od3p8n@o&9kcj(s63!#^tziq+j!nuwlyptw#o06t&wrk$q'
 # SECURITY WARNING: don't run with debug turned on in production!
 DEBUG = True
 
-ALLOWED_HOSTS = []
+ALLOWED_HOSTS = ["*"]
 
 
 # Application definition
@@ -84,6 +84,11 @@ DATABASES = {
     'default2': {
         'ENGINE': 'django.db.backends.sqlite3',
         'NAME': os.path.join(BASE_DIR, "testapp2.db"),
+        'TEST': {
+            # Force using a disk based database for testing
+            # so that we can share it between processes.
+            'NAME': os.path.join(BASE_DIR, "testapp2.db"),
+        }
     }
 }
 
