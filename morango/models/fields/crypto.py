@@ -6,7 +6,6 @@ desirability/efficiency from left to right). We have a base ``Key`` class which 
 """
 import hashlib
 import re
-import sys
 
 import rsa as PYRSA
 from django.db import models
@@ -41,10 +40,8 @@ try:
 except ImportError:
     CRYPTOGRAPHY_EXISTS = False
 
-if sys.version_info[0] < 3:
-    from base64 import encodestring as b64encode, decodestring as b64decode
-else:
-    from base64 import encodebytes as b64encode, decodebytes as b64decode
+
+from base64 import encodebytes as b64encode, decodebytes as b64decode
 
 
 PKCS8_HEADER = "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8A"
