@@ -27,7 +27,7 @@ setup(
         "django-mptt>0.10.0",
         "rsa>=3.4.2,<3.5",
         "djangorestframework>3.10",
-        "django-ipware>=1.1.6,<1.2",
+        "django-ipware==4.0.2",
         "requests",
         "ifcfg",
     ],

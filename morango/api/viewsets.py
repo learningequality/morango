@@ -5,7 +5,7 @@ import uuid
 
 from django.core.exceptions import ValidationError
 from django.utils import timezone
-from ipware.ip import get_ip
+from ipware import get_client_ip
 from rest_framework import mixins
 from rest_framework import pagination
 from rest_framework import response
@@ -58,6 +58,11 @@ def controller_signal_logger(context=None):
 
 session_controller = SessionController.build()
 session_controller.signals.connect(controller_signal_logger)
+
+
+def get_ip(request):
+    client_ip, _ = get_client_ip(request)
+    return client_ip
 
 
 class CertificateChainViewSet(viewsets.ViewSet):
