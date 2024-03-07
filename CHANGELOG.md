@@ -2,6 +2,17 @@
 
 List of the most important changes for each release.
 
+## 0.8.0
+ - Drops support for Python 2.7
+ - Upgrades cryptography library to 40.0.2, the latest version that supports Python 3.6
+ - Upgrades M2Crypto to 0.41.0
+ - Upgrades Django to version 3
+ - Upgrades django-mptt to a version greater than 0.10 for Django 3 compatibility
+ - Upgrades djangorestframework to a version greater than 3.10 for Django 3 compatibility
+ - Upgrades django-ipware to version 4.0.2, the latest version that supports Python 3.6
+ - Drops usage of "value_from_object_json_compatible" on fields and instead inspects booleans for "morango_serialize_to_string" attribute to determine if the field value_to_string method should be used for serialization and to_python used for deserialization
+ - Removes support for MorangoMPTT models
+
 ## 0.7.1
  - Supersedes 0.7.0
  - Drops support for Python 3.4 and 3.5
