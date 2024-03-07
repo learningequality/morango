@@ -7,12 +7,10 @@ import os
 import socket
 import uuid
 from io import BytesIO
+from urllib.parse import urljoin
+from urllib.parse import urlparse
 
 from django.utils import timezone
-from django.utils.six import iteritems
-from django.utils.six import raise_from
-from django.utils.six.moves.urllib.parse import urljoin
-from django.utils.six.moves.urllib.parse import urlparse
 from requests.adapters import HTTPAdapter
 from requests.exceptions import HTTPError
 from requests.packages.urllib3.util.retry import Retry
@@ -299,7 +297,7 @@ class NetworkSyncConnection(Connection):
         try:
             self._get_sync_session(sync_session)
         except HTTPError as e:
-            raise_from(MorangoResumeSyncError("Failure resuming sync session"), e)
+            raise MorangoResumeSyncError("Failure resuming sync session") from e
 
         # update process id
         sync_session.process_id = os.getpid()
@@ -440,7 +438,7 @@ class NetworkSyncConnection(Connection):
         # convert user arguments into query str for passing to auth layer
         if isinstance(userargs, dict):
             userargs = "&".join(
-                ["{}={}".format(key, val) for (key, val) in iteritems(userargs)]
+                ["{}={}".format(key, val) for (key, val) in userargs.items()]
             )
         return self.session.post(
             self.urlresolve(api_urls.CERTIFICATE), json=data, auth=(userargs, password)
@@ -627,12 +625,9 @@ class TransferClient(object):
         """
         result = self.controller.proceed_to_and_wait_for(stage, callback=callback)
         if result == transfer_statuses.ERRORED:
-            raise_from(
-                MorangoError(
-                    error_msg or "Stage `{}` failed".format(self.context.stage)
-                ),
-                self.context.error,
-            )
+            raise MorangoError(
+                error_msg or "Stage `{}` failed".format(self.context.stage)
+            ) from self.context.error
 
     def initialize(self, sync_filter):
         """

@@ -22,7 +22,6 @@ from django.db.models.deletion import Collector
 from django.db.models.expressions import CombinedExpression
 from django.db.models.fields.related import ForeignKey
 from django.db.models.functions import Cast
-from django.utils import six
 from django.utils import timezone
 from django.utils.functional import cached_property
 
@@ -37,7 +36,6 @@ from morango.models.fields.uuids import UUIDField
 from morango.models.fields.uuids import UUIDModelMixin
 from morango.models.fsic_utils import remove_redundant_instance_counters
 from morango.models.manager import SyncableModelManager
-from morango.models.morango_mptt import MorangoMPTTModel
 from morango.models.utils import get_0_4_system_parameters
 from morango.models.utils import get_0_5_mac_address
 from morango.models.utils import get_0_5_system_id
@@ -353,10 +351,10 @@ class TransferSession(models.Model):
 
     def get_touched_record_ids_for_model(self, model):
         if isinstance(model, SyncableModel) or (
-            isinstance(model, six.class_types) and issubclass(model, SyncableModel)
+            isinstance(model, type) and issubclass(model, SyncableModel)
         ):
             model = model.morango_model_name
-        _assert(isinstance(model, six.string_types), "Model must resolve to string")
+        _assert(isinstance(model, str), "Model must resolve to string")
         return Store.objects.filter(
             model_name=model, last_transfer_session_id=self.id
         ).values_list("id", flat=True)
@@ -420,7 +418,7 @@ class StoreQueryset(models.QuerySet):
             self.annotate(id_cast=Cast("id", TextField()))
             # remove dashes from char uuid
             .annotate(
-                fixed_id=Func(F("id_cast"), Value("-"), Value(""), function="replace")
+                fixed_id=Func(F("id_cast"), Value("-"), Value(""), function="replace", output_field=TextField())
             )
             # return as list
             .values_list("fixed_id", flat=True)
@@ -610,7 +608,7 @@ class DatabaseMaxCounter(AbstractCounter):
                         )
         else:
             updated_fsic = {}
-            for key, value in six.iteritems(fsics):
+            for key, value in fsics.items():
                 if key in internal_fsic:
                     # if same instance id, update fsic with larger value
                     if fsics[key] > internal_fsic[key]:
@@ -620,7 +618,7 @@ class DatabaseMaxCounter(AbstractCounter):
                     updated_fsic[key] = fsics[key]
 
             # load database max counters
-            for (key, value) in six.iteritems(updated_fsic):
+            for (key, value) in updated_fsic.items():
                 for f in sync_filter:
                     DatabaseMaxCounter.objects.update_or_create(
                         instance_id=key, partition=f, defaults={"counter": value}
@@ -843,10 +841,8 @@ class SyncableModel(UUIDModelMixin):
         with transaction.atomic():
             if hard_delete:
                 # set hard deletion for all related models
-                for model, instances in six.iteritems(collector.data):
-                    if issubclass(model, SyncableModel) or issubclass(
-                        model, MorangoMPTTModel
-                    ):
+                for model, instances in collector.data.items():
+                    if issubclass(model, SyncableModel):
                         for obj in instances:
                             obj._update_hard_deleted_models()
             return collector.delete()
@@ -930,15 +926,8 @@ class SyncableModel(UUIDModelMixin):
                 continue
             if f.attname in self._morango_internal_fields_not_to_serialize:
                 continue
-            # case if model is morango mptt
-            if f.attname in getattr(
-                self,
-                "_internal_mptt_fields_not_to_serialize",
-                "_internal_fields_not_to_serialize",
-            ):
-                continue
-            if hasattr(f, "value_from_object_json_compatible"):
-                data[f.attname] = f.value_from_object_json_compatible(self)
+            if getattr(f, "morango_serialize_to_string", False):
+                data[f.attname] = f.value_to_string(self)
             else:
                 data[f.attname] = f.value_from_object(self)
         return data
@@ -949,7 +938,10 @@ class SyncableModel(UUIDModelMixin):
         kwargs = {}
         for f in cls._meta.concrete_fields:
             if f.attname in dict_model:
-                kwargs[f.attname] = dict_model[f.attname]
+                if getattr(f, "morango_serialize_to_string", False):
+                    kwargs[f.attname] = f.to_python(dict_model[f.attname])
+                else:
+                    kwargs[f.attname] = dict_model[f.attname]
         return cls(**kwargs)
 
     @classmethod

@@ -21,9 +21,6 @@ from morango.models.fields import __all__ as fields_all
 from morango.models.fields.crypto import SharedKey
 from morango.models.fields.uuids import UUIDModelMixin
 from morango.models.manager import SyncableModelManager
-from morango.models.morango_mptt import MorangoMPTTModel
-from morango.models.morango_mptt import MorangoMPTTTreeManager
-from morango.models.morango_mptt import MorangoTreeQuerySet
 from morango.models.query import SyncableModelQuerySet
 from morango.registry import syncable_models
 
@@ -41,9 +38,6 @@ __all__ += [
     "SyncableModelManager",
     "SyncableModelQuerySet",
     "syncable_models",
-    "MorangoTreeQuerySet",
-    "MorangoMPTTTreeManager",
-    "MorangoMPTTModel",
     "DatabaseIDModel",
     "InstanceIDModel",
     "SyncSession",

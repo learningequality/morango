@@ -1,15 +1,22 @@
 import contextlib
 import json
+import os
+import socket
+import subprocess
+import sys
+import time
 
 import mock
 import pytest
+import requests
 from django.conf import settings
-from django.db import connections
-from django.test.testcases import LiveServerTestCase
+from django.test.testcases import TransactionTestCase
 from facility_profile.models import InteractionLog
 from facility_profile.models import MyUser
 from facility_profile.models import SummaryLog
+from requests.exceptions import RequestException
 from requests.exceptions import Timeout
+from testapp.settings import BASE_DIR
 
 from ..compat import EnvironmentVarGuard
 from morango.errors import MorangoError
@@ -21,6 +28,7 @@ from morango.models.core import Buffer
 from morango.models.core import InstanceIDModel
 from morango.models.core import TransferSession
 from morango.sync.controller import MorangoProfileController
+
 
 SECOND_TEST_DATABASE = "default2"
 SECOND_SYSTEM_ID = "default2"
@@ -37,18 +45,79 @@ def second_environment():
     assert instance1.id != instance2.id
 
 
+def get_free_tcp_port():
+    tcp = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    tcp.bind(("", 0))
+    addr, port = tcp.getsockname()
+    tcp.close()
+    return port
+
+
+class LiveServer:
+    def __init__(self):
+        self.env = os.environ.copy()
+        self.env["MORANGO_SYSTEM_ID"] = SECOND_SYSTEM_ID
+        self.port = get_free_tcp_port()
+        self.host = "127.0.0.1"
+        self.start()
+
+    @property
+    def baseurl(self):
+        return f"http://{self.host}:{self.port}/"
+
+    def start(self):
+        manage_py_path = os.path.join(BASE_DIR, "manage.py")
+        self._instance = subprocess.Popen(
+            [sys.executable, manage_py_path, "runserver", "--nothreading", "--noreload", "--settings", "testapp.server2_settings", f"{self.host}:{self.port}"],
+            env=self.env,
+        )
+        self._wait_for_server_start()
+
+    def _wait_for_server_start(self, timeout=20):
+        for i in range(timeout * 2):
+            try:
+                resp = requests.get(self.baseurl, timeout=3)
+                if resp.status_code > 0:
+                    return
+            except RequestException:
+                pass
+            time.sleep(0.5)
+
+        raise Exception("Server did not start within {} seconds".format(timeout))
+
+    def kill(self):
+        try:
+            self._instance.kill()
+        except OSError:
+            pass
+
+
 @pytest.mark.skipif(
     getattr(settings, "MORANGO_TEST_POSTGRESQL", False), reason="Not supported"
 )
-class PushPullClientTestCase(LiveServerTestCase):
-    multi_db = True
+class PushPullClientTestCase(TransactionTestCase):
     profile = "facilitydata"
+    databases = ["default", SECOND_TEST_DATABASE]
+
+    @classmethod
+    def setUpClass(cls):
+        super(TransactionTestCase, cls).setUpClass()
+        cls.server = LiveServer()
+
+    @classmethod
+    def tearDownClass(cls):
+        # There may not be a 'server' attribute if setUpClass() for some
+        # reasons has raised an exception.
+        if hasattr(cls, 'server'):
+            # Terminate the live server's thread
+            cls.server.kill()
+            super(TransactionTestCase, cls).tearDownClass()
 
     def setUp(self):
         super(PushPullClientTestCase, self).setUp()
         self.profile_controller = MorangoProfileController(self.profile)
         self.conn = self.profile_controller.create_network_connection(
-            self.live_server_url
+            self.server.baseurl
         )
         self.conn.chunk_size = 3
 
@@ -129,14 +198,6 @@ class PushPullClientTestCase(LiveServerTestCase):
             password="password",
         )
         return self.conn.create_sync_session(client_cert, server_cert)
-
-    @classmethod
-    def _create_server_thread(cls, connections_override):
-        # override default to point to second environment database
-        connections_override["default"] = connections["default2"]
-        return super(PushPullClientTestCase, cls)._create_server_thread(
-            connections_override
-        )
 
     def assertLastActivityUpdate(self, transfer_session=None):
         """A signal callable that asserts `last_activity_timestamp`s are updated"""

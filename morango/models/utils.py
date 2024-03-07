@@ -1,5 +1,4 @@
 import hashlib
-import ifcfg
 import os
 import platform
 import socket
@@ -7,10 +6,10 @@ import subprocess
 import sys
 import uuid
 
-from .fields.uuids import sha2_uuid
-
+import ifcfg
 from django.conf import settings
-from django.utils import six
+
+from .fields.uuids import sha2_uuid
 
 
 def _get_database_path():
@@ -109,7 +108,7 @@ def _get_android_uuid():
 def _do_salted_hash(value):
     if not value:
         return ""
-    if not isinstance(value, six.string_types):
+    if not isinstance(value, str):
         value = str(value)
     try:
         value = value.encode()
@@ -185,7 +184,7 @@ def _get_mac_address_flags(mac):
     """
     See: https://en.wikipedia.org/wiki/MAC_address#Universal_vs._local
     """
-    if isinstance(mac, six.integer_types):
+    if isinstance(mac, int):
         mac = _mac_int_to_ether(mac)
 
     first_octet = int(mac[:2], base=16)

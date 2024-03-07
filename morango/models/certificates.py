@@ -11,7 +11,6 @@ from django.core.management import call_command
 from django.db import models
 from django.db import transaction
 from django.utils import timezone
-from django.utils.six import string_types
 
 from .fields.crypto import Key
 from .fields.crypto import PrivateKeyField
@@ -195,7 +194,7 @@ class Certificate(mptt.models.MPTTModel, UUIDModelMixin):
     def save_certificate_chain(cls, cert_chain, expected_last_id=None):
 
         # parse the chain from json if needed
-        if isinstance(cert_chain, string_types):
+        if isinstance(cert_chain, str):
             cert_chain = json.loads(cert_chain)
 
         # start from the bottom of the chain
@@ -320,7 +319,7 @@ class ScopeDefinition(models.Model):
         return Scope(definition=self, params=params)
 
     def get_description(self, params):
-        if isinstance(params, string_types):
+        if isinstance(params, str):
             params = json.loads(params)
         return string.Template(self.description).safe_substitute(params)
 
@@ -328,7 +327,7 @@ class ScopeDefinition(models.Model):
 class Filter(object):
     def __init__(self, template, params={}):
         # ensure params have been deserialized
-        if isinstance(params, string_types):
+        if isinstance(params, str):
             params = json.loads(params)
         self._template = template
         self._params = params

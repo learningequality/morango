@@ -7,8 +7,8 @@ m2r
 sphinx-notfound-page
 
 # for extracting model docs
-django==1.11.29  # pyup: >=1.11,<2
-djangorestframework==3.9.1
-django-mptt==0.9.1
+django==3.2.24
+djangorestframework==3.14.0
+django-mptt==0.16.0
 rsa==3.4.2
 ifcfg==0.21

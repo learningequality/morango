@@ -1,21 +1,21 @@
-import factory
 import uuid
-from django.test import TestCase
+
+import factory
 from django.test import override_settings
+from django.test import TestCase
 from django.utils import timezone
-from django.utils.six import iteritems
 from facility_profile.models import MyUser
 
 from ..helpers import RecordMaxCounterFactory
 from ..helpers import StoreFactory
 from morango.constants import transfer_stages
 from morango.constants import transfer_statuses
-from morango.sync.controller import MorangoProfileController
 from morango.models.certificates import Filter
 from morango.models.core import DatabaseMaxCounter
-from morango.models.core import TransferSession
-from morango.models.core import SyncSession
 from morango.models.core import Store
+from morango.models.core import SyncSession
+from morango.models.core import TransferSession
+from morango.sync.controller import MorangoProfileController
 
 
 class DatabaseMaxCounterFactory(factory.DjangoModelFactory):
@@ -118,7 +118,7 @@ class OldDatabaseMaxCounterUpdateCalculation(TestCase):
         client_fsic = {"a" * 32: 2, "b" * 32: 2, "c" * 32: 2}
         server_fsic = {"a" * 32: 1, "b" * 32: 1, "c" * 32: 1}
         self.assertFalse(DatabaseMaxCounter.objects.filter(counter=2).exists())
-        for instance_id, counter in iteritems(server_fsic):
+        for instance_id, counter in server_fsic.items():
             DatabaseMaxCounter.objects.create(
                 instance_id=instance_id, counter=counter, partition=self.filter
             )
@@ -132,7 +132,7 @@ class OldDatabaseMaxCounterUpdateCalculation(TestCase):
         self.assertFalse(
             DatabaseMaxCounter.objects.filter(instance_id="e" * 32).exists()
         )
-        for instance_id, counter in iteritems(server_fsic):
+        for instance_id, counter in server_fsic.items():
             DatabaseMaxCounter.objects.create(
                 instance_id=instance_id, counter=counter, partition=self.filter
             )
@@ -145,7 +145,7 @@ class OldDatabaseMaxCounterUpdateCalculation(TestCase):
         client_fsic = {"a" * 32: 1, "b" * 32: 1, "c" * 32: 1}
         server_fsic = {"a" * 32: 2, "b" * 32: 2, "c" * 32: 2}
         self.assertFalse(DatabaseMaxCounter.objects.filter(counter=1).exists())
-        for instance_id, counter in iteritems(server_fsic):
+        for instance_id, counter in server_fsic.items():
             DatabaseMaxCounter.objects.create(
                 instance_id=instance_id, counter=counter, partition=self.filter
             )
