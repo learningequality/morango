@@ -1,4 +1,4 @@
-from django.conf.urls import include
-from django.conf.urls import url
+from django.urls import include
+from django.urls import path
 
-urlpatterns = [url(r"^api/morango/v1/", include("morango.api.urls"))]
+urlpatterns = [path("api/morango/v1/", include("morango.api.urls"))]
