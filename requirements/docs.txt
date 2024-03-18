@@ -7,7 +7,7 @@ m2r
 sphinx-notfound-page
 
 # for extracting model docs
-django==3.2.24
+django==3.2.25
 djangorestframework==3.14.0
 django-mptt==0.16.0
 rsa==3.4.2
