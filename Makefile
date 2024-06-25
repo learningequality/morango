@@ -3,6 +3,14 @@ SHELL := bash
 .ONESHELL:
 .PHONY: help clean clean-pyc release dist
 
+# standalone install method
+DOCKER_COMPOSE = docker-compose
+
+# support new plugin installation for docker-compose
+ifeq (, $(shell which docker-compose))
+DOCKER_COMPOSE = docker compose
+endif
+
 define BROWSER_PYSCRIPT
 import os, webbrowser, sys
 try:
@@ -84,16 +92,16 @@ tox:
 	set -ex
 	function _on_interrupt() {
 		# leave off `-v` to skip volume cleanup for debugging error
-		docker-compose down
+		$(DOCKER_COMPOSE) down
 	}
 	trap _on_interrupt SIGINT SIGTERM SIGKILL ERR
-	docker-compose up --detach
-	until docker-compose logs --tail=1 postgres | grep -q "database system is ready to accept connections"; do
+	$(DOCKER_COMPOSE) up --detach
+	until $(DOCKER_COMPOSE) logs --tail=1 postgres | grep -q "database system is ready to accept connections"; do
 		echo "$(date) - waiting for postgres..."
 		sleep 1
 	done
 	$(MAKE) -e $(subst -with-postgres,,$@)
-	docker-compose down -v
+	$(DOCKER_COMPOSE) down -v
 
 coverage: ## check code coverage quickly with the default Python
 	coverage run --source morango setup.py test
