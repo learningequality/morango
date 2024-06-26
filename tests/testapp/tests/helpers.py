@@ -446,6 +446,9 @@ class TestSessionContext(SessionContext):
 
 class TestMigrationsMixin(object):
     # Modified from https://www.caktusgroup.com/blog/2016/02/02/writing-unit-tests-django-migrations/
+    # Note that this has been updated to handle running migration tests for previously squashed migrations.
+    # It is possible this will no longer work for testing migrations that are part of or
+    # subsequent to a squashed migration.
 
     migrate_from = None
     migrate_to = None
@@ -469,6 +472,10 @@ class TestMigrationsMixin(object):
         migrate_from = [(self.app, self.migrate_from)]
         migrate_to = [(self.app, self.migrate_to)]
         executor = MigrationExecutor(connection)
+        executor.migrate([(self.app, None)])
+        executor.loader.replace_migrations = False
+        executor.loader.build_graph()  # reload.
+
         old_apps = executor.loader.project_state(migrate_from).apps
 
         # Reverse to the original migration
@@ -490,6 +497,8 @@ class TestMigrationsMixin(object):
     def tearDownClass(cls):
         # revert migration back to latest migration
         executor = MigrationExecutor(connection)
+        executor.migrate([(cls.app, None)])
+        executor.loader.replace_migrations = True
         executor.loader.build_graph()
         executor.migrate([cls.latest_migration])
 

@@ -1,0 +1,56 @@
+name: Migrations for SQLite versions
+
+on: [push, pull_request]
+
+jobs:
+    pre_job:
+        name: Path match check
+        runs-on: ubuntu-latest
+        # Map a step output to a job output
+        outputs:
+            should_skip: ${{ steps.skip_check.outputs.should_skip }}
+        steps:
+            - id: skip_check
+              uses: fkirc/skip-duplicate-actions@master
+              with:
+                  github_token: ${{ github.token }}
+                  paths: '["morango/migrations/*.py", ".github/workflows/check_migrations_sqlite.yml", "setup.py", "requirements/*.txt"]'
+    migration_test:
+        name: SQLite migration tests
+        needs: pre_job
+        runs-on: ubuntu-20.04
+        steps:
+            - uses: actions/checkout@v2
+            - name: Set up Python 3.7
+              if: ${{ needs.pre_job.outputs.should_skip != 'true' }}
+              uses: actions/setup-python@v2
+              with:
+                  python-version: 3.7
+            - name: Install build dependencies
+              if: ${{ needs.pre_job.outputs.should_skip != 'true' }}
+              run: sudo apt install -y build-essential tcl
+            - name: Build SQLite 3.25.3
+              if: ${{ needs.pre_job.outputs.should_skip != 'true' }}
+              run: |
+                  # Following the instructions from https://til.simonwillison.net/sqlite/ld-preload
+                  # to build SQLite from source, using version 3.25.3
+                  wget https://www.sqlite.org/src/tarball/89e099fb/SQLite-89e099fb.tar.gz
+                  tar -xzvf SQLite-89e099fb.tar.gz
+                  cd SQLite-89e099fb
+                  CPPFLAGS="-DSQLITE_ENABLE_FTS3 -DSQLITE_ENABLE_FTS3_PARENTHESIS -DSQLITE_ENABLE_RTREE=1" ./configure
+                  make
+                  LD_PRELOAD=.libs/libsqlite3.so python3 -c \
+                  'import sqlite3; assert sqlite3.connect(":memory").execute("select sqlite_version()").fetchone()[0] == "3.25.3"'
+                  # Once we have confirmed that this works, set it for subsequent steps
+                  echo "LD_PRELOAD=$(realpath .libs/libsqlite3.so)" >> $GITHUB_ENV
+            - uses: actions/cache@v4
+              with:
+                path: ~/.cache/pip
+                key: ${{ runner.os }}-pip-${{ hashFiles('setup.py') }}
+                restore-keys: |
+                    ${{ runner.os }}-pip-
+            - name: Install dependencies
+              run: pip install .
+            - name: Run migrations
+              if: ${{ needs.pre_job.outputs.should_skip != 'true' }}
+              run: python tests/testapp/manage.py migrate
