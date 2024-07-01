@@ -1,7 +1,7 @@
 """
 This module contains constants representing the possible stages of a transfer session.
 """
-from django.utils.translation import ugettext_lazy as _
+from django.utils.translation import gettext_lazy as _
 
 INITIALIZING = "initializing"
 SERIALIZING = "serializing"
