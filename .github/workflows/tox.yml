@@ -121,8 +121,8 @@ jobs:
               if: ${{ needs.pre_job.outputs.should_skip != 'true' }}
               uses: actions/cache@v2
               with:
-                  path: ${{ github.workspace }}/.tox/py3.6
-                  key: ${{ runner.os }}-tox-py3.6-${{ hashFiles('setup.py', 'requirements/*.txt') }}
+                  path: ${{ github.workspace }}/.tox/py3.9-postgres
+                  key: ${{ runner.os }}-tox-py3.9-postgres-${{ hashFiles('setup.py', 'requirements/*.txt') }}
             - name: Test with tox
               if: ${{ needs.pre_job.outputs.should_skip != 'true' }}
               run: tox -e postgres
