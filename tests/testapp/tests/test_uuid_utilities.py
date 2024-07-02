@@ -1,5 +1,4 @@
 import hashlib
-import sys
 import uuid
 
 import mock
@@ -100,6 +99,7 @@ class InstanceIDModelTestCase(TestCase):
     @mock.patch("platform.platform", return_value="Windows 3.1")
     @mock.patch("platform.node", return_value="myhost")
     @mock.patch("morango.models.utils._get_database_path", return_value="<dummypath>")
+    @mock.patch('sys.version', '2.7.333')
     def test_consistent_with_0_4_instance_id_calculation(self, *args):
         """
         This test ensures that we don't accidentally make changes that impact how we calculate
@@ -107,8 +107,6 @@ class InstanceIDModelTestCase(TestCase):
         """
 
         from morango.models.utils import _get_database_path
-
-        sys.version = "2.7.333"
 
         DatabaseIDModel.objects.all().update(current=False)
         database_id = DatabaseIDModel.objects.create(
