@@ -450,6 +450,7 @@ class Store(AbstractStore):
     class Meta:
         indexes = [
             models.Index(fields=["partition"], name="idx_morango_store_partition"),
+            models.Index(fields=["profile", "model_name", "partition", "dirty_bit"], condition=models.Q(dirty_bit=True), name="idx_morango_deserialize"),
         ]
 
     def _deserialize_store_model(self, fk_cache, defer_fks=False):  # noqa: C901
