@@ -1,2 +1,2 @@
 M2Crypto==0.41.0
-cryptography==40.0.2
+cryptography==43.0.1
