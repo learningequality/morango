@@ -2,6 +2,14 @@
 
 List of the most important changes for each release.
 
+## 0.8.2
+- Adds support for Python 3.13
+- Adds conditional index to improve deserialization queries
+
+## 0.8.1
+- Adds support for Python 3.12
+- Squashes old migrations to prevent issues with old SQLite versions
+
 ## 0.8.0
  - Drops support for Python 2.7
  - Upgrades cryptography library to 40.0.2, the latest version that supports Python 3.6
