@@ -6,6 +6,7 @@ desirability/efficiency from left to right). We have a base ``Key`` class which 
 """
 import hashlib
 import re
+import sys
 
 import rsa as PYRSA
 from django.db import models
@@ -20,6 +21,16 @@ except ImportError:
     M2CRYPTO_EXISTS = False
 
 try:
+    # Pre-empt the PanicException that importing cryptography can cause
+    # when we are using a non-compatible version of cffi on Python 3.13
+    # this happens because of static depdendency bundling in Kolibri
+    import cffi
+
+    if sys.version_info > (3, 13):
+        if hasattr(cffi, "__version_info__"):
+            if cffi.__version_info__ < (1, 17, 1):
+                raise ImportError
+
     from cryptography.hazmat.backends import default_backend
     from cryptography import exceptions as crypto_exceptions
 
@@ -39,7 +50,13 @@ try:
     CRYPTOGRAPHY_EXISTS = True
 except ImportError:
     CRYPTOGRAPHY_EXISTS = False
-
+except BaseException as e:
+    # Still catch PanicExceptions just in case.
+    if "Python API call failed" in str(e):
+        CRYPTOGRAPHY_EXISTS = False
+    else:
+        # Otherwise raise the error again to avoid silently catching other errors
+        raise
 
 from base64 import encodebytes as b64encode, decodebytes as b64decode
 
