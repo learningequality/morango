@@ -25,10 +25,10 @@ jobs:
                 python-version: [ 3.6, 3.7, 3.8, 3.9, '3.10', '3.11', '3.12', '3.13' ]
 
         steps:
-            - uses: actions/checkout@v2
+            - uses: actions/checkout@v4
             - name: Set up Python ${{ matrix.python-version }}
               if: ${{ needs.pre_job.outputs.should_skip != 'true' }}
-              uses: actions/setup-python@v2
+              uses: actions/setup-python@v5
               with:
                   python-version: ${{ matrix.python-version }}
             - name: Install tox
@@ -38,7 +38,7 @@ jobs:
                   pip install tox
             - name: tox env cache
               if: ${{ needs.pre_job.outputs.should_skip != 'true' }}
-              uses: actions/cache@v2
+              uses: actions/cache@v4
               with:
                   path: ${{ github.workspace }}/.tox/py${{ matrix.python-version }}
                   key: ${{ runner.os }}-tox-py${{ matrix.python-version }}-${{ hashFiles('setup.py', 'requirements/*.txt') }}
@@ -57,10 +57,10 @@ jobs:
                 python-version: [ 3.6, 3.7, 3.8, 3.9, '3.10', '3.11', '3.12', '3.13' ]
 
         steps:
-            - uses: actions/checkout@v2
+            - uses: actions/checkout@v4
             - name: Set up Python ${{ matrix.python-version }}
               if: ${{ needs.pre_job.outputs.should_skip != 'true' }}
-              uses: actions/setup-python@v2
+              uses: actions/setup-python@v5
               with:
                   python-version: ${{ matrix.python-version }}
             - name: Install system dependencies
@@ -75,7 +75,7 @@ jobs:
                 pip install tox
             - name: tox env cache
               if: ${{ needs.pre_job.outputs.should_skip != 'true' }}
-              uses: actions/cache@v2
+              uses: actions/cache@v4
               with:
                   path: ${{ github.workspace }}/.tox/py${{ matrix.python-version }}-cryptography${{ env.cryptography_version }}
                   key: ${{ runner.os }}-tox-py${{ matrix.python-version }}-crypto${{ env.cryptography_version }}-${{ hashFiles('setup.py', 'requirements/*.txt') }}
@@ -106,10 +106,10 @@ jobs:
                     # Maps tcp port 5432 on service container to the host
                     - 5432:5432
         steps:
-            - uses: actions/checkout@v2
+            - uses: actions/checkout@v4
             - name: Set up Python 3.9 for Postgres
               if: ${{ needs.pre_job.outputs.should_skip != 'true' }}
-              uses: actions/setup-python@v2
+              uses: actions/setup-python@v5
               with:
                   python-version: 3.9
             - name: Install tox
@@ -119,7 +119,7 @@ jobs:
                   pip install tox
             - name: tox env cache
               if: ${{ needs.pre_job.outputs.should_skip != 'true' }}
-              uses: actions/cache@v2
+              uses: actions/cache@v4
               with:
                   path: ${{ github.workspace }}/.tox/py3.9-postgres
                   key: ${{ runner.os }}-tox-py3.9-postgres-${{ hashFiles('setup.py', 'requirements/*.txt') }}
@@ -136,10 +136,10 @@ jobs:
                 python-version: [3.8]
 
         steps:
-            - uses: actions/checkout@v2
+            - uses: actions/checkout@v4
             - name: Set up Python ${{ matrix.python-version }}
               if: ${{ needs.pre_job.outputs.should_skip != 'true' }}
-              uses: actions/setup-python@v2
+              uses: actions/setup-python@v5
               with:
                   python-version: ${{ matrix.python-version }}
             - name: Install tox
