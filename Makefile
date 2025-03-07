@@ -75,7 +75,7 @@ clean-test: ## remove test and coverage artifacts
 	rm -fr htmlcov/
 
 lint:
-	flake8 morango
+	pre-commit run --all-files
 
 migrations:
 	python tests/testapp/manage.py makemigrations
