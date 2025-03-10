@@ -2,6 +2,9 @@
 
 List of the most important changes for each release.
 
+## 0.8.3
+- Adds error handling in the case that an incompatible cffi version is used in with Python 3.13
+
 ## 0.8.2
 - Adds support for Python 3.13
 - Adds conditional index to improve deserialization queries
