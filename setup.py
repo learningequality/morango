@@ -25,7 +25,7 @@ setup(
     install_requires=[
         "django>=3,<4",
         "django-mptt>0.10.0",
-        "rsa>=3.4.2,<3.5",
+        "rsa<4.10",
         "djangorestframework>3.10",
         "django-ipware==4.0.2",
         "requests",
