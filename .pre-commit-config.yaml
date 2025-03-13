@@ -1,16 +1,24 @@
 repos:
--   repo: https://github.com/pre-commit/pre-commit-hooks
+  - repo: https://github.com/pre-commit/pre-commit-hooks
     rev: v2.2.3
     hooks:
-    -   id: trailing-whitespace
-    -   id: flake8
-    -   id: check-yaml
-    -   id: check-added-large-files
-    -   id: debug-statements
-    -   id: end-of-file-fixer
+      - id: trailing-whitespace
+      - id: flake8
+      - id: check-yaml
+      - id: check-added-large-files
+      - id: debug-statements
+      - id: end-of-file-fixer
         exclude: '^.+?\.json$'
--   repo: https://github.com/asottile/reorder_python_imports
+  - repo: https://github.com/asottile/reorder_python_imports
     rev: v1.4.0
     hooks:
-    -   id: reorder-python-imports
+      - id: reorder-python-imports
         language_version: python3
+  - repo: https://github.com/google/yamlfmt
+    rev: v0.14.0
+    hooks:
+      - id: yamlfmt
+  - repo: https://github.com/rhysd/actionlint
+    rev: v1.7.7
+    hooks:
+      - id: actionlint
