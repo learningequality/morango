@@ -10,5 +10,5 @@ sphinx-notfound-page
 django==3.2.25
 djangorestframework==3.14.0
 django-mptt==0.16.0
-rsa==3.4.2
+rsa==4.7
 ifcfg==0.21
