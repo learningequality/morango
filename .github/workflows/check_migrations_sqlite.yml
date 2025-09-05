@@ -20,7 +20,7 @@ jobs:
     container:
       image: python:3.7-buster
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - name: Install build dependencies
         if: ${{ needs.pre_job.outputs.should_skip != 'true' }}
         run: |

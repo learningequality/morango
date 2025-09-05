@@ -22,10 +22,10 @@ jobs:
       matrix:
         python-version: [3.9, '3.10', '3.11', '3.12', '3.13']
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - name: Set up Python ${{ matrix.python-version }}
         if: ${{ needs.pre_job.outputs.should_skip != 'true' }}
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v6
         with:
           python-version: ${{ matrix.python-version }}
       - name: Install tox
@@ -53,7 +53,7 @@ jobs:
     container:
       image: python:${{ matrix.python-version }}-buster
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - name: Install tox
         if: ${{ needs.pre_job.outputs.should_skip != 'true' }}
         run: |
@@ -79,10 +79,10 @@ jobs:
       matrix:
         python-version: [3.9, '3.10', '3.11', '3.12', '3.13']
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - name: Set up Python ${{ matrix.python-version }}
         if: ${{ needs.pre_job.outputs.should_skip != 'true' }}
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v6
         with:
           python-version: ${{ matrix.python-version }}
       - name: Install system dependencies
@@ -117,7 +117,7 @@ jobs:
     container:
       image: python:${{ matrix.python-version }}-buster
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - name: Install system dependencies
         if: ${{ needs.pre_job.outputs.should_skip != 'true' }}
         run: |
@@ -158,10 +158,10 @@ jobs:
           # Maps tcp port 5432 on service container to the host
           - 5432:5432
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - name: Set up Python 3.9 for Postgres
         if: ${{ needs.pre_job.outputs.should_skip != 'true' }}
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v6
         with:
           python-version: 3.9
       - name: Install tox
@@ -187,10 +187,10 @@ jobs:
       matrix:
         python-version: [3.8]
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - name: Set up Python ${{ matrix.python-version }}
         if: ${{ needs.pre_job.outputs.should_skip != 'true' }}
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v6
         with:
           python-version: ${{ matrix.python-version }}
       - name: Install tox
