@@ -121,6 +121,9 @@ jobs:
       - name: Install system dependencies
         if: ${{ needs.pre_job.outputs.should_skip != 'true' }}
         run: |
+          echo "deb http://archive.debian.org/debian-archive/debian/ buster main" > /etc/apt/sources.list
+          echo "deb http://archive.debian.org/debian-archive/debian-security/ buster/updates main" >> /etc/apt/sources.list
+          echo "Acquire::Check-Valid-Until \"false\";" > /etc/apt/apt.conf.d/99archive
           apt-get -y -qq update
           apt-get install -y openssl libssl-dev
       - name: Install tox
