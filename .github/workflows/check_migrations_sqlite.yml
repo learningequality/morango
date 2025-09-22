@@ -20,7 +20,6 @@ jobs:
     container:
       image: python:3.7-buster
     steps:
-      - uses: actions/checkout@v4
       - name: Install build dependencies
         if: ${{ needs.pre_job.outputs.should_skip != 'true' }}
         run: |
@@ -28,14 +27,16 @@ jobs:
           echo "deb http://archive.debian.org/debian-archive/debian-security/ buster/updates main" >> /etc/apt/sources.list
           echo "Acquire::Check-Valid-Until \"false\";" > /etc/apt/apt.conf.d/99archive
           apt-get -y -qq update
-          apt-get install -y build-essential tcl
+          apt-get install -y build-essential tcl git-lfs
+      - uses: actions/checkout@v4
+        with:
+          lfs: true
       - name: Build SQLite 3.25.3
         if: ${{ needs.pre_job.outputs.should_skip != 'true' }}
         run: |
           # Following the instructions from https://til.simonwillison.net/sqlite/ld-preload
           # to build SQLite from source, using version 3.25.3
-          wget https://www.sqlite.org/src/tarball/89e099fb/SQLite-89e099fb.tar.gz
-          tar -xzvf SQLite-89e099fb.tar.gz
+          tar -xzvf tests/SQLite-89e099fb.tar.gz
           cd SQLite-89e099fb
           CPPFLAGS="-DSQLITE_ENABLE_FTS3 -DSQLITE_ENABLE_FTS3_PARENTHESIS -DSQLITE_ENABLE_RTREE=1" ./configure
           make
