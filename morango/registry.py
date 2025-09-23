@@ -35,6 +35,24 @@ def _multiple_self_ref_fk_check(class_model):
     return False
 
 
+def _check_manager(name, objects):
+    from morango.models.manager import SyncableModelManager
+    from morango.models.query import SyncableModelQuerySet
+    # syncable model checks
+    if not isinstance(objects, SyncableModelManager):
+        raise InvalidMorangoModelConfiguration(
+            "Manager for {} must inherit from SyncableModelManager.".format(
+                name
+            )
+        )
+    if not isinstance(objects.none(), SyncableModelQuerySet):
+        raise InvalidMorangoModelConfiguration(
+            "Queryset for {} model must inherit from SyncableModelQuerySet.".format(
+                name
+            )
+        )
+
+
 class SyncableModelRegistry(object):
     def __init__(self):
         self.profile_models = {}
@@ -98,8 +116,6 @@ class SyncableModelRegistry(object):
 
         import django.apps
         from morango.models.core import SyncableModel
-        from morango.models.manager import SyncableModelManager
-        from morango.models.query import SyncableModelQuerySet
 
         model_list = []
         for model in django.apps.apps.get_models():
@@ -110,19 +126,10 @@ class SyncableModelRegistry(object):
                     raise InvalidMorangoModelConfiguration(
                         "Syncing models with more than 1 self referential ForeignKey is not supported."
                     )
-                # syncable model checks
-                if not isinstance(model.objects, SyncableModelManager):
-                    raise InvalidMorangoModelConfiguration(
-                        "Manager for {} must inherit from SyncableModelManager.".format(
-                            name
-                        )
-                    )
-                if not isinstance(model.objects.none(), SyncableModelQuerySet):
-                    raise InvalidMorangoModelConfiguration(
-                        "Queryset for {} model must inherit from SyncableModelQuerySet.".format(
-                            name
-                        )
-                    )
+                # Check both the objects and the syncing_objects querysets.
+                _check_manager(name, model.objects)
+                _check_manager(name, model.syncing_objects)
+
                 if model._meta.many_to_many:
                     raise UnsupportedFieldType(
                         "{} model with a ManyToManyField is not supported in morango."

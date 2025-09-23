@@ -98,3 +98,29 @@ class InteractionLog(FacilityDataSyncableModel):
 
     def calculate_partition(self, *args, **kwargs):
         return '{user_id}:user:interaction'.format(user_id=self.user.id)
+
+
+class FilteredModelManager(SyncableModelManager):
+    """Custom manager that filters out models marked as 'hidden'"""
+
+    def get_queryset(self):
+        return super().get_queryset().filter(hidden=False)
+
+
+class TestModel(FacilityDataSyncableModel):
+    """Test model with a custom manager to test syncing_objects behavior"""
+
+    # Morango syncing settings
+    morango_model_name = "testmodel"
+
+    name = models.CharField(max_length=100)
+    hidden = models.BooleanField(default=False)
+
+    # Override the default manager to filter hidden objects
+    objects = FilteredModelManager()
+
+    def calculate_source_id(self, *args, **kwargs):
+        return self.name
+
+    def calculate_partition(self, *args, **kwargs):
+        return 'testmodel'
