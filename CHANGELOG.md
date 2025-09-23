@@ -2,6 +2,9 @@
 
 List of the most important changes for each release.
 
+## 0.8.4
+- Adds syncable_objects model manager to use by default for all syncing operations, to allow default objects to be overridden
+
 ## 0.8.3
 - Adds error handling in the case that an incompatible cffi version is used in with Python 3.13
 - Update Python rsa package dependency to 4.9
