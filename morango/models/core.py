@@ -473,7 +473,7 @@ class Store(AbstractStore):
             # imports core models.
             from morango.sync.utils import mute_signals
             with mute_signals(signals.post_delete):
-                klass_model.objects.filter(id=self.id).delete()
+                klass_model.syncing_objects.filter(id=self.id).delete()
             return None, deferred_fks
         else:
             # load model into memory
@@ -805,6 +805,11 @@ class SyncableModel(UUIDModelMixin):
     _morango_partition = models.CharField(max_length=128, editable=False)
 
     objects = SyncableModelManager()
+
+    # Add a special syncing_objects queryset to every SyncableModel for use in syncing operations.
+    # This means that we still deal with the entire set of objects when syncing, even if the default
+    # model manager has been overridden to filter the queryset.
+    syncing_objects = SyncableModelManager()
 
     class Meta:
         abstract = True

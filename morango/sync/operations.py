@@ -145,7 +145,7 @@ def _serialize_into_store(profile, filter=None):
         for model in syncable_models.get_models(profile):
             new_store_records = []
             new_rmc_records = []
-            klass_queryset = model.objects.filter(_morango_dirty_bit=True)
+            klass_queryset = model.syncing_objects.filter(_morango_dirty_bit=True)
             if prefix_condition:
                 klass_queryset = klass_queryset.filter(prefix_condition)
             store_records_dict = Store.objects.in_bulk(
