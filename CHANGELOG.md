@@ -2,6 +2,9 @@
 
 List of the most important changes for each release.
 
+## 0.8.5
+- Prevents MPTT corruption that occurs with concurrent certificate creation
+
 ## 0.8.4
 - Adds syncable_objects model manager to use by default for all syncing operations, to allow default objects to be overridden
 
