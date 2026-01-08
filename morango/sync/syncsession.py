@@ -14,6 +14,7 @@ from django.utils import timezone
 from requests.adapters import HTTPAdapter
 from requests.exceptions import HTTPError
 from requests.packages.urllib3.util.retry import Retry
+from django.db import transaction, connection
 
 from .session import SessionWrapper
 from morango.api.serializers import CertificateSerializer
@@ -28,9 +29,11 @@ from morango.errors import MorangoError
 from morango.errors import MorangoResumeSyncError
 from morango.errors import MorangoServerDoesNotAllowNewCertPush
 from morango.models.certificates import Certificate
+from morango.models.certificates import Filter
 from morango.models.certificates import Key
 from morango.models.core import InstanceIDModel
 from morango.models.core import SyncSession
+from morango.sync.backends.utils import load_backend
 from morango.sync.context import CompositeSessionContext
 from morango.sync.context import LocalSessionContext
 from morango.sync.context import NetworkSessionContext
@@ -39,6 +42,7 @@ from morango.sync.utils import SyncSignal
 from morango.sync.utils import SyncSignalGroup
 from morango.utils import CAPABILITIES
 from morango.utils import pid_exists
+from morango.sync.utils import lock_partitions
 
 if GZIP_BUFFER_POST in CAPABILITIES:
     from gzip import GzipFile
@@ -46,6 +50,7 @@ if GZIP_BUFFER_POST in CAPABILITIES:
 
 logger = logging.getLogger(__name__)
 
+DBBackend = load_backend(connection)
 
 def _join_with_logical_operator(lst, operator):
     op = ") {operator} (".format(operator=operator)
@@ -351,11 +356,15 @@ class NetworkSyncConnection(Connection):
             cert_chain_response = self._get_certificate_chain(
                 params={"ancestors_of": parent_cert.id}
             )
-
-            # upon receiving cert chain from server, we attempt to save the chain into our records
-            Certificate.save_certificate_chain(
-                cert_chain_response.json(), expected_last_id=parent_cert.id
-            )
+            cert_chain = cert_chain_response.json()
+            with transaction.atomic():
+                lock_partitions(DBBackend, sync_filter=Filter(cert_chain[0]["id"]))
+                # check again, now that we have a lock
+                if not Certificate.objects.filter(id=parent_cert.id).exists():
+                    # upon receiving cert chain from server, we attempt to save the chain into our records
+                    Certificate.save_certificate_chain(
+                        cert_chain, expected_last_id=parent_cert.id
+                    )
 
         csr_key = Key()
         # build up data for csr

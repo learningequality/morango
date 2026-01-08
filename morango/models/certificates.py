@@ -5,6 +5,7 @@ and a ``public_key`` used for verifying that a certificate(s) was properly signe
 """
 import json
 import string
+import logging
 
 import mptt.models
 from django.core.management import call_command
@@ -24,7 +25,10 @@ from morango.errors import CertificateSignatureInvalid
 from morango.errors import NonceDoesNotExist
 from morango.errors import NonceExpired
 from morango.utils import _assert
-
+from django.db import transaction, connection
+from morango.sync.backends.utils import load_backend
+from contextlib import contextmanager
+from django.db.utils import OperationalError
 
 class Certificate(mptt.models.MPTTModel, UUIDModelMixin):
 
@@ -245,6 +249,37 @@ class Certificate(mptt.models.MPTTModel, UUIDModelMixin):
 
     def get_scope(self):
         return self.scope_definition.get_scope(self.scope_params)
+
+    @contextmanager
+    def _attempt_lock_mptt(self):
+        from morango.sync.utils import lock_partitions
+
+        DBBackend = load_backend(connection)
+
+        with transaction.atomic():
+            # Call get_root on the parent as it is already saved in the DB
+            root_id = self.parent.get_root().id if self.parent else self.id
+
+            # lock the partitions in our scope to prevent MPTT tree corruption during concurrent certificate creation
+            lock_partitions(DBBackend, sync_filter=Filter(root_id) if root_id else None)
+            yield
+
+    @contextmanager
+    def _lock_mptt(self):
+        try:
+            with self._attempt_lock_mptt():
+                yield
+        except OperationalError as e:
+            if "deadlock detected" in e.args[0]:
+                logging.error("Deadlock detected when attempting to lock MPTT partitions, retrying once more")
+                with self._attempt_lock_mptt():
+                    yield
+            else:
+                raise
+
+    def save(self, *args, **kwargs):
+        with self._lock_mptt():
+            super().save(*args, **kwargs)
 
     def __str__(self):
         if self.scope_definition:
