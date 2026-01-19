@@ -1,5 +1,6 @@
 import json
 
+from django.test import SimpleTestCase
 from django.test import TestCase
 
 from morango.errors import CertificateIDInvalid
@@ -8,6 +9,7 @@ from morango.errors import CertificateRootScopeInvalid
 from morango.errors import CertificateScopeNotSubset
 from morango.errors import CertificateSignatureInvalid
 from morango.models.certificates import Certificate
+from morango.models.certificates import Filter
 from morango.models.certificates import Key
 from morango.models.certificates import ScopeDefinition
 
@@ -149,3 +151,107 @@ class CertificateKeySettingTestCase(TestCase):
         cert = Certificate()
         cert.public_key = Key()
         self.assertEqual(cert.private_key, None)
+
+
+class FilterTestCase(SimpleTestCase):
+    def test_init__with_string(self):
+        f = Filter("test")
+        self.assertEqual(f._template, "test")
+        self.assertEqual(f._params, {})
+        self.assertEqual(f._filter_tuple, ("test",))
+
+    def test_init__with_params(self):
+        f = Filter("test:${param}", {"param": "value"})
+        self.assertEqual(f._template, "test:${param}")
+        self.assertEqual(f._params, {"param": "value"})
+        self.assertEqual(f._filter_tuple, ("test:value",))
+
+    def test_init__with_json_params(self):
+        f = Filter("test:${param}", '{"param": "value"}')
+        self.assertEqual(f._template, "test:${param}")
+        self.assertEqual(f._params, {"param": "value"})
+        self.assertEqual(f._filter_tuple, ("test:value",))
+
+    def test_is_subset_of(self):
+        f1 = Filter("a\nb")
+        f2 = Filter("a\nb\nc")
+        f3 = Filter("a")
+        f4 = Filter("a:2")
+        self.assertTrue(f1.is_subset_of(f2))
+        self.assertFalse(f2.is_subset_of(f1))
+        self.assertTrue(f1.is_subset_of(f1))
+        self.assertFalse(f1.is_subset_of(f3))
+        self.assertTrue(f4.is_subset_of(f3))
+        self.assertFalse(f3.is_subset_of(f4))
+
+    def test_contains_partition(self):
+        f = Filter("a\nb")
+        self.assertTrue(f.contains_partition("a"))
+        self.assertTrue(f.contains_partition("b"))
+        self.assertFalse(f.contains_partition("c"))
+        self.assertTrue(f.contains_partition("a:123"))
+        self.assertFalse(f.contains_partition("c:123"))
+
+    def test_le_operator(self):
+        f1 = Filter("a\nb")
+        f2 = Filter("a\nb\nc")
+        self.assertTrue(f1 <= f2)
+        self.assertFalse(f2 <= f1)
+
+    def test_eq_operator(self):
+        f1 = Filter("a\nb")
+        f2 = Filter("b\na")
+        f3 = Filter("a\nc")
+        self.assertTrue(f1 == f2)
+        self.assertFalse(f1 == f3)
+        self.assertIsNone(f1)
+
+    def test_contains_operator(self):
+        f = Filter("a\nb")
+        self.assertTrue("a" in f)
+        self.assertTrue("a:2" in f)
+        self.assertFalse("c" in f)
+
+    def test_add_operator(self):
+        f1 = Filter("a")
+        f2 = Filter("b")
+        f3 = f1 + f2
+        self.assertEqual(f3._filter_tuple, ("a", "b"))
+
+    def test_add_operator__duplicates(self):
+        f1 = Filter("a")
+        f2 = Filter("a\nb")
+        f3 = f1 + f2
+        self.assertEqual(f3._filter_tuple, ("a", "b"))
+
+    def test_add_operator__with_none(self):
+        f1 = Filter("a\nb")
+        f2 = None
+        f3 = f1 + f2
+        self.assertEqual(f3._filter_tuple, ("a", "b"))
+
+    def test_iter(self):
+        f = Filter("a\nb")
+        self.assertEqual(list(f), ["a", "b"])
+
+    def test_str(self):
+        f = Filter("a\nb")
+        self.assertEqual(str(f), "a\nb")
+
+    def test_len(self):
+        f = Filter("a\nb")
+        self.assertEqual(len(f), 2)
+        f_empty = Filter("")
+        self.assertEqual(len(f_empty), 1)  # empty string is a single partition
+
+    def test_add(self):
+        f1 = Filter("a")
+        f2 = Filter("b")
+        f3 = Filter.add(f1, f2)
+        self.assertEqual(f3._filter_tuple, ("a", "b"))
+
+    def test_add__with_none(self):
+        f1 = None
+        f2 = Filter("a\nb")
+        f3 = Filter.add(f1, f2)
+        self.assertEqual(f3._filter_tuple, ("a", "b"))
