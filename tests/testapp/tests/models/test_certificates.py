@@ -162,6 +162,10 @@ class FilterTestCase(SimpleTestCase):
         f = Filter("test\tfoo")
         self.assertEqual(f._filter_tuple, ("test", "foo"))
 
+    def test_init__with_params__deprecated(self):
+        f = Filter("test:${id}", params={"id": "1234"})
+        self.assertEqual(f._filter_tuple, ("test:1234",))
+
     def test_is_subset_of(self):
         f1 = Filter("a\nb")
         f2 = Filter("a\nb\nc")

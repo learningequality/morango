@@ -361,10 +361,16 @@ class ScopeDefinition(models.Model):
 
 
 class Filter(object):
-    def __init__(self, filter_str):
+    def __init__(self, filter_str, params=None):
         """
-        :param filter_str: The partition filter string, which may have multiple separated by new lines
+        :param filter_str: The partition filter string, which may have multiple separated by newlines
+        :type filter_str: str
+        :param params: DEPRECATED: USE Filter.from_template() INSTEAD
+        :type params: dict|str
         """
+        if params is not None:
+            filter_str = str(Filter.from_template(filter_str, params=params))
+
         self._filter_tuple = tuple(filter_str.split()) or ("",)
 
     def is_subset_of(self, other):
