@@ -96,6 +96,7 @@ Pipfile
 
 # Jetbrains IDE
 .idea
+/*.iml
 
 *.db
 

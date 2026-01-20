@@ -63,6 +63,13 @@ class SessionContext(object):
         """
         return self
 
+    def join(self, context):
+        """
+        Perform any processing of session context after passing it to the middleware, which will
+        receive the result returned by `prepare` after that has happened
+        """
+        pass
+
     def update(
         self,
         transfer_session=None,
@@ -83,7 +90,7 @@ class SessionContext(object):
         :type capabilities: str[]|None
         :type error: BaseException|None
         """
-        if transfer_session and self.transfer_session:
+        if transfer_session and self.transfer_session and transfer_session.id != self.transfer_session.id:
             raise MorangoContextUpdateError("Transfer session already exists")
         elif (
             transfer_session
@@ -92,14 +99,18 @@ class SessionContext(object):
         ):
             raise MorangoContextUpdateError("Sync session mismatch")
 
-        if sync_filter and self.filter:
-            raise MorangoContextUpdateError("Filter already exists")
+        if sync_filter and self.filter and sync_filter != self.filter:
+            if not self.filter.is_subset_of(sync_filter):
+                raise MorangoContextUpdateError("The existing filter must be a subset of the new filter")
+            if transfer_stages.stage(self.stage) > transfer_stages.stage(transfer_stages.INITIALIZING):
+                raise MorangoContextUpdateError("Cannot update filter after initializing stage")
 
         if is_push is not None and self.is_push is not None:
             raise MorangoContextUpdateError("Push/pull method already exists")
 
         self.transfer_session = transfer_session or self.transfer_session
-        self.filter = sync_filter or self.filter
+        if sync_filter or self.filter:
+            self.filter = Filter.add(self.filter, sync_filter)
         self.is_push = is_push if is_push is not None else self.is_push
         self.capabilities = set(capabilities or self.capabilities) & CAPABILITIES
         self.update_state(stage=stage, stage_status=stage_status)
@@ -402,49 +413,46 @@ class CompositeSessionContext(SessionContext):
         """
         return self.children[self._counter % len(self.children)]
 
+    def join(self, context):
+        """
+        This updates some context attributes that really only make sense logically for what an
+        operation might change during a sync
+
+        :param context: The context that was returned previously from `prepare`
+        :type context: SessionContext
+        """
+        updates = {}
+        if not self.transfer_session and context.transfer_session:
+            # if the transfer session is being resumed, we'd detect a different stage here,
+            # and thus we reset the counter, so we can be sure to start fresh at that stage
+            # on the next invocation of the middleware
+            if (
+                context.transfer_session.transfer_stage
+                and self._stage
+                and context.transfer_session.transfer_stage != self._stage
+            ):
+                self._counter = 0
+                updates.update(
+                    stage=context.transfer_session.transfer_stage,
+                    stage_status=transfer_statuses.PENDING,
+                )
+            updates.update(transfer_session=context.transfer_session)
+        if self.filter != context.filter:
+            updates.update(sync_filter=context.filter)
+        if self.capabilities != context.capabilities:
+            updates.update(capabilities=context.capabilities)
+        if self.error != context.error:
+            updates.update(error=context.error)
+        if updates:
+            self.update(**updates)
+
     def update(self, stage=None, stage_status=None, **kwargs):
-        """
-        Updates the context object and its state
-        :param stage: The str transfer stage
-        :param stage_status: The str transfer stage status
-        :param kwargs: Other arguments to update the context with
-        """
         # update ourselves, but exclude stage and stage_status
         super(CompositeSessionContext, self).update(**kwargs)
         # update children contexts directly, but exclude stage and stage_status
         self._update_attrs(**kwargs)
         # handle state changes after updating children
         self.update_state(stage=stage, stage_status=stage_status)
-
-        # During the initializing stage, we want to make sure to synchronize the transfer session
-        # object between the composite and children contexts, using whatever child context's
-        # transfer session object that was updated on the context during initialization
-        current_stage = stage or self._stage
-        if not self.transfer_session and current_stage == transfer_stages.INITIALIZING:
-            try:
-                transfer_session = next(
-                    c.transfer_session for c in self.children if c.transfer_session
-                )
-                # prepare an updates dictionary, so we can update everything at once
-                updates = dict(transfer_session=transfer_session)
-
-                # if the transfer session is being resumed, we'd detect a different stage here,
-                # and thus we reset the counter, so we can be sure to start fresh at that stage
-                # on the next invocation of the middleware
-                if (
-                    transfer_session.transfer_stage
-                    and transfer_session.transfer_stage != current_stage
-                ):
-                    self._counter = 0
-                    updates.update(
-                        stage=transfer_session.transfer_stage,
-                        stage_status=transfer_statuses.PENDING,
-                    )
-
-                # recurse into update with transfer session and possibly state updates too
-                self.update(**updates)
-            except StopIteration:
-                pass
 
     def update_state(self, stage=None, stage_status=None):
         """

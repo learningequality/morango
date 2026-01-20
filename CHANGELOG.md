@@ -2,6 +2,11 @@
 
 List of the most important changes for each release.
 
+## 0.8.6
+- Allows sync operations to modify the context, particularly the sync filter, as long as the original is a subset of the new filter
+- Deprecates usage of `Filter` for parameter replacement. Use `Filter.from_template` instead
+- Adds additional utilities to `Filter` class and defensive logic for various scenarios
+
 ## 0.8.5
 - Prevents MPTT corruption that occurs with concurrent certificate creation
 

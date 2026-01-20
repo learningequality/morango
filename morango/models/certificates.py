@@ -4,13 +4,16 @@ Each certificate has a ``private_key`` used for signing (child) certificates (th
 and a ``public_key`` used for verifying that a certificate(s) was properly signed.
 """
 import json
-import string
 import logging
+import string
+from contextlib import contextmanager
 
 import mptt.models
 from django.core.management import call_command
+from django.db import connection
 from django.db import models
 from django.db import transaction
+from django.db.utils import OperationalError
 from django.utils import timezone
 
 from .fields.crypto import Key
@@ -24,11 +27,9 @@ from morango.errors import CertificateScopeNotSubset
 from morango.errors import CertificateSignatureInvalid
 from morango.errors import NonceDoesNotExist
 from morango.errors import NonceExpired
-from morango.utils import _assert
-from django.db import transaction, connection
 from morango.sync.backends.utils import load_backend
-from contextlib import contextmanager
-from django.db.utils import OperationalError
+from morango.utils import _assert
+
 
 class Certificate(mptt.models.MPTTModel, UUIDModelMixin):
 
@@ -360,45 +361,89 @@ class ScopeDefinition(models.Model):
 
 
 class Filter(object):
-    def __init__(self, template, params={}):
-        # ensure params have been deserialized
-        if isinstance(params, str):
-            params = json.loads(params)
-        self._template = template
-        self._params = params
-        self._filter_string = string.Template(template).safe_substitute(params)
-        self._filter_tuple = tuple(self._filter_string.split()) or ("",)
+    def __init__(self, filter_str, params=None):
+        """
+        :param filter_str: The partition filter string, which may have multiple separated by newlines
+        :type filter_str: str
+        :param params: DEPRECATED: USE Filter.from_template() INSTEAD
+        :type params: dict|str
+        """
+        if params is not None:
+            logging.warning("DEPRECATED: Constructing a filter with a template and params is deprecated. Use Filter.from_template() instead")
+            filter_str = str(Filter.from_template(filter_str, params=params))
+
+        self._filter_tuple = tuple(filter_str.split()) or ("",)
 
     def is_subset_of(self, other):
-        for partition in self._filter_tuple:
-            if not partition.startswith(other._filter_tuple):
+        """
+        :param other: The other Filter
+        :type other: Filter
+        :return: A boolean on whether this Filter is captured within the other Filter
+        :rtype: bool
+        """
+        for partition in self:
+            if not other.contains_partition(partition):
                 return False
         return True
 
     def contains_partition(self, partition):
+        """Returns True if the partition starts with as least one of the partitions in this Filter"""
         return partition.startswith(self._filter_tuple)
 
+    def contains_exact_partition(self, partition):
+        """Returns True if the partition exactly matches one of the partitions in this Filter"""
+        return partition in self._filter_tuple
+
+    def copy(self):
+        return Filter(str(self))
+
     def __le__(self, other):
+        """Returns True if this Filter is a subset of the other"""
         return self.is_subset_of(other)
 
     def __eq__(self, other):
+        """Returns True if this Filter has exactly the same partitions as the other"""
         if other is None:
             return False
-        for partition in self._filter_tuple:
-            if partition not in other._filter_tuple:
+        for partition in self:
+            if not other.contains_exact_partition(partition):
                 return False
-        for partition in other._filter_tuple:
-            if partition not in self._filter_tuple:
+        for partition in other:
+            if not self.contains_exact_partition(partition):
                 return False
         return True
 
     def __contains__(self, partition):
+        """
+        Performs a 'startswith' comparison on the partition, determining whether it matches or
+        is a subset of any partition in this Filter
+
+        :param partition: str
+        :return: A boolean
+        :rtype: bool
+        """
         return self.contains_partition(partition)
 
     def __add__(self, other):
-        return Filter(self._filter_string + "\n" + other._filter_string)
+        """
+        The Filter's addition operator overload
+        :param other: Filter or None
+        :type other: Filter|None
+        :return: The combined Filter
+        :rtype: Filter
+        """
+        if other is None:
+            return self
+        # create a list of partition filters, deduplicating them between the two filter objects
+        partitions = []
+        partitions.extend(p for p in self if p)
+        partitions.extend(p for p in other if p and p not in partitions)
+        return Filter("\n".join(partitions))
 
     def __iter__(self):
+        """
+        :rtype: tuple[str]
+        """
         return iter(self._filter_tuple)
 
     def __str__(self):
@@ -407,13 +452,48 @@ class Filter(object):
     def __len__(self):
         return len(self._filter_tuple)
 
+    @classmethod
+    def add(cls, filter_a, filter_b):
+        """
+        The Filter's addition operator overload is already defensive against None being the
+        right-hand operand, but this method is defensive against None being the left-hand operand
+
+        :param filter_a: A Filter or None
+        :type filter_a: Filter|None
+        :param filter_b: A Filter or None
+        :type filter_b: Filter|None
+        :return: The combined Filter or None
+        :rtype: Filter|None
+        """
+        if filter_a is None:
+            return filter_b
+        return filter_a + filter_b
+
+    @classmethod
+    def from_template(cls, template, params=None):
+        """
+        Create a filter from a string template, which may have params that will be replaced with
+        values passed to `params`
+
+        :param template: The partition filter template
+        :type template: str
+        :param params: The param dictionary or JSON object string
+        :type params: dict|str
+        :return: The filter with params replaced
+        :rtype: Filter
+        """
+        if isinstance(params, str):
+            params = json.loads(params)
+        params = params or {}
+        return Filter(string.Template(template).safe_substitute(params))
+
 
 class Scope(object):
     def __init__(self, definition, params):
         # turn the scope definition filter templates into Filter objects
-        rw_filter = Filter(definition.read_write_filter_template, params)
-        self.read_filter = rw_filter + Filter(definition.read_filter_template, params)
-        self.write_filter = rw_filter + Filter(definition.write_filter_template, params)
+        rw_filter = Filter.from_template(definition.read_write_filter_template, params)
+        self.read_filter = rw_filter + Filter.from_template(definition.read_filter_template, params)
+        self.write_filter = rw_filter + Filter.from_template(definition.write_filter_template, params)
 
     def is_subset_of(self, other):
         if not self.read_filter.is_subset_of(other.read_filter):

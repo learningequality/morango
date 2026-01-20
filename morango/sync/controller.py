@@ -253,6 +253,9 @@ class SessionController(object):
             # invoke the middleware with the prepared context
             result = middleware(prepared_context)
 
+            # return the prepared context back
+            context.join(prepared_context)
+
             # don't update stage result if context's stage was updated during operation
             if context.stage == stage:
                 context.update(stage_status=result)
