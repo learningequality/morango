@@ -369,6 +369,7 @@ class Filter(object):
         :type params: dict|str
         """
         if params is not None:
+            logging.warning("DEPRECATED: Constructing a filter with a template and params is deprecated. Use Filter.from_template() instead")
             filter_str = str(Filter.from_template(filter_str, params=params))
 
         self._filter_tuple = tuple(filter_str.split()) or ("",)
