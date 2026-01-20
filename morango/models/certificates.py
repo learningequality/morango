@@ -361,20 +361,11 @@ class ScopeDefinition(models.Model):
 
 
 class Filter(object):
-    def __init__(self, template, params=None):
+    def __init__(self, filter_str):
         """
-        :param template: The partition filter string, which may have parameters (`${param}`) and new lines
-        :type template: str
-        :param params: Optional parameter values to fill in the template
-        :type params: dict|str|None
+        :param filter_str: The partition filter string, which may have multiple separated by new lines
         """
-        # ensure params have been deserialized
-        if isinstance(params, str):
-            params = json.loads(params)
-        self._template = template
-        self._params = params or {}
-        filter_string = string.Template(template).safe_substitute(params)
-        self._filter_tuple = tuple(filter_string.split()) or ("",)
+        self._filter_tuple = tuple(filter_str.split()) or ("",)
 
     def is_subset_of(self, other):
         """
@@ -395,6 +386,9 @@ class Filter(object):
     def contains_exact_partition(self, partition):
         """Returns True if the partition exactly matches one of the partitions in this Filter"""
         return partition in self._filter_tuple
+
+    def copy(self):
+        return Filter(str(self))
 
     def __le__(self, other):
         """Returns True if this Filter is a subset of the other"""
@@ -433,6 +427,7 @@ class Filter(object):
         """
         if other is None:
             return self
+        # create a list of partition filters, deduplicating them between the two filter objects
         partitions = []
         partitions.extend(p for p in self if p)
         partitions.extend(p for p in other if p and p not in partitions)
@@ -467,13 +462,31 @@ class Filter(object):
             return filter_b
         return filter_a + filter_b
 
+    @classmethod
+    def from_template(cls, template, params=None):
+        """
+        Create a filter from a string template, which may have params that will be replaced with
+        values passed to `params`
+
+        :param template: The partition filter template
+        :type template: str
+        :param params: The param dictionary or JSON object string
+        :type params: dict|str
+        :return: The filter with params replaced
+        :rtype: Filter
+        """
+        if isinstance(params, str):
+            params = json.loads(params)
+        params = params or {}
+        return Filter(string.Template(template).safe_substitute(params))
+
 
 class Scope(object):
     def __init__(self, definition, params):
         # turn the scope definition filter templates into Filter objects
-        rw_filter = Filter(definition.read_write_filter_template, params)
-        self.read_filter = rw_filter + Filter(definition.read_filter_template, params)
-        self.write_filter = rw_filter + Filter(definition.write_filter_template, params)
+        rw_filter = Filter.from_template(definition.read_write_filter_template, params)
+        self.read_filter = rw_filter + Filter.from_template(definition.read_filter_template, params)
+        self.write_filter = rw_filter + Filter.from_template(definition.write_filter_template, params)
 
     def is_subset_of(self, other):
         if not self.read_filter.is_subset_of(other.read_filter):

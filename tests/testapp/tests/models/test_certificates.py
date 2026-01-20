@@ -156,33 +156,25 @@ class CertificateKeySettingTestCase(TestCase):
 class FilterTestCase(SimpleTestCase):
     def test_init__with_string(self):
         f = Filter("test")
-        self.assertEqual(f._template, "test")
-        self.assertEqual(f._params, {})
         self.assertEqual(f._filter_tuple, ("test",))
 
-    def test_init__with_params(self):
-        f = Filter("test:${param}", {"param": "value"})
-        self.assertEqual(f._template, "test:${param}")
-        self.assertEqual(f._params, {"param": "value"})
-        self.assertEqual(f._filter_tuple, ("test:value",))
-
-    def test_init__with_json_params(self):
-        f = Filter("test:${param}", '{"param": "value"}')
-        self.assertEqual(f._template, "test:${param}")
-        self.assertEqual(f._params, {"param": "value"})
-        self.assertEqual(f._filter_tuple, ("test:value",))
+    def test_init__with_newlines(self):
+        f = Filter("test\tfoo")
+        self.assertEqual(f._filter_tuple, ("test", "foo"))
 
     def test_is_subset_of(self):
         f1 = Filter("a\nb")
         f2 = Filter("a\nb\nc")
         f3 = Filter("a")
         f4 = Filter("a:2")
+        f5 = Filter("a:2\nb")
         self.assertTrue(f1.is_subset_of(f2))
         self.assertFalse(f2.is_subset_of(f1))
         self.assertTrue(f1.is_subset_of(f1))
         self.assertFalse(f1.is_subset_of(f3))
         self.assertTrue(f4.is_subset_of(f3))
         self.assertFalse(f3.is_subset_of(f4))
+        self.assertFalse(f5.is_subset_of(f4))
 
     def test_contains_partition(self):
         f = Filter("a\nb")
@@ -204,13 +196,19 @@ class FilterTestCase(SimpleTestCase):
         f3 = Filter("a\nc")
         self.assertTrue(f1 == f2)
         self.assertFalse(f1 == f3)
-        self.assertIsNone(f1)
+        fN = None
+        self.assertFalse(f1 == fN)
 
     def test_contains_operator(self):
         f = Filter("a\nb")
         self.assertTrue("a" in f)
         self.assertTrue("a:2" in f)
         self.assertFalse("c" in f)
+
+    def test_copy(self):
+        f = Filter("a\nb")
+        f_copy = f.copy()
+        self.assertEqual(f._filter_tuple, f_copy._filter_tuple)
 
     def test_add_operator(self):
         f1 = Filter("a")
@@ -255,3 +253,11 @@ class FilterTestCase(SimpleTestCase):
         f2 = Filter("a\nb")
         f3 = Filter.add(f1, f2)
         self.assertEqual(f3._filter_tuple, ("a", "b"))
+
+    def test_from_template(self):
+        f = Filter.from_template("test:${param}", {"param": "value"})
+        self.assertEqual(f._filter_tuple, ("test:value",))
+
+    def test_from_template__with_json_params(self):
+        f = Filter.from_template("test:${param}", '{"param": "value"}')
+        self.assertEqual(f._filter_tuple, ("test:value",))
