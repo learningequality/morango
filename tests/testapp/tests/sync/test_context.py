@@ -39,7 +39,7 @@ class SessionContextTestCase(SimpleTestCase):
 
     def test_init__no_transfer_session(self):
         sync_session = mock.Mock(spec=SyncSession)
-        sync_filter = mock.Mock(spec=Filter)
+        sync_filter = Filter("a")
 
         context = TestSessionContext(sync_session=sync_session, sync_filter=sync_filter, is_push=True)
         self.assertEqual(sync_session, context.sync_session)
@@ -89,7 +89,7 @@ class SessionContextTestCase(SimpleTestCase):
 
     def test_update__no_overwrite__transfer_session(self):
         sync_session = mock.Mock(spec=SyncSession)
-        sync_filter = mock.Mock(spec=Filter)
+        sync_filter = Filter("a")
         transfer_session = mock.Mock(
             spec=TransferSession,
             sync_session=sync_session,
@@ -104,11 +104,44 @@ class SessionContextTestCase(SimpleTestCase):
             context.update(transfer_session=transfer_session)
 
     def test_update__no_overwrite__filter(self):
-        sync_filter = mock.Mock(spec=Filter)
-        context = SessionContext(sync_filter=sync_filter)
+        existing_filter = Filter("a:1")
+        context = TestSessionContext(sync_filter=existing_filter)
+        context.update_state(stage=transfer_stages.INITIALIZING)
 
+        new_filter = Filter("b:2")
         with self.assertRaises(MorangoContextUpdateError):
-            context.update(sync_filter=sync_filter)
+            context.update(sync_filter=new_filter)
+
+    def test_update__overwrite__filter_subset(self):
+        existing_filter = Filter("a:1")
+        context = TestSessionContext(sync_filter=existing_filter)
+        context.update_state(stage=transfer_stages.INITIALIZING)
+
+        new_filter = Filter("a:1\nb:2")
+        self.assertTrue(existing_filter.is_subset_of(new_filter))
+        try:
+            context.update(sync_filter=new_filter)
+        except MorangoContextUpdateError:
+            self.fail("Context update failed with filter that should be allowed")
+
+    def test_update__overwrite__filter_subset__not_initializing(self):
+        existing_filter = Filter("a:1")
+        context = TestSessionContext(sync_filter=existing_filter)
+        context.update_state(stage=transfer_stages.TRANSFERRING)
+
+        new_filter = Filter("a:1\nb:2")
+        self.assertTrue(existing_filter.is_subset_of(new_filter))
+        with self.assertRaises(MorangoContextUpdateError):
+            context.update(sync_filter=new_filter)
+
+    def test_update__overwrite__filter_subset2(self):
+        existing_filter = Filter("a:1")
+        context = TestSessionContext(sync_filter=existing_filter)
+        context.update_state(stage=transfer_stages.INITIALIZING)
+
+        new_filter = Filter("a:1:a")
+        with self.assertRaises(MorangoContextUpdateError):
+            context.update(sync_filter=new_filter)
 
     def test_update__no_overwrite__push(self):
         context = SessionContext(is_push=True)
@@ -120,7 +153,7 @@ class SessionContextTestCase(SimpleTestCase):
     def test_update__basic(self):
         context = TestSessionContext()
 
-        sync_filter = mock.Mock(spec=Filter)
+        sync_filter = Filter("a")
         context.update(
             sync_filter=sync_filter,
             is_push=True,
@@ -141,7 +174,7 @@ class SessionContextTestCase(SimpleTestCase):
         )
 
         sync_session = mock.Mock(spec=SyncSession)
-        sync_filter = mock.Mock(spec=Filter)
+        sync_filter = Filter("a")
         transfer_session = mock.Mock(
             spec=TransferSession,
             sync_session=sync_session,
@@ -179,6 +212,7 @@ class LocalSessionContextTestCase(SimpleTestCase):
             transfer_stage=transfer_stages.TRANSFERRING,
             transfer_stage_status=transfer_statuses.STARTED,
         )
+        transfer_session.get_filter.return_value = Filter("a")
         context = LocalSessionContext()
         self.assertNotEqual(transfer_stages.TRANSFERRING, context.stage)
         self.assertNotEqual(transfer_statuses.STARTED, context.stage_status)
@@ -283,8 +317,22 @@ class ContextPicklingTestCase(TestCase):
 class CompositeSessionContextTestCase(SimpleTestCase):
     def setUp(self):
         super(CompositeSessionContextTestCase, self).setUp()
-        self.sub_context_a = mock.Mock(spec=LocalSessionContext, transfer_session=None)
-        self.sub_context_b = mock.Mock(spec=NetworkSessionContext, transfer_session=None)
+        self.sub_context_a = mock.Mock(
+            spec=LocalSessionContext,
+            transfer_session=None,
+            is_push=True,
+            filter=Filter("a"),
+            capabilities=("test",),
+            error=None,
+        )
+        self.sub_context_b = mock.Mock(
+            spec=NetworkSessionContext,
+            transfer_session=None,
+            is_push=True,
+            filter=Filter("a"),
+            capabilities=("test",),
+            error=None,
+        )
         self.context = CompositeSessionContext([self.sub_context_a, self.sub_context_b])
         self.stages = (transfer_stages.INITIALIZING, transfer_stages.QUEUING)
 
@@ -309,9 +357,11 @@ class CompositeSessionContextTestCase(SimpleTestCase):
                 )
                 self.sub_context_a.transfer_session = transfer_session
 
+            self.context.join(prepared_context)
             self.context.update(stage_status=transfer_statuses.COMPLETED)
             self.sub_context_a.update_state.assert_not_called()
             self.sub_context_b.update_state.assert_not_called()
+            self.assertIsNotNone(self.context.transfer_session)
 
             self.context.update(stage=stage, stage_status=transfer_statuses.PENDING)
             self.sub_context_a.update_state.assert_not_called()
@@ -344,3 +394,47 @@ class CompositeSessionContextTestCase(SimpleTestCase):
             result = controller.proceed_to(stage)
             self.assertEqual(result, transfer_statuses.COMPLETED)
             middleware[i].assert_called_once_with(self.sub_context_b)
+
+    def test_integration__status(self):
+        middleware = mock.Mock(related_stage=transfer_stages.INITIALIZING)
+
+        def _middleware(context):
+            context.transfer_session = TransferSession(
+                sync_session=SyncSession(),
+                transfer_stage=transfer_stages.INITIALIZING,
+                transfer_stage_status=transfer_statuses.PENDING
+            )
+            return transfer_statuses.COMPLETED
+
+        middleware.side_effect = _middleware
+        controller = SessionController([middleware], mock.Mock(), context=self.context)
+
+        result = controller.proceed_to(transfer_stages.INITIALIZING)
+        middleware.assert_called_once_with(self.sub_context_a)
+        self.assertEqual(result, transfer_statuses.PENDING)
+        self.assertEqual(self.context.stage, transfer_stages.INITIALIZING)
+
+        middleware.reset_mock()
+        result = controller.proceed_to(transfer_stages.INITIALIZING)
+        middleware.assert_called_once_with(self.sub_context_b)
+        self.assertEqual(result, transfer_statuses.COMPLETED)
+        self.assertEqual(self.context.stage, transfer_stages.INITIALIZING)
+
+    def test_integration__resumption(self):
+        middleware = mock.Mock(related_stage=transfer_stages.INITIALIZING)
+
+        def _middleware(context):
+            context.transfer_session = TransferSession(
+                sync_session=SyncSession(),
+                transfer_stage=transfer_stages.DESERIALIZING,
+                transfer_stage_status=transfer_statuses.PENDING
+            )
+            return transfer_statuses.COMPLETED
+
+        middleware.side_effect = _middleware
+        controller = SessionController([middleware], mock.Mock(), context=self.context)
+        result = controller.proceed_to(transfer_stages.INITIALIZING)
+
+        # status should match transfer session
+        self.assertEqual(result, transfer_statuses.PENDING)
+        self.assertEqual(self.context.stage, transfer_stages.DESERIALIZING)

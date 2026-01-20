@@ -412,6 +412,7 @@ class TransferClientTestCase(BaseTransferClientTestCase):
         )
         self.client.context.transfer_session = None
         self.client.context.children[0].transfer_session = self.transfer_session
+        self.client.context.join(self.client.context.children[0])
         self.client.context.update(stage_status=transfer_statuses.COMPLETED)
         self.assertEqual(self.transfer_session, self.client.context.transfer_session)
         for context in self.client.context.children:
