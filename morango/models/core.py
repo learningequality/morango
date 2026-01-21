@@ -453,7 +453,7 @@ class Store(AbstractStore):
             models.Index(fields=["profile", "model_name", "partition", "dirty_bit"], condition=models.Q(dirty_bit=True), name="idx_morango_deserialize"),
         ]
 
-    def _deserialize_store_model(self, fk_cache, defer_fks=False):  # noqa: C901
+    def _deserialize_store_model(self, fk_cache, defer_fks=False, sync_filter=None):  # noqa: C901
         """
         When deserializing a store model, we look at the deleted flags to know if we should delete the app model.
         Upon loading the app model in memory we validate the app models fields, if any errors occurs we follow
@@ -461,6 +461,13 @@ class Store(AbstractStore):
         We return:
             None => if the model was deleted successfully
             model => if the model validates successfully
+
+        :param fk_cache: A cache for foreign key lookups
+        :type fk_cache: dict
+        :param defer_fks: Whether to defer foreign key lookups
+        :type defer_fks: bool
+        :param sync_filter: The current sync's filter, if any
+        :type sync_filter: Filter|None
         """
         deferred_fks = {}
         klass_model = syncable_models.get_model(self.profile, self.model_name)
@@ -476,8 +483,10 @@ class Store(AbstractStore):
                 klass_model.syncing_objects.filter(id=self.id).delete()
             return None, deferred_fks
         else:
+            if sync_filter:
+                print("Has filter", sync_filter)
             # load model into memory
-            app_model = klass_model.deserialize(json.loads(self.serialized))
+            app_model = klass_model.deserialize(json.loads(self.serialized), sync_filter=sync_filter)
             app_model._morango_source_id = self.source_id
             app_model._morango_partition = self.partition
             app_model._morango_dirty_bit = False
@@ -485,9 +494,9 @@ class Store(AbstractStore):
             try:
                 # validate and return the model
                 if defer_fks:
-                    deferred_fks = app_model.deferred_clean_fields()
+                    deferred_fks = app_model.deferred_clean_fields(sync_filter=sync_filter)
                 else:
-                    app_model.cached_clean_fields(fk_cache)
+                    app_model.cached_clean_fields(fk_cache, sync_filter=sync_filter)
                 return app_model, deferred_fks
 
             except (exceptions.ValidationError, exceptions.ObjectDoesNotExist) as e:
@@ -853,15 +862,31 @@ class SyncableModel(UUIDModelMixin):
                             obj._update_hard_deleted_models()
             return collector.delete()
 
-    def cached_clean_fields(self, fk_lookup_cache):
+    def clean_fields(self, exclude=None, sync_filter=None):
+        """
+        Immediately validates all fields
+
+        :param exclude: A list of field names to exclude from validation
+        :type exclude: list[str]
+        :param sync_filter: The current sync's filter, if any
+        :type sync_filter: Filter|None
+        """
+        super(SyncableModel, self).clean_fields(exclude=exclude)
+
+    def cached_clean_fields(self, fk_lookup_cache, exclude=None, sync_filter=None):
         """
         Immediately validates all fields, but uses a cache for foreign key (FK) lookups to reduce
         repeated queries for many records with the same FK
 
         :param fk_lookup_cache: A dictionary to use as a cache to prevent querying the database if a
             FK exists in the cache, having already been validated
+        :type fk_lookup_cache: dict
+        :param exclude: A list of field names to exclude from validation
+        :type exclude: list[str]
+        :param sync_filter: The current sync's filter, if any
+        :type sync_filter: Filter|None
         """
-        excluded_fields = []
+        excluded_fields = exclude or []
         fk_fields = [
             field for field in self._meta.fields if isinstance(field, models.ForeignKey)
         ]
@@ -883,7 +908,7 @@ class SyncableModel(UUIDModelMixin):
                     fk_lookup_cache[key] = 1
                     excluded_fields.append(f.name)
 
-        self.clean_fields(exclude=excluded_fields)
+        self.clean_fields(exclude=excluded_fields, sync_filter=sync_filter)
 
         # after cleaning, we can confidently set ourselves in the fk_lookup_cache
         self_key = "{id}_{db_table}".format(
@@ -892,15 +917,19 @@ class SyncableModel(UUIDModelMixin):
         )
         fk_lookup_cache[self_key] = 1
 
-    def deferred_clean_fields(self):
+    def deferred_clean_fields(self, exclude=None, sync_filter=None):
         """
         Calls `.clean_fields()` but excludes all foreign key fields and instead returns them as a
         dictionary for deferred batch processing
 
+        :param exclude: A list of field names to exclude from validation
+        :type exclude: list[str]
+        :param sync_filter: The current sync's filter, if any
+        :type sync_filter: Filter|None
         :return: A dictionary containing lists of `ForeignKeyReference`s keyed by the name of the
             model being referenced by the FK
         """
-        excluded_fields = []
+        excluded_fields = exclude or []
         deferred_fks = defaultdict(list)
         for field in self._meta.fields:
             if not isinstance(field, models.ForeignKey):
@@ -918,7 +947,7 @@ class SyncableModel(UUIDModelMixin):
                 )
             )
 
-        self.clean_fields(exclude=excluded_fields)
+        self.clean_fields(exclude=excluded_fields, sync_filter=sync_filter)
         return deferred_fks
 
     def serialize(self):
@@ -939,8 +968,14 @@ class SyncableModel(UUIDModelMixin):
         return data
 
     @classmethod
-    def deserialize(cls, dict_model):
-        """Returns an unsaved class object based on the valid properties passed in."""
+    def deserialize(cls, dict_model, sync_filter=None):
+        """Returns an unsaved class object based on the valid properties passed in.
+
+        :param dict_model: The model data to deserialize
+        :type dict_model: dict
+        :param sync_filter: The current sync's filter, if any
+        :type sync_filter: Filter|None
+        """
         kwargs = {}
         for f in cls._meta.concrete_fields:
             if f.attname in dict_model:

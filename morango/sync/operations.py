@@ -465,6 +465,7 @@ def _deserialize_from_store(profile, skip_erroring=False, filter=None):
                     lambda x, y: x | y,
                     [Q(partition__startswith=prefix) for prefix in filter],
                 )
+                print("prefix_condition: ", prefix_condition)
                 store_models = store_models.filter(prefix_condition)
 
             # if requested, skip any records that previously errored, to be faster
@@ -485,7 +486,7 @@ def _deserialize_from_store(profile, skip_erroring=False, filter=None):
                     for store_model in dirty_children:
                         try:
                             app_model, _ = store_model._deserialize_store_model(
-                                fk_cache
+                                fk_cache, sync_filter=filter
                             )
                             if app_model:
                                 with mute_signals(signals.pre_save, signals.post_save):
@@ -538,7 +539,7 @@ def _deserialize_from_store(profile, skip_erroring=False, filter=None):
                             app_model,
                             model_deferred_fks,
                         ) = store_model._deserialize_store_model(
-                            fk_cache, defer_fks=True
+                            fk_cache, defer_fks=True, sync_filter=filter,
                         )
                         if app_model:
                             app_models.append(app_model)
