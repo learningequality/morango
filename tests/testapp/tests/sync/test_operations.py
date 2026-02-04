@@ -12,6 +12,7 @@ from django.test import override_settings
 from django.test import TestCase
 from django.test import TransactionTestCase
 from django.utils import timezone
+from facility_profile.models import ConditionalLog
 from facility_profile.models import Facility
 from facility_profile.models import MyUser
 from facility_profile.models import SummaryLog
@@ -1135,9 +1136,13 @@ class DequeueBufferIntoStoreTestCase(TestCase):
 class DeserializationTestCases(TestCase):
 
     def setUp(self):
-
         self.profile = "facilitydata"
 
+        self.serialized_facility = {
+            "id": uuid.uuid4().hex,
+            "name": "test facility",
+            "now_date": timezone.now().isoformat()
+        }
         self.serialized_user = {
             "id": uuid.uuid4().hex,
             "username": "testuser",
@@ -1153,9 +1158,16 @@ class DeserializationTestCases(TestCase):
             "user_id": self.serialized_user["id"],
             "content_id": uuid.uuid4().hex,
         }
+        self.serialized_conditional = {
+            "id": uuid.uuid4().hex,
+            "facility_id": self.serialized_facility["id"],
+            "user_id": self.serialized_user["id"],
+            "content_id": uuid.uuid4().hex,
+        }
 
     def serialize_to_store(self, Model, data):
         instance = Model(**data)
+        instance.calculate_uuid()
         serialized = instance.serialize()
         Store.objects.create(
             id=serialized["id"],
@@ -1170,17 +1182,70 @@ class DeserializationTestCases(TestCase):
         )
 
     def serialize_all_to_store(self):
+        self.serialize_to_store(Facility, self.serialized_facility)
         self.serialize_to_store(MyUser, self.serialized_user)
         self.serialize_to_store(SummaryLog, self.serialized_log1)
         self.serialize_to_store(SummaryLog, self.serialized_log2)
+        self.serialize_to_store(ConditionalLog, self.serialized_conditional)
 
-    def assert_deserialization(self, user_deserialized=True, log1_deserialized=True, log2_deserialized=True):
-        assert MyUser.objects.filter(id=self.serialized_user["id"]).exists() == user_deserialized
-        assert SummaryLog.objects.filter(id=self.serialized_log1["id"]).exists() == log1_deserialized
-        assert SummaryLog.objects.filter(id=self.serialized_log2["id"]).exists() == log2_deserialized
-        assert Store.objects.get(id=self.serialized_user["id"]).dirty_bit == (not user_deserialized)
-        assert Store.objects.get(id=self.serialized_log1["id"]).dirty_bit == (not log1_deserialized)
-        assert Store.objects.get(id=self.serialized_log2["id"]).dirty_bit == (not log2_deserialized)
+    def assert_deserialization(
+        self,
+        facility_deserialized=True,
+        user_deserialized=True,
+        log1_deserialized=True,
+        log2_deserialized=True,
+        conditional_deserialized=True,
+    ):
+        self.assertEqual(
+            Facility.objects.filter(id=self.serialized_facility["id"]).exists(),
+            facility_deserialized,
+            msg="Facility was not deserialized" if facility_deserialized else "Facility was deserialized"
+        )
+        self.assertEqual(
+            MyUser.objects.filter(id=self.serialized_user["id"]).exists(),
+            user_deserialized,
+            msg="User was not deserialized" if user_deserialized else "User was deserialized"
+        )
+        self.assertEqual(
+            SummaryLog.objects.filter(id=self.serialized_log1["id"]).exists(),
+            log1_deserialized,
+            msg="Log1 was not deserialized" if log1_deserialized else "Log1 was deserialized"
+        )
+        self.assertEqual(
+            SummaryLog.objects.filter(id=self.serialized_log2["id"]).exists(),
+            log2_deserialized,
+            msg="Log2 was not deserialized" if log2_deserialized else "Log2 was deserialized"
+        )
+        self.assertEqual(
+            ConditionalLog.objects.filter(id=self.serialized_conditional["id"]).exists(),
+            conditional_deserialized,
+            msg="Conditional was not deserialized" if conditional_deserialized else "Conditional was deserialized"
+        )
+        self.assertEqual(
+            Store.objects.get(id=self.serialized_facility["id"]).dirty_bit,
+            (not facility_deserialized),
+            msg="Facility store does not reflect deserialization" if not facility_deserialized else "Facility store reflects deserialization"
+        )
+        self.assertEqual(
+            Store.objects.get(id=self.serialized_user["id"]).dirty_bit,
+            (not user_deserialized),
+            msg="User store does not reflect deserialization" if not user_deserialized else "User store reflects deserialization"
+        )
+        self.assertEqual(
+            Store.objects.get(id=self.serialized_log1["id"]).dirty_bit,
+            (not log1_deserialized),
+            msg="Log1 store does not reflect deserialization" if not log1_deserialized else "Log1 store reflects deserialization"
+        )
+        self.assertEqual(
+            Store.objects.get(id=self.serialized_log2["id"]).dirty_bit,
+            (not log2_deserialized),
+            msg="Log2 store does not reflect deserialization" if not log2_deserialized else "Log2 store reflects deserialization"
+        )
+        self.assertEqual(
+            Store.objects.get(id=self.serialized_conditional["id"]).dirty_bit,
+            (not conditional_deserialized),
+            msg="Conditional store does not reflect deserialization" if not conditional_deserialized else "Conditional store reflects deserialization"
+        )
 
     def test_successful_deserialization(self):
 
@@ -1198,7 +1263,12 @@ class DeserializationTestCases(TestCase):
 
         _deserialize_from_store(self.profile)
 
-        self.assert_deserialization(user_deserialized=False, log1_deserialized=False, log2_deserialized=False)
+        self.assert_deserialization(
+            user_deserialized=False,
+            log1_deserialized=False,
+            log2_deserialized=False,
+            conditional_deserialized=False
+        )
 
     def test_deserialization_with_excessively_long_username(self):
 
@@ -1208,7 +1278,12 @@ class DeserializationTestCases(TestCase):
 
         _deserialize_from_store(self.profile)
 
-        self.assert_deserialization(user_deserialized=False, log1_deserialized=False, log2_deserialized=False)
+        self.assert_deserialization(
+            user_deserialized=False,
+            log1_deserialized=False,
+            log2_deserialized=False,
+            conditional_deserialized=False
+        )
 
     def test_deserialization_with_invalid_content_id(self):
 
@@ -1229,3 +1304,25 @@ class DeserializationTestCases(TestCase):
         _deserialize_from_store(self.profile)
 
         self.assert_deserialization(log1_deserialized=False)
+
+    def test_deserialization__conditional__no_filter(self):
+        self.serialize_all_to_store()
+
+        _deserialize_from_store(self.profile)
+
+        self.assert_deserialization()
+        conditional_log = ConditionalLog.objects.get(pk=self.serialized_conditional["id"])
+        self.assertEqual(conditional_log.user_id, self.serialized_user["id"])
+
+    def test_deserialization__conditional__with_filter(self):
+        self.serialize_all_to_store()
+
+        _deserialize_from_store(self.profile, filter=Filter(self.serialized_facility["id"]))
+
+        self.assert_deserialization(
+            user_deserialized=False,
+            log1_deserialized=False,
+            log2_deserialized=False,
+        )
+        conditional_log = ConditionalLog.objects.get(pk=self.serialized_conditional["id"])
+        self.assertIsNone(conditional_log.user_id)

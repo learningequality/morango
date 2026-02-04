@@ -22,8 +22,6 @@ class SyncableUserModelManager(SyncableModelManager, UserManager):
 
 
 class Facility(FacilityDataSyncableModel):
-
-    # Morango syncing settings
     morango_model_name = "facility"
 
     name = models.CharField(max_length=100)
@@ -34,7 +32,10 @@ class Facility(FacilityDataSyncableModel):
         return self.name
 
     def calculate_partition(self, *args, **kwargs):
-        return ''
+        if self.id:
+            return uuid.UUID(self.id).hex
+        else:
+            return '{id}'.format(id=self.ID_PLACEHOLDER)
 
     def clean_fields(self, *args, **kwargs):
         # reference parent here just to trigger a non-validation error to make sure we handle it
@@ -43,7 +44,6 @@ class Facility(FacilityDataSyncableModel):
 
 
 class MyUser(AbstractBaseUser, FacilityDataSyncableModel):
-    # Morango syncing settings
     morango_model_name = "user"
 
     USERNAME_FIELD = "username"
@@ -73,21 +73,19 @@ class MyUser(AbstractBaseUser, FacilityDataSyncableModel):
 
 
 class SummaryLog(FacilityDataSyncableModel):
-    # Morango syncing settings
     morango_model_name = "contentsummarylog"
 
     user = models.ForeignKey(MyUser, on_delete=models.CASCADE)
     content_id = UUIDField(db_index=True, default=uuid.uuid4)
 
     def calculate_source_id(self, *args, **kwargs):
-        return '{}:{}'.format(self.user.id, self.content_id)
+        return '{}:{}'.format(self.user_id, self.content_id)
 
     def calculate_partition(self, *args, **kwargs):
-        return '{user_id}:user:summary'.format(user_id=self.user.id)
+        return '{user_id}:user:summary'.format(user_id=self.user_id)
 
 
 class InteractionLog(FacilityDataSyncableModel):
-    # Morango syncing settings
     morango_model_name = "contentinteractionlog"
 
     user = models.ForeignKey(MyUser, blank=True, null=True, on_delete=models.CASCADE)
@@ -97,7 +95,33 @@ class InteractionLog(FacilityDataSyncableModel):
         return None
 
     def calculate_partition(self, *args, **kwargs):
-        return '{user_id}:user:interaction'.format(user_id=self.user.id)
+        return '{user_id}:user:interaction'.format(user_id=self.user_id)
+
+
+class ConditionalLog(FacilityDataSyncableModel):
+    morango_model_name = "conditionallog"
+
+    facility = models.ForeignKey(Facility, blank=False, null=False, on_delete=models.CASCADE)
+    user = models.ForeignKey(MyUser, blank=True, null=True, on_delete=models.CASCADE)
+    content_id = UUIDField(db_index=True, default=uuid.uuid4)
+
+    def calculate_source_id(self, *args, **kwargs):
+        return None
+
+    def calculate_partition(self, *args, **kwargs):
+        return uuid.UUID(self.facility_id).hex
+
+    def clean_fields(self, exclude=None, sync_filter=None):
+        exclude = exclude or []
+        if sync_filter:
+            exclude.append("user_id")
+        super(ConditionalLog, self).clean_fields(exclude=exclude, sync_filter=sync_filter)
+
+    @classmethod
+    def deserialize(cls, dict_model, sync_filter=None):
+        if sync_filter:
+            del dict_model["user_id"]
+        return super().deserialize(dict_model, sync_filter)
 
 
 class FilteredModelManager(SyncableModelManager):
@@ -110,7 +134,6 @@ class FilteredModelManager(SyncableModelManager):
 class TestModel(FacilityDataSyncableModel):
     """Test model with a custom manager to test syncing_objects behavior"""
 
-    # Morango syncing settings
     morango_model_name = "testmodel"
 
     name = models.CharField(max_length=100)

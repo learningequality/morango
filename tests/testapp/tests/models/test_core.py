@@ -1,9 +1,11 @@
 import uuid
 
 import factory
+import mock
 from django.test import override_settings
 from django.test import TestCase
 from django.utils import timezone
+from facility_profile.models import Facility
 from facility_profile.models import MyUser
 
 from ..helpers import RecordMaxCounterFactory
@@ -367,3 +369,26 @@ class TransferSessionAndStoreTestCase(TestCase):
                 )
             ),
         )
+
+
+class SyncableModelTestCase(TestCase):
+    @mock.patch("morango.models.core.UUIDModelMixin.clean_fields")
+    def test_clean_fields(self, mock_super_clean_fields):
+        f = Facility(name="test")
+        sync_filter = Filter("test")
+        f.clean_fields(exclude=["test1"], sync_filter=sync_filter)
+        mock_super_clean_fields.assert_called_once_with(exclude=["test1"])
+
+    @mock.patch("morango.models.core.SyncableModel.clean_fields")
+    def test_cached_clean_fields(self, mock_clean_fields):
+        f = Facility(name="test")
+        sync_filter = Filter("test")
+        f.cached_clean_fields({}, exclude=["test1"], sync_filter=sync_filter)
+        mock_clean_fields.assert_called_once_with(exclude=["test1", "parent"], sync_filter=sync_filter)
+
+    @mock.patch("morango.models.core.SyncableModel.clean_fields")
+    def test_deferred_clean_fields(self, mock_clean_fields):
+        f = Facility(name="test")
+        sync_filter = Filter("test")
+        f.deferred_clean_fields(exclude=["test1"], sync_filter=sync_filter)
+        mock_clean_fields.assert_called_once_with(exclude=["test1"], sync_filter=sync_filter)

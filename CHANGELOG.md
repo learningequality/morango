@@ -2,6 +2,9 @@
 
 List of the most important changes for each release.
 
+## 0.8.7
+- Adds flexibility for customizing deserialization behavior using sync filter to `SyncableModel` methods
+
 ## 0.8.6
 - Allows sync operations to modify the context, particularly the sync filter, as long as the original is a subset of the new filter
 - Deprecates usage of `Filter` for parameter replacement. Use `Filter.from_template` instead
