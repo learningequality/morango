@@ -5,7 +5,9 @@ This class is registered at app load time for morango in `apps.py`.
 import inspect
 import sys
 from collections import OrderedDict
+from typing import Generator
 
+from django.db.models import QuerySet
 from django.db.models.fields.related import ForeignKey
 
 from morango.constants import transfer_stages
@@ -81,6 +83,14 @@ class SyncableModelRegistry(object):
         """
         self.check_models_ready(profile)
         return list(self.profile_models.get(profile, {}).values())
+
+    def get_model_querysets(self, profile) -> Generator[QuerySet, None, None]:
+        """
+        Method for future enhancement to iterate over model's and their querysets in a fashion
+        (particularly, an order) that is aware of FK dependencies.
+        """
+        for model in self.get_models(profile):
+            yield model.syncing_objects.all()
 
     def _insert_model_in_dependency_order(self, model, profile):
         # When we add models to be synced, we need to make sure
