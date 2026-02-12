@@ -4,12 +4,9 @@ import json
 import logging
 import uuid
 from collections import defaultdict
-from contextlib import contextmanager
 
 from django.core import exceptions
-from django.core.serializers.json import DjangoJSONEncoder
 from django.db import connection
-from django.db import transaction
 from django.db.models import CharField
 from django.db.models import Q
 from django.db.models import signals
@@ -22,7 +19,6 @@ from morango.constants import transfer_stages
 from morango.constants import transfer_statuses
 from morango.constants.capabilities import ASYNC_OPERATIONS
 from morango.constants.capabilities import FSIC_V2_FORMAT
-from morango.errors import MorangoDatabaseError
 from morango.errors import MorangoInvalidFSICPartition
 from morango.errors import MorangoLimitExceeded
 from morango.errors import MorangoResumeSyncError
@@ -47,12 +43,13 @@ from morango.sync.backends.utils import load_backend
 from morango.sync.backends.utils import TemporaryTable
 from morango.sync.context import LocalSessionContext
 from morango.sync.context import NetworkSessionContext
-from morango.sync.utils import lock_partitions
+from morango.sync.db import begin_transaction
+from morango.sync.stream.serialize import serialize_into_store
 from morango.sync.utils import mute_signals
 from morango.sync.utils import validate_and_create_buffer_data
 from morango.utils import _assert
+from morango.utils import self_referential_fk
 from morango.utils import SETTINGS
-
 
 logger = logging.getLogger(__name__)
 
@@ -79,206 +76,6 @@ class OperationLogger(object):
 def _join_with_logical_operator(lst, operator):
     op = ") {operator} (".format(operator=operator)
     return "(({items}))".format(items=op.join(lst))
-
-
-def _self_referential_fk(model):
-    """
-    Return whether this model has a self ref FK, and the name for the field
-    """
-    for f in model._meta.concrete_fields:
-        if f.related_model:
-            if issubclass(model, f.related_model):
-                return f.attname
-    return None
-
-
-@contextmanager
-def _begin_transaction(sync_filter, isolated=False, shared_lock=False):
-    """
-    Starts a transaction, sets the transaction isolation level to repeatable read, and locks
-    affected partitions
-
-    :param sync_filter: The filter for filtering applicable records of the sync
-    :type sync_filter: morango.models.certificates.Filter|None
-    :param isolated: Whether to alter the transaction isolation to repeatable-read
-    :type isolated: bool
-    :param shared_lock: Whether the advisory lock should be exclusive or shared
-    :type shared_lock: bool
-    """
-    if isolated:
-        # when isolation is requested, we modify the transaction isolation of the connection for the
-        # duration of the transaction
-        with DBBackend._set_transaction_repeatable_read():
-            with transaction.atomic(savepoint=False):
-                lock_partitions(DBBackend, sync_filter=sync_filter, shared=shared_lock)
-                yield
-    else:
-        with transaction.atomic():
-            lock_partitions(DBBackend, sync_filter=sync_filter, shared=shared_lock)
-            yield
-
-
-def _serialize_into_store(profile, filter=None):
-    """
-    Takes data from app layer and serializes the models into the store.
-
-    ALGORITHM: On a per syncable model basis, we iterate through each class model and we go through 2 possible cases:
-
-    1. If there is a store record pertaining to that app model, we update the serialized store record with
-    the latest changes from the model's fields. We also update the counter's based on this device's current Instance ID.
-    2. If there is no store record for this app model, we proceed to create an in memory store model and append to a list to be
-    bulk created on a per class model basis.
-    """
-    # ensure that we write and retrieve the counter in one go for consistency
-    current_id = InstanceIDModel.get_current_instance_and_increment_counter()
-
-    with _begin_transaction(filter, isolated=True):
-        # create Q objects for filtering by prefixes
-        prefix_condition = None
-        if filter:
-            prefix_condition = functools.reduce(
-                lambda x, y: x | y,
-                [Q(_morango_partition__startswith=prefix) for prefix in filter],
-            )
-
-        # filter through all models with the dirty bit turned on
-        for model in syncable_models.get_models(profile):
-            new_store_records = []
-            new_rmc_records = []
-            klass_queryset = model.syncing_objects.filter(_morango_dirty_bit=True)
-            if prefix_condition:
-                klass_queryset = klass_queryset.filter(prefix_condition)
-            store_records_dict = Store.objects.in_bulk(
-                id_list=klass_queryset.values_list("id", flat=True)
-            )
-            for app_model in klass_queryset:
-                try:
-                    store_model = store_records_dict[app_model.id]
-
-                    # if store record dirty and app record dirty, append store serialized to conflicting data
-                    if store_model.dirty_bit:
-                        store_model.conflicting_serialized_data = (
-                            store_model.serialized
-                            + "\n"
-                            + store_model.conflicting_serialized_data
-                        )
-                        store_model.dirty_bit = False
-
-                    # set new serialized data on this store model
-                    ser_dict = json.loads(store_model.serialized)
-                    ser_dict.update(app_model.serialize())
-                    store_model.serialized = DjangoJSONEncoder().encode(ser_dict)
-
-                    # create or update instance and counter on the record max counter for this store model
-                    RecordMaxCounter.objects.update_or_create(
-                        defaults={"counter": current_id.counter},
-                        instance_id=current_id.id,
-                        store_model_id=store_model.id,
-                    )
-
-                    # update last saved bys for this store model
-                    store_model.last_saved_instance = current_id.id
-                    store_model.last_saved_counter = current_id.counter
-                    # update deleted flags in case it was previously deleted
-                    store_model.deleted = False
-                    store_model.hard_deleted = False
-                    # clear last_transfer_session_id
-                    store_model.last_transfer_session_id = None
-
-                    # update this model
-                    store_model.save()
-
-                except KeyError:
-                    kwargs = {
-                        "id": app_model.id,
-                        "serialized": DjangoJSONEncoder().encode(app_model.serialize()),
-                        "last_saved_instance": current_id.id,
-                        "last_saved_counter": current_id.counter,
-                        "model_name": app_model.morango_model_name,
-                        "profile": app_model.morango_profile,
-                        "partition": app_model._morango_partition,
-                        "source_id": app_model._morango_source_id,
-                    }
-                    # check if model has FK pointing to it and add the value to a field on the store
-                    self_ref_fk = _self_referential_fk(model)
-                    if self_ref_fk:
-                        self_ref_fk_value = getattr(app_model, self_ref_fk)
-                        kwargs.update({"_self_ref_fk": self_ref_fk_value or ""})
-                    # create store model and record max counter for the app model
-                    new_store_records.append(Store(**kwargs))
-                    new_rmc_records.append(
-                        RecordMaxCounter(
-                            store_model_id=app_model.id,
-                            instance_id=current_id.id,
-                            counter=current_id.counter,
-                        )
-                    )
-
-            # bulk create store and rmc records for this class
-            Store.objects.bulk_create(new_store_records)
-            RecordMaxCounter.objects.bulk_create(new_rmc_records)
-
-            # set dirty bit to false for all instances of this model
-            klass_queryset.update(update_dirty_bit_to=False)
-
-        # get list of ids of deleted models
-        deleted_ids = DeletedModels.objects.filter(profile=profile).values_list(
-            "id", flat=True
-        )
-        # update last_saved_bys and deleted flag of all deleted store model instances
-        deleted_store_records = Store.objects.filter(id__in=deleted_ids)
-        deleted_store_records.update(
-            dirty_bit=False,
-            deleted=True,
-            last_saved_instance=current_id.id,
-            last_saved_counter=current_id.counter,
-        )
-        # update rmcs counters for deleted models that have our instance id
-        RecordMaxCounter.objects.filter(
-            instance_id=current_id.id, store_model_id__in=deleted_ids
-        ).update(counter=current_id.counter)
-        # get a list of deleted model ids that don't have an rmc for our instance id
-        new_rmc_ids = deleted_store_records.exclude(
-            recordmaxcounter__instance_id=current_id.id
-        ).values_list("id", flat=True)
-        # bulk create these new rmcs
-        RecordMaxCounter.objects.bulk_create(
-            [
-                RecordMaxCounter(
-                    store_model_id=r_id,
-                    instance_id=current_id.id,
-                    counter=current_id.counter,
-                )
-                for r_id in new_rmc_ids
-            ]
-        )
-        # clear deleted models table for this profile
-        DeletedModels.objects.filter(profile=profile).delete()
-
-        # handle logic for hard deletion models
-        hard_deleted_ids = HardDeletedModels.objects.filter(
-            profile=profile
-        ).values_list("id", flat=True)
-        hard_deleted_store_records = Store.objects.filter(id__in=hard_deleted_ids)
-        hard_deleted_store_records.update(
-            hard_deleted=True, serialized="{}", conflicting_serialized_data=""
-        )
-        HardDeletedModels.objects.filter(profile=profile).delete()
-
-        # update our own database max counters after serialization
-        if not filter:
-            DatabaseMaxCounter.objects.update_or_create(
-                instance_id=current_id.id,
-                partition="",
-                defaults={"counter": current_id.counter},
-            )
-        else:
-            for f in filter:
-                DatabaseMaxCounter.objects.update_or_create(
-                    instance_id=current_id.id,
-                    partition=f,
-                    defaults={"counter": current_id.counter},
-                )
 
 
 def _validate_missing_store_foreign_keys(from_model_name, to_model_name, temp_table):
@@ -447,7 +244,7 @@ def _deserialize_from_store(profile, skip_erroring=False, filter=None):
     excluded_list = []
     deleted_list = []
 
-    with _begin_transaction(filter, isolated=True):
+    with begin_transaction(filter, isolated=True):
         # iterate through classes which are in foreign key dependency order
         for model in syncable_models.get_models(profile):
             deferred_fks = defaultdict(list)
@@ -473,7 +270,7 @@ def _deserialize_from_store(profile, skip_erroring=False, filter=None):
                 store_models = store_models.filter(deserialization_error="")
 
             # handle cases where a class has a single FK reference to itself
-            if _self_referential_fk(model):
+            if self_referential_fk(model):
                 clean_parents = store_models.filter(dirty_bit=False).char_ids_list()
                 dirty_children = (
                     store_models.filter(dirty_bit=True)
@@ -539,7 +336,9 @@ def _deserialize_from_store(profile, skip_erroring=False, filter=None):
                             app_model,
                             model_deferred_fks,
                         ) = store_model._deserialize_store_model(
-                            fk_cache, defer_fks=True, sync_filter=filter,
+                            fk_cache,
+                            defer_fks=True,
+                            sync_filter=filter,
                         )
                         if app_model:
                             app_models.append(app_model)
@@ -618,7 +417,7 @@ def _queue_into_buffer_v1(transfersession):
     as well as the partition for the data we are syncing.
     """
     filter_prefixes = Filter(transfersession.filter)
-    with _begin_transaction(filter_prefixes, shared_lock=True):
+    with begin_transaction(filter_prefixes, shared_lock=True):
         server_fsic = json.loads(transfersession.server_fsic)
         client_fsic = json.loads(transfersession.client_fsic)
 
@@ -745,7 +544,7 @@ def _queue_into_buffer_v2(transfersession, chunk_size=200):
     We use raw sql queries to place data in the buffer and the record max counter buffer, which matches the conditions of the FSIC.
     """
     sync_filter = Filter(transfersession.filter)
-    with _begin_transaction(sync_filter, shared_lock=True):
+    with begin_transaction(sync_filter, shared_lock=True):
         server_fsic = json.loads(transfersession.server_fsic)
         client_fsic = json.loads(transfersession.client_fsic)
 
@@ -889,7 +688,7 @@ def _dequeue_into_store(transfer_session, fsic, v2_format=False):
     are not affected by previous cases.
     """
 
-    with _begin_transaction(Filter(transfer_session.filter)):
+    with begin_transaction(Filter(transfer_session.filter)):
         with connection.cursor() as cursor:
             DBBackend._dequeuing_delete_rmcb_records(cursor, transfer_session.id)
             DBBackend._dequeuing_delete_buffered_records(cursor, transfer_session.id)
@@ -1012,9 +811,11 @@ class InitializeOperation(LocalOperation):
             if context.request:
                 data.update(
                     id=context.request.data.get("id"),
-                    records_total=context.request.data.get("records_total")
-                    if context.is_push
-                    else None,
+                    records_total=(
+                        context.request.data.get("records_total")
+                        if context.is_push
+                        else None
+                    ),
                     client_fsic=context.request.data.get("client_fsic") or "{}",
                 )
             elif context.is_server:
@@ -1048,7 +849,9 @@ class SerializeOperation(LocalOperation):
 
         if context.is_producer and SETTINGS.MORANGO_SERIALIZE_BEFORE_QUEUING:
             try:
-                _serialize_into_store(context.sync_session.profile, filter=context.filter)
+                serialize_into_store(
+                    context.sync_session.profile, sync_filter=context.filter
+                )
             except OperationalError as e:
                 # if we run into a transaction isolation error, we return a pending status to force
                 # retrying through the controller flow
@@ -1276,8 +1079,12 @@ class ReceiverDeserializeOperation(LocalOperation):
         if SETTINGS.MORANGO_DESERIALIZE_AFTER_DEQUEUING and records_transferred > 0:
             try:
                 # we first serialize to avoid deserialization merge conflicts
-                _serialize_into_store(context.sync_session.profile, filter=context.filter)
-                _deserialize_from_store(context.sync_session.profile, filter=context.filter)
+                serialize_into_store(
+                    context.sync_session.profile, sync_filter=context.filter
+                )
+                _deserialize_from_store(
+                    context.sync_session.profile, filter=context.filter
+                )
             except OperationalError as e:
                 # if we run into a transaction isolation error, we return a pending status to force
                 # retrying through the controller flow
