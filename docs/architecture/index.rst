@@ -132,6 +132,48 @@ In Kolibri, on the ``FacilityDataset`` model, we generate the certificate as a f
 There's flexibility in the application layer for determining the validity of a root certificate, and it's specified on a per-profile basis. For the ``facilitydata`` profile, Kolibri leverages its ``auth`` models for this.
 
 
+Streaming architecture
+----------------------
+
+Morango includes a streaming architecture for memory-efficient processing of sync data. This architecture is implemented in the ``morango.sync.stream`` module and provides a modular, ETL-like pipeline pattern for processing data records one-by-one, significantly reducing memory overhead compared to batch processing approaches.
+
+The streaming architecture is built around several core concepts:
+
+**Stream modules**
+  Abstract base classes that form the foundation of the streaming pipeline:
+
+  - ``Source``: The starting point of a pipeline that yields data items
+  - ``OperatorModule``: Transform-like modules that process data items
+  - ``Sink``: Terminal modules that consume data items without yielding further output
+  - ``PipelineModule``: Modules that can be connected to other modules via the ``pipe()`` method
+
+**Pipeline composition**
+  Modules are connected using a fluent interface via the ``pipe()`` method, creating a directed flow of data:
+
+  .. code-block:: python
+
+      source.pipe(transform1).pipe(transform2).end(sink)
+
+**Key pipeline modules**
+  Several specialized pipeline modules are provided:
+
+  - ``Transform``: Applies a 1:1 transformation to each item
+  - ``FlatMap``: Maps each item to zero or more output items
+  - ``Buffer``: Collects items into fixed-size chunks for batch operations
+  - ``Unbuffer``: Flattens chunks back into individual items
+
+**Serialization pipeline**
+  The serialization process uses this streaming architecture through the ``serialize_into_store()`` function, which constructs a pipeline that:
+
+  1. Reads dirty app models from the database (``AppModelSource``)
+  2. Buffers records for efficient database lookups (``Buffer``)
+  3. Looks up corresponding store records (``StoreLookup``)
+  4. Updates store records with new data (``StoreUpdate``)
+  5. Buffers by model type for efficient bulk operations (``ModelPartitionBuffer``)
+  6. Writes changes to the database (``WriteSink``)
+
+This streaming approach ensures that memory usage remains constant regardless of dataset size, making Morango suitable for large-scale deployments with limited resources.
+
 Session controller, contexts, and operations
 --------------------------------------------
 
@@ -142,4 +184,3 @@ A unidirectional sync has several stages: ``INITIALIZING``, ``SERIALIZING``, ``Q
 .. image:: ./session-controller-seq.png
 
 The list of operations for each stage are configured through Django settings. The configuration key for each stage follows the pattern ``MORANGO_%STAGE%_OPERATIONS``, so the list/tuple of operations for the ``QUEUING`` stage access the ``MORANGO_QUEUING_OPERATIONS`` configuration value. Built-in operations implement a callable ``BaseOperation`` class by overriding a ``handle`` method. The ``BaseOperation`` class supports raising an ``AssertionError`` to defer responsibility to the next operation.
-
