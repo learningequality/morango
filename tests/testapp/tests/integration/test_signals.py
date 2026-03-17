@@ -1,18 +1,10 @@
-import factory
 from django.test import TestCase
 from facility_profile.models import Facility
 
+from ..helpers import FacilityFactory as FacilityModelFactory
 from morango.models.core import DeletedModels
 from morango.models.core import InstanceIDModel
 from morango.sync.controller import MorangoProfileController
-
-
-class FacilityModelFactory(factory.DjangoModelFactory):
-
-    class Meta:
-        model = Facility
-
-    name = factory.Sequence(lambda n: "Fac %d" % n)
 
 
 class PostDeleteSignalsTestCase(TestCase):

@@ -12,6 +12,7 @@ from facility_profile.models import MyUser
 from facility_profile.models import SummaryLog
 
 from ..compat import EnvironmentVarGuard
+from ..helpers import FacilityFactory as FacilityModelFactory
 from ..helpers import serialized_facility_factory
 from ..helpers import TestSessionContext
 from morango.constants import transfer_stages
@@ -26,14 +27,7 @@ from morango.sync.controller import MorangoProfileController
 from morango.sync.controller import SessionController
 
 
-class FacilityModelFactory(factory.DjangoModelFactory):
-    class Meta:
-        model = Facility
-
-    name = factory.Sequence(lambda n: "Fac %d" % n)
-
-
-class StoreModelFacilityFactory(factory.DjangoModelFactory):
+class StoreModelFacilityFactory(factory.django.DjangoModelFactory):
     class Meta:
         model = Store
 

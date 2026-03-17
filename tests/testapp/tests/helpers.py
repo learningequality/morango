@@ -36,14 +36,14 @@ from morango.sync.syncsession import SyncSessionClient
 from morango.sync.syncsession import TransferClient
 
 
-class FacilityFactory(factory.DjangoModelFactory):
+class FacilityFactory(factory.django.DjangoModelFactory):
     class Meta:
         model = Facility
 
     name = factory.Sequence(lambda n: "Fac %d" % n)
 
 
-class AbstractStoreFactory(factory.DjangoModelFactory):
+class AbstractStoreFactory(factory.django.DjangoModelFactory):
     class Meta:
         model = AbstractStore
 
@@ -61,12 +61,12 @@ class StoreFactory(AbstractStoreFactory):
         model = Store
 
 
-class RecordMaxCounterBufferFactory(factory.DjangoModelFactory):
+class RecordMaxCounterBufferFactory(factory.django.DjangoModelFactory):
     class Meta:
         model = RecordMaxCounterBuffer
 
 
-class RecordMaxCounterFactory(factory.DjangoModelFactory):
+class RecordMaxCounterFactory(factory.django.DjangoModelFactory):
     class Meta:
         model = RecordMaxCounter
 
