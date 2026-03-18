@@ -12,7 +12,7 @@ from facility_profile.models import MyUser
 from facility_profile.models import SummaryLog
 
 from ..compat import EnvironmentVarGuard
-from ..helpers import FacilityFactory as FacilityModelFactory
+from ..helpers import FacilityModelFactory
 from ..helpers import serialized_facility_factory
 from ..helpers import TestSessionContext
 from morango.constants import transfer_stages

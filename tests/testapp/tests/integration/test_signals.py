@@ -1,7 +1,7 @@
 from django.test import TestCase
 from facility_profile.models import Facility
 
-from ..helpers import FacilityFactory as FacilityModelFactory
+from ..helpers import FacilityModelFactory
 from morango.models.core import DeletedModels
 from morango.models.core import InstanceIDModel
 from morango.sync.controller import MorangoProfileController

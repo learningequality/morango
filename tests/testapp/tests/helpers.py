@@ -36,7 +36,7 @@ from morango.sync.syncsession import SyncSessionClient
 from morango.sync.syncsession import TransferClient
 
 
-class FacilityFactory(factory.django.DjangoModelFactory):
+class FacilityModelFactory(factory.django.DjangoModelFactory):
     class Meta:
         model = Facility
 
@@ -102,11 +102,11 @@ def create_dummy_store_data():
 
     data["mc"].serialize_into_store()  # counter is at 1
     # create group of facilities and first serialization
-    data["group1_c1"] = [FacilityFactory() for _ in range(5)]
+    data["group1_c1"] = [FacilityModelFactory() for _ in range(5)]
     data["mc"].serialize_into_store()  # counter is at 2
 
     # create group of facilities and second serialization
-    data["group1_c2"] = [FacilityFactory() for _ in range(5)]
+    data["group1_c2"] = [FacilityModelFactory() for _ in range(5)]
 
     # create users and logs associated with user
     data["user1"] = MyUser.objects.create(username="bob")
@@ -127,7 +127,7 @@ def create_dummy_store_data():
         ]  # new counter is at 0
 
         data["mc"].serialize_into_store()  # new counter is at 1
-        data["group2_c1"] = [FacilityFactory() for _ in range(5)]
+        data["group2_c1"] = [FacilityModelFactory() for _ in range(5)]
 
         # create users and logs associated with user
         data["user2"] = MyUser.objects.create(username="rob")
