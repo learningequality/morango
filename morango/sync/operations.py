@@ -465,7 +465,6 @@ def _deserialize_from_store(profile, skip_erroring=False, filter=None):
                     lambda x, y: x | y,
                     [Q(partition__startswith=prefix) for prefix in filter],
                 )
-                print("prefix_condition: ", prefix_condition)
                 store_models = store_models.filter(prefix_condition)
 
             # if requested, skip any records that previously errored, to be faster

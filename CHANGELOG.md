@@ -2,6 +2,10 @@
 
 List of the most important changes for each release.
 
+## 0.8.9
+- Removes debugging print statements
+- Adds flake8 linting
+
 ## 0.8.8
 - Adds support for Python 3.14
 
