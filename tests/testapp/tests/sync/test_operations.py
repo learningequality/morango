@@ -3,7 +3,6 @@ import threading
 import uuid
 from time import sleep
 
-import factory
 import mock
 import pytest
 from django.conf import settings
@@ -51,13 +50,6 @@ from morango.sync.operations import ReceiverQueueOperation
 from morango.sync.syncsession import TransferClient
 
 DBBackend = load_backend(connection)
-
-
-class FacilityModelFactory(factory.DjangoModelFactory):
-    class Meta:
-        model = Facility
-
-    name = factory.Sequence(lambda n: "Fac %d" % n)
 
 
 def assertRecordsBuffered(records):

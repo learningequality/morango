@@ -20,7 +20,7 @@ from morango.models.core import TransferSession
 from morango.sync.controller import MorangoProfileController
 
 
-class DatabaseMaxCounterFactory(factory.DjangoModelFactory):
+class DatabaseMaxCounterFactory(factory.django.DjangoModelFactory):
     class Meta:
         model = DatabaseMaxCounter
 
