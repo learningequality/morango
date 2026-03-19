@@ -29,7 +29,6 @@ setup(
         "djangorestframework>3.10",
         "django-ipware==4.0.2",
         "requests",
-        "typing-extensions==4.1.1",
         "ifcfg",
     ],
     license="MIT",
