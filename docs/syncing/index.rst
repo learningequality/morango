@@ -15,7 +15,7 @@ Process
 
 Syncing is the actual exchange of data in a sync session. The general steps for syncing data are:
 
-1. **Serialization** - serializing data that is associated with Django models in the Application layer, and storing it in JSON format in a record in the Store
+1. **Serialization** - serializing data that is associated with Django models in the Application layer, and storing it in JSON format in a record in the Store. This process uses a streaming architecture that processes records one-by-one through a modular pipeline, ensuring constant memory usage regardless of dataset size.
 2. **Queuing/Buffering** - storing serialized records and their modification history to a separate Buffers data structure
 3. **Transfer/chunking of data** - the actual transfer of data over a request/response cycle in chunks of 500 records at a time
 4. **Dequeuing** - merging the data received in the receiving buffers to the receiving store and record-max counter
@@ -70,4 +70,3 @@ For a push or pull sync lifecycle, the order of the fired signals would be as fo
 7) Dequeuing started
 8) Dequeuing completed
 9) Session completed
-

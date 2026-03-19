@@ -21,7 +21,6 @@ from morango.models.core import DeletedModels
 from morango.models.core import InstanceIDModel
 from morango.models.core import RecordMaxCounter
 from morango.models.core import Store
-from morango.sync.controller import _self_referential_fk
 from morango.sync.controller import MorangoProfileController
 from morango.sync.controller import SessionController
 
@@ -108,8 +107,8 @@ class SerializeIntoStoreTestCase(TestCase):
         old_instance_id = Store.objects.first().last_saved_instance
 
         with EnvironmentVarGuard() as env:
-            env['MORANGO_SYSTEM_ID'] = 'new_sys_id'
-            (new_id, _) = InstanceIDModel.get_or_create_current_instance(clear_cache=True)
+            env["MORANGO_SYSTEM_ID"] = "new_sys_id"
+            new_id, _ = InstanceIDModel.get_or_create_current_instance(clear_cache=True)
 
             Facility.objects.all().update(name=self.new_name)
             self.mc.serialize_into_store()
@@ -180,7 +179,7 @@ class SerializeIntoStoreTestCase(TestCase):
         fac = FacilityModelFactory()
         user = MyUser.objects.create(username="deadbeef")
         log = SummaryLog.objects.create(user=user)
-        self.mc.serialize_into_store(filter=Filter(user._morango_partition))
+        self.mc.serialize_into_store(sync_filter=Filter(user._morango_partition))
         self.assertFalse(Store.objects.filter(id=fac.id).exists())
         self.assertTrue(Store.objects.filter(id=user.id).exists())
         self.assertTrue(Store.objects.filter(id=log.id).exists())
@@ -191,7 +190,7 @@ class SerializeIntoStoreTestCase(TestCase):
         user2 = MyUser.objects.create(username="alivebeef")
         log = SummaryLog.objects.create(user=user)
         self.mc.serialize_into_store(
-            filter=Filter(user._morango_partition + "\n" + user2._morango_partition)
+            sync_filter=Filter(user._morango_partition + "\n" + user2._morango_partition)
         )
         self.assertFalse(Store.objects.filter(id=fac.id).exists())
         self.assertTrue(Store.objects.filter(id=user2.id).exists())
@@ -291,7 +290,7 @@ class SerializeIntoStoreTestCase(TestCase):
 
 class RecordMaxCounterUpdatesDuringSerialization(TestCase):
     def setUp(self):
-        (self.current_id, _) = InstanceIDModel.get_or_create_current_instance()
+        self.current_id, _ = InstanceIDModel.get_or_create_current_instance()
         self.mc = MorangoProfileController("facilitydata")
         self.fac1 = FacilityModelFactory(name="school")
         self.mc.serialize_into_store()
@@ -299,8 +298,8 @@ class RecordMaxCounterUpdatesDuringSerialization(TestCase):
 
     def test_new_rmc_for_existing_model(self):
         with EnvironmentVarGuard() as env:
-            env['MORANGO_SYSTEM_ID'] = 'new_sys_id'
-            (new_id, _) = InstanceIDModel.get_or_create_current_instance(clear_cache=True)
+            env["MORANGO_SYSTEM_ID"] = "new_sys_id"
+            new_id, _ = InstanceIDModel.get_or_create_current_instance(clear_cache=True)
 
             Facility.objects.update(name="facility")
             self.mc.serialize_into_store()
@@ -336,8 +335,8 @@ class RecordMaxCounterUpdatesDuringSerialization(TestCase):
 
     def test_new_rmc_for_non_existent_model(self):
         with EnvironmentVarGuard() as env:
-            env['MORANGO_SYSTEM_ID'] = 'new_sys_id'
-            (new_id, _) = InstanceIDModel.get_or_create_current_instance(clear_cache=True)
+            env["MORANGO_SYSTEM_ID"] = "new_sys_id"
+            new_id, _ = InstanceIDModel.get_or_create_current_instance(clear_cache=True)
 
             new_fac = FacilityModelFactory(name="college")
             self.mc.serialize_into_store()
@@ -354,7 +353,7 @@ class RecordMaxCounterUpdatesDuringSerialization(TestCase):
 
 class DeserializationFromStoreIntoAppTestCase(TestCase):
     def setUp(self):
-        (self.current_id, _) = InstanceIDModel.get_or_create_current_instance()
+        self.current_id, _ = InstanceIDModel.get_or_create_current_instance()
         self.range = 10
         self.mc = MorangoProfileController("facilitydata")
         for i in range(self.range):
@@ -429,7 +428,9 @@ class DeserializationFromStoreIntoAppTestCase(TestCase):
 
     def test_broken_fk_leaves_store_dirty_bit(self):
         log_id = uuid.uuid4().hex
-        serialized = json.dumps({"user_id": "40de9a3fded95d7198f200c78e559353", "id": log_id})
+        serialized = json.dumps(
+            {"user_id": "40de9a3fded95d7198f200c78e559353", "id": log_id}
+        )
         st = StoreModelFacilityFactory(
             id=log_id, serialized=serialized, model_name="contentsummarylog"
         )
@@ -518,8 +519,12 @@ class DeserializationFromStoreIntoAppTestCase(TestCase):
         self.mc.serialize_into_store()
         user.username = "changed"
         user2.username = "changed2"
-        Store.objects.filter(id=user.id).update(serialized=json.dumps(user.serialize()), dirty_bit=True)
-        Store.objects.filter(id=user2.id).update(serialized=json.dumps(user2.serialize()), dirty_bit=True)
+        Store.objects.filter(id=user.id).update(
+            serialized=json.dumps(user.serialize()), dirty_bit=True
+        )
+        Store.objects.filter(id=user2.id).update(
+            serialized=json.dumps(user2.serialize()), dirty_bit=True
+        )
         return user, user2
 
     def test_regular_model_deserialization(self):
@@ -534,7 +539,7 @@ class DeserializationFromStoreIntoAppTestCase(TestCase):
     def test_filtered_deserialization(self):
         # filtered deserialization only impacts specific records
         user, user2 = self._create_two_users_to_deserialize()
-        self.mc.deserialize_from_store(filter=Filter(user._morango_partition))
+        self.mc.deserialize_from_store(sync_filter=Filter(user._morango_partition))
         self.assertFalse(MyUser.objects.filter(username="test").exists())
         self.assertTrue(MyUser.objects.filter(username="test2").exists())
         self.assertTrue(MyUser.objects.filter(username="changed").exists())
@@ -543,12 +548,8 @@ class DeserializationFromStoreIntoAppTestCase(TestCase):
 
 class SelfReferentialFKDeserializationTestCase(TestCase):
     def setUp(self):
-        (self.current_id, _) = InstanceIDModel.get_or_create_current_instance()
+        self.current_id, _ = InstanceIDModel.get_or_create_current_instance()
         self.mc = MorangoProfileController("facilitydata")
-
-    def test_self_ref_fk(self):
-        self.assertEqual(_self_referential_fk(Facility), "parent_id")
-        self.assertEqual(_self_referential_fk(MyUser), None)
 
     def test_delete_model_in_store_deletes_models_in_app(self):
         root = FacilityModelFactory()
@@ -590,10 +591,14 @@ class SelfReferentialFKDeserializationTestCase(TestCase):
         self.assertEqual(child2[0].parent_id, root.id)
 
     def test_deserialization_of_model_with_missing_parent(self):
-        self._test_deserialization_of_model_with_missing_parent(correct_self_ref_fk=True)
+        self._test_deserialization_of_model_with_missing_parent(
+            correct_self_ref_fk=True
+        )
 
     def test_deserialization_of_model_with_mismatched_self_ref_fk(self):
-        self._test_deserialization_of_model_with_missing_parent(correct_self_ref_fk=False)
+        self._test_deserialization_of_model_with_missing_parent(
+            correct_self_ref_fk=False
+        )
 
     def _test_deserialization_of_model_with_missing_parent(self, correct_self_ref_fk):
         root = FacilityModelFactory()
@@ -619,7 +624,7 @@ class SelfReferentialFKDeserializationTestCase(TestCase):
 
 class ForeignKeyDeserializationTestCase(TestCase):
     def setUp(self):
-        (self.current_id, _) = InstanceIDModel.get_or_create_current_instance()
+        self.current_id, _ = InstanceIDModel.get_or_create_current_instance()
         self.mc = MorangoProfileController("facilitydata")
 
     def test_deserialization_of_model_with_missing_foreignkey_referent(self):
@@ -640,7 +645,10 @@ class ForeignKeyDeserializationTestCase(TestCase):
 
         new_log.refresh_from_db()
         self.assertTrue(new_log.dirty_bit)
-        self.assertIn("my user instance with id '{}'".format(data["user_id"]), new_log.deserialization_error)
+        self.assertIn(
+            "my user instance with id '{}'".format(data["user_id"]),
+            new_log.deserialization_error,
+        )
 
     def test_deserialization_of_model_with_disallowed_null_foreignkey(self):
 
@@ -708,15 +716,18 @@ class SessionControllerTestCase(SimpleTestCase):
     def setUp(self):
         super(SessionControllerTestCase, self).setUp()
         self.middleware = [
-            mock.Mock(related_stage=stage)
-            for stage, _ in transfer_stages.CHOICES
+            mock.Mock(related_stage=stage) for stage, _ in transfer_stages.CHOICES
         ]
         self.context = TestSessionContext()
-        self.controller = SessionController.build(middleware=self.middleware, context=self.context)
+        self.controller = SessionController.build(
+            middleware=self.middleware, context=self.context
+        )
 
     @contextlib.contextmanager
     def _mock_method(self, method):
-        with mock.patch('morango.sync.controller.SessionController.{}'.format(method)) as invoke:
+        with mock.patch(
+            "morango.sync.controller.SessionController.{}".format(method)
+        ) as invoke:
             yield invoke
             invoke.reset_mock()
 
@@ -726,18 +737,24 @@ class SessionControllerTestCase(SimpleTestCase):
         self.assertEqual(transfer_statuses.COMPLETED, result)
 
     def test_proceed_to__in_progress(self):
-        self.context.update(stage=transfer_stages.TRANSFERRING, stage_status=transfer_statuses.STARTED)
+        self.context.update(
+            stage=transfer_stages.TRANSFERRING, stage_status=transfer_statuses.STARTED
+        )
         result = self.controller.proceed_to(transfer_stages.TRANSFERRING)
         self.assertEqual(transfer_statuses.STARTED, result)
 
     def test_proceed_to__errored(self):
-        self.context.update(stage=transfer_stages.TRANSFERRING, stage_status=transfer_statuses.ERRORED)
+        self.context.update(
+            stage=transfer_stages.TRANSFERRING, stage_status=transfer_statuses.ERRORED
+        )
         result = self.controller.proceed_to(transfer_stages.TRANSFERRING)
         self.assertEqual(transfer_statuses.ERRORED, result)
 
     def test_proceed_to__executes_middleware__incrementally(self):
-        self.context.update(stage=transfer_stages.SERIALIZING, stage_status=transfer_statuses.COMPLETED)
-        with self._mock_method('_invoke_middleware') as mock_invoke:
+        self.context.update(
+            stage=transfer_stages.SERIALIZING, stage_status=transfer_statuses.COMPLETED
+        )
+        with self._mock_method("_invoke_middleware") as mock_invoke:
             mock_invoke.return_value = transfer_statuses.STARTED
             result = self.controller.proceed_to(transfer_stages.QUEUING)
             self.assertEqual(transfer_statuses.STARTED, result)
@@ -748,15 +765,19 @@ class SessionControllerTestCase(SimpleTestCase):
             mock_invoke.reset_mock()
 
     def test_proceed_to__executes_middleware__all(self):
-        self.context.update(stage=transfer_stages.SERIALIZING, stage_status=transfer_statuses.COMPLETED)
-        with self._mock_method('_invoke_middleware') as invoke:
+        self.context.update(
+            stage=transfer_stages.SERIALIZING, stage_status=transfer_statuses.COMPLETED
+        )
+        with self._mock_method("_invoke_middleware") as invoke:
             invoke.return_value = transfer_statuses.COMPLETED
             result = self.controller.proceed_to(transfer_stages.CLEANUP)
             self.assertEqual(transfer_statuses.COMPLETED, result)
             self.assertEqual(5, len(invoke.call_args_list))
 
     def test_proceed_to__resuming_fast_forward(self):
-        self.context.update(stage=transfer_stages.INITIALIZING, stage_status=transfer_statuses.PENDING)
+        self.context.update(
+            stage=transfer_stages.INITIALIZING, stage_status=transfer_statuses.PENDING
+        )
         expected_stages = (
             transfer_stages.INITIALIZING,
             transfer_stages.DESERIALIZING,
@@ -766,32 +787,39 @@ class SessionControllerTestCase(SimpleTestCase):
         def invoke(context, middleware):
             self.assertIn(context.stage, expected_stages)
             if context.stage == transfer_stages.INITIALIZING:
-                context.update(stage=transfer_stages.DESERIALIZING, stage_status=transfer_statuses.PENDING)
+                context.update(
+                    stage=transfer_stages.DESERIALIZING,
+                    stage_status=transfer_statuses.PENDING,
+                )
             return transfer_statuses.COMPLETED
 
-        with self._mock_method('_invoke_middleware') as mock_invoke:
+        with self._mock_method("_invoke_middleware") as mock_invoke:
             mock_invoke.side_effect = invoke
             result = self.controller.proceed_to(transfer_stages.CLEANUP)
             self.assertEqual(transfer_statuses.COMPLETED, result)
             self.assertEqual(3, len(mock_invoke.call_args_list))
 
     def test_proceed_to_and_wait_for(self):
-        with self._mock_method('proceed_to') as proceed_to:
+        with self._mock_method("proceed_to") as proceed_to:
             proceed_to.side_effect = [
                 transfer_statuses.PENDING,
                 transfer_statuses.PENDING,
-                transfer_statuses.COMPLETED
+                transfer_statuses.COMPLETED,
             ]
-            result = self.controller.proceed_to_and_wait_for(transfer_stages.CLEANUP, max_interval=0.1)
+            result = self.controller.proceed_to_and_wait_for(
+                transfer_stages.CLEANUP, max_interval=0.1
+            )
             self.assertEqual(result, transfer_statuses.COMPLETED)
 
     def test_proceed_to_and_wait_for__errored(self):
-        with self._mock_method('proceed_to') as proceed_to:
+        with self._mock_method("proceed_to") as proceed_to:
             proceed_to.side_effect = [
                 transfer_statuses.PENDING,
-                transfer_statuses.ERRORED
+                transfer_statuses.ERRORED,
             ]
-            result = self.controller.proceed_to_and_wait_for(transfer_stages.CLEANUP, max_interval=0.1)
+            result = self.controller.proceed_to_and_wait_for(
+                transfer_stages.CLEANUP, max_interval=0.1
+            )
             self.assertEqual(result, transfer_statuses.ERRORED)
 
     @mock.patch("morango.sync.controller.sleep")
@@ -807,9 +835,11 @@ class SessionControllerTestCase(SimpleTestCase):
             return transfer_statuses.PENDING
 
         try:
-            with self._mock_method('proceed_to') as proceed_to:
+            with self._mock_method("proceed_to") as proceed_to:
                 proceed_to.side_effect = mock_proceed_to
-                result = self.controller.proceed_to_and_wait_for(transfer_stages.CLEANUP, max_interval=0.1)
+                result = self.controller.proceed_to_and_wait_for(
+                    transfer_stages.CLEANUP, max_interval=0.1
+                )
                 self.assertEqual(result, transfer_statuses.COMPLETED)
         except OverflowError:
             self.fail("Overflow error raised!")
@@ -823,14 +853,25 @@ class SessionControllerTestCase(SimpleTestCase):
         middleware = self.middleware[0]
         middleware.return_value = transfer_statuses.STARTED
 
-        with mock.patch.object(TestSessionContext, "update_state", wraps=context.update_state) as m:
+        with mock.patch.object(
+            TestSessionContext, "update_state", wraps=context.update_state
+        ) as m:
             result = self.controller._invoke_middleware(context, middleware)
             self.assertEqual(result, transfer_statuses.STARTED)
 
             context_update_calls = m.call_args_list
             self.assertEqual(2, len(context_update_calls))
-            self.assertEqual(mock.call(stage=middleware.related_stage, stage_status=transfer_statuses.PENDING), context_update_calls[0])
-            self.assertEqual(mock.call(stage=None, stage_status=transfer_statuses.STARTED), context_update_calls[1])
+            self.assertEqual(
+                mock.call(
+                    stage=middleware.related_stage,
+                    stage_status=transfer_statuses.PENDING,
+                ),
+                context_update_calls[0],
+            )
+            self.assertEqual(
+                mock.call(stage=None, stage_status=transfer_statuses.STARTED),
+                context_update_calls[1],
+            )
 
         self.assertEqual(2, len(handler.call_args_list))
         self.assertEqual(mock.call(context=context), handler.call_args_list[0])

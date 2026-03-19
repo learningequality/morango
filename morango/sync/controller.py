@@ -6,24 +6,12 @@ from morango.constants import transfer_stages
 from morango.constants import transfer_statuses
 from morango.registry import session_middleware
 from morango.sync.operations import _deserialize_from_store
-from morango.sync.operations import _serialize_into_store
 from morango.sync.operations import OperationLogger
+from morango.sync.stream.serialize import serialize_into_store
 from morango.sync.utils import SyncSignalGroup
 from morango.utils import _assert
 
-
 logger = logging.getLogger(__name__)
-
-
-def _self_referential_fk(klass_model):
-    """
-    Return whether this model has a self ref FK, and the name for the field
-    """
-    for f in klass_model._meta.concrete_fields:
-        if f.related_model:
-            if issubclass(klass_model, f.related_model):
-                return f.attname
-    return None
 
 
 class MorangoProfileController(object):
@@ -31,22 +19,22 @@ class MorangoProfileController(object):
         _assert(profile, "profile needs to be defined.")
         self.profile = profile
 
-    def serialize_into_store(self, filter=None):
+    def serialize_into_store(self, sync_filter=None):
         """
         Takes data from app layer and serializes the models into the store.
         """
         with OperationLogger("Serializing records", "Serialization complete"):
-            _serialize_into_store(self.profile, filter=filter)
+            serialize_into_store(self.profile, sync_filter=sync_filter)
 
-    def deserialize_from_store(self, skip_erroring=False, filter=None):
+    def deserialize_from_store(self, skip_erroring=False, sync_filter=None):
         """
         Takes data from the store and integrates into the application.
         """
         with OperationLogger("Deserializing records", "Deserialization complete"):
             # we first serialize to avoid deserialization merge conflicts
-            _serialize_into_store(self.profile, filter=filter)
+            serialize_into_store(self.profile, sync_filter=sync_filter)
             _deserialize_from_store(
-                self.profile, filter=filter, skip_erroring=skip_erroring
+                self.profile, filter=sync_filter, skip_erroring=skip_erroring
             )
 
     def create_network_connection(self, base_url, **kwargs):
@@ -217,7 +205,7 @@ class SessionController(object):
                 if tries >= max_interval_tries:
                     sleep(max_interval)
                 else:
-                    sleep(0.3 * (2 ** tries - 1))
+                    sleep(0.3 * (2**tries - 1))
             result = self.proceed_to(target_stage, context=context)
             tries += 1
             if callable(callback):
