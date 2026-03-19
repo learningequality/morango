@@ -29,7 +29,6 @@ setup(
         "djangorestframework>3.10",
         "django-ipware==4.0.2",
         "requests",
-        "typing-extensions==4.1.1",
         "ifcfg",
     ],
     license="MIT",
@@ -48,6 +47,7 @@ setup(
         'Programming Language :: Python :: 3.11',
         'Programming Language :: Python :: 3.12',
         'Programming Language :: Python :: 3.13',
+        'Programming Language :: Python :: 3.14',
     ],
-    python_requires=">=3.6,  <3.14",
+    python_requires=">=3.6,  <3.15",
 )

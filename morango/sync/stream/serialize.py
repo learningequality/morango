@@ -9,7 +9,6 @@ from typing import Type
 
 from django.core.serializers.json import DjangoJSONEncoder
 from django.db.models import Q
-from typing_extensions import Literal
 
 from morango.models.certificates import Filter
 from morango.models.core import DatabaseMaxCounter
@@ -71,8 +70,14 @@ class AppModelSource(Source[SerializeTask]):
         profile: str,
         sync_filter: Optional[Filter] = None,
         dirty_only: bool = True,
-        partition_order: Literal["asc", "desc"] = "asc",
+        partition_order: str = "asc",
     ):
+        """
+        :param profile: The Morango model profile
+        :param sync_filter: The Filter object for this sync
+        :param dirty_only: Whether to filter on dirty records only
+        :param partition_order: Controls how the filter specificity is applied, "asc" or "desc"
+        """
         self.profile = profile
         self.sync_filter = sync_filter
         self.dirty_only = dirty_only

@@ -483,8 +483,6 @@ class Store(AbstractStore):
                 klass_model.syncing_objects.filter(id=self.id).delete()
             return None, deferred_fks
         else:
-            if sync_filter:
-                print("Has filter", sync_filter)
             # load model into memory
             app_model = klass_model.deserialize(json.loads(self.serialized), sync_filter=sync_filter)
             app_model._morango_source_id = self.source_id
