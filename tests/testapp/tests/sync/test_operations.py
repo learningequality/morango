@@ -1,7 +1,6 @@
 import json
 import uuid
 
-import factory
 import mock
 from django.db import connection
 from django.test import override_settings
@@ -45,13 +44,6 @@ from morango.sync.operations import ReceiverQueueOperation
 from morango.sync.syncsession import TransferClient
 
 DBBackend = load_backend(connection)
-
-
-class FacilityModelFactory(factory.DjangoModelFactory):
-    class Meta:
-        model = Facility
-
-    name = factory.Sequence(lambda n: "Fac %d" % n)
 
 
 def assertRecordsBuffered(records):
