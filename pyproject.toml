@@ -48,7 +48,7 @@ test = [
 ]
 
 dev = [
-#    "pre-commit==4.1.0",
+    "prek>=0.3.6; python_version>='3.8'",
     "tox>=4; python_version>='3.9'",
     "tox<4; python_version<'3.9'",
     "tox-uv>=1.0; python_version>='3.9'",

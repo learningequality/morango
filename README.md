@@ -14,14 +14,36 @@ Developed in support of the [Kolibri](https://github.com/learningequality/kolibr
 
 ## Developer documentation
 
-See [morango.readthedocs.io](https://morango.readthedocs.io)
+See [morango.readthedocs.io](https://morango.readthedocs.io) for documentation on how Morango works.
+
+### Getting started
+
+To start contributing to Morango, first make sure you [have `uv` installed](https://docs.astral.sh/uv/getting-started/installation/).
+
+Create a virtual environment, with at least python 3.9:
+```bash
+uv venv -p 3.10
+```
+
+Then install dependencies:
+```bash
+uv sync --all-extras
+```
+
+If you get during installation, you may need to install system packages such as `openssl` and `libssl-dev`.
+
+Finally, set up pre-commit hooks:
+```bash
+prek install  # with -f to reinstall
+```
+
+### Docs
 
 To build and edit the docs, run:
 
 ```bash
 # install requirements
-pip install -r requirements/docs.txt
-pip install -e .
+uv sync --extra docs
 
 # build docs
 make docs
