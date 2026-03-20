@@ -12,7 +12,7 @@ jobs:
         uses: fkirc/skip-duplicate-actions@master
         with:
           github_token: ${{ github.token }}
-          paths: '["morango/migrations/*.py", ".github/workflows/check_migrations_sqlite.yml", "pyproject.toml"]'
+          paths: '["morango/migrations/*.py", ".github/workflows/check_migrations_sqlite.yml", "pyproject.toml", "uv.lock"]'
   build:
     name: Build wheel
     needs: pre_job

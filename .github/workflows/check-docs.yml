@@ -12,7 +12,7 @@ jobs:
         uses: fkirc/skip-duplicate-actions@master
         with:
           github_token: ${{ github.token }}
-          paths: '["docs/**", "pyproject.toml"]'
+          paths: '["docs/**", "pyproject.toml", "uv.lock"]'
   docs:
     name: Checking docs build
     needs: pre_job

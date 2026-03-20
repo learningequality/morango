@@ -12,7 +12,7 @@ jobs:
         uses: fkirc/skip-duplicate-actions@master
         with:
           github_token: ${{ github.token }}
-          paths: '["**.py", ".github/workflows/tox.yml", "tox.ini", "pyproject.toml"]'
+          paths: '["**.py", ".github/workflows/tox.yml", "tox.ini", "pyproject.toml", "uv.lock"]'
   build:
     name: Build wheel
     needs: pre_job
