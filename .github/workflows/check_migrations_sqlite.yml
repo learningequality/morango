@@ -32,7 +32,7 @@ jobs:
         run: uv build --wheel
       - name: Upload wheel artifact
         if: ${{ needs.pre_job.outputs.should_skip != 'true' }}
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: wheel
           path: dist/*.whl
@@ -59,7 +59,7 @@ jobs:
           fetch-depth: 0
       - name: Download wheel artifact
         if: ${{ needs.pre_job.outputs.should_skip != 'true' }}
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: wheel
           path: dist/
