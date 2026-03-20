@@ -1178,11 +1178,11 @@ wheels = [
 
 [[package]]
 name = "ifcfg"
-version = "0.21"
+version = "0.24"
 source = { registry = "https://pypi.org/simple" }
-sdist = { url = "https://files.pythonhosted.org/packages/0d/9e/849ee352c3be795c09622e3bda2f2fe74ce099d051c48e9c22529146eac5/ifcfg-0.21.tar.gz", hash = "sha256:5f96ce813c2964cf292429ba683b1278afa80043b11a479d829ce8246546a605", size = 10218, upload-time = "2020-02-14T22:51:44.391Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/ba/51/53de897f3be2402b53940cfe2570a1838ef828f416b5198dd454f1654b76/ifcfg-0.24.tar.gz", hash = "sha256:64f60f7a0d15c85876b76b5f79246ed8c27bf5f79e5753ec88287145884661ab", size = 12116, upload-time = "2023-04-19T06:22:02.168Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/31/86/e673dbd280e6744dfa85291f2c78cb59a05559206e8662d6f258d4a8b3f0/ifcfg-0.21-py2.py3-none-any.whl", hash = "sha256:d18d8e379a67e86b6d1170177cf317efd5afbc321d2a5081618754f9ebe2cb53", size = 10094, upload-time = "2020-02-14T22:51:42.073Z" },
+    { url = "https://files.pythonhosted.org/packages/d8/35/d5d8da34881946022e311693a875e2d162045f20ea17d7d33707ab929eb8/ifcfg-0.24-py2.py3-none-any.whl", hash = "sha256:950f31ddc3fdd877724fb4154b744434471106088ecf10170b96063c24b3c0b7", size = 10332, upload-time = "2023-04-19T06:22:00.439Z" },
 ]
 
 [[package]]
@@ -1744,7 +1744,7 @@ requires-dist = [
     { name = "djangorestframework", marker = "extra == 'docs'", specifier = "==3.14.0" },
     { name = "factory-boy", marker = "extra == 'test'", specifier = ">=3.0,<4" },
     { name = "ifcfg" },
-    { name = "ifcfg", marker = "extra == 'docs'", specifier = "==0.21" },
+    { name = "ifcfg", marker = "extra == 'docs'", specifier = "==0.24" },
     { name = "m2crypto", marker = "extra == 'accelerated'", specifier = "==0.41.0" },
     { name = "m2crypto", marker = "extra == 'postgres'", specifier = "==0.41.0" },
     { name = "m2r", marker = "extra == 'docs'" },
