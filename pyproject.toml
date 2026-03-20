@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "morango"
 dynamic = ["version"]
-description = "Pure Python sqlite-based Django DB replication engine."
+description = "A pure Python DB replication engine for Django that supports SQLite and PostgreSQL."
 authors = [{name = "Learning Equality", email = "dev@learningequality.org"}]
 maintainers = [{name = "Learning Equality", email = "dev@learningequality.org"}]
 readme = "README.md"
