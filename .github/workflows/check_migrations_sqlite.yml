@@ -12,10 +12,34 @@ jobs:
         uses: fkirc/skip-duplicate-actions@master
         with:
           github_token: ${{ github.token }}
-          paths: '["morango/migrations/*.py", ".github/workflows/check_migrations_sqlite.yml", "setup.py", "requirements/*.txt"]'
+          paths: '["morango/migrations/*.py", ".github/workflows/check_migrations_sqlite.yml", "pyproject.toml"]'
+  build:
+    name: Build wheel
+    needs: pre_job
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+      - name: Install uv
+        if: ${{ needs.pre_job.outputs.should_skip != 'true' }}
+        uses: astral-sh/setup-uv@v7
+        with:
+          python-version: 3.9
+          enable-cache: "true"
+      - name: Build wheel
+        if: ${{ needs.pre_job.outputs.should_skip != 'true' }}
+        run: uv build --wheel
+      - name: Upload wheel artifact
+        if: ${{ needs.pre_job.outputs.should_skip != 'true' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: wheel
+          path: dist/*.whl
+          retention-days: 1
   migration_test:
     name: SQLite migration tests
-    needs: pre_job
+    needs: [pre_job, build]
     runs-on: ubuntu-latest
     container:
       image: python:3.7-buster
@@ -32,6 +56,13 @@ jobs:
         if: ${{ needs.pre_job.outputs.should_skip != 'true' }}
         with:
           lfs: true
+          fetch-depth: 0
+      - name: Download wheel artifact
+        if: ${{ needs.pre_job.outputs.should_skip != 'true' }}
+        uses: actions/download-artifact@v4
+        with:
+          name: wheel
+          path: dist/
       - name: Build SQLite 3.25.3
         if: ${{ needs.pre_job.outputs.should_skip != 'true' }}
         run: |
@@ -54,7 +85,7 @@ jobs:
             ${{ runner.os }}-pip-
       - name: Install dependencies
         if: ${{ needs.pre_job.outputs.should_skip != 'true' }}
-        run: pip install .
+        run: pip install $(ls dist/*.whl | head -n 1)[test]
       - name: Run migrations
         if: ${{ needs.pre_job.outputs.should_skip != 'true' }}
         run: python tests/testapp/manage.py migrate

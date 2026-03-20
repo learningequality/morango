@@ -1,0 +1,148 @@
+[build-system]
+requires = ["setuptools>=64", "setuptools-scm>=8"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "morango"
+dynamic = ["version"]
+description = "Pure Python sqlite-based Django DB replication engine."
+authors = [{name = "Learning Equality", email = "dev@learningequality.org"}]
+maintainers = [{name = "Learning Equality", email = "dev@learningequality.org"}]
+readme = "README.md"
+license-files = ["LICENSE"]
+requires-python = ">=3.6,<3.15"
+keywords = ["database", "syncing", "morango"]
+classifiers = [
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Natural Language :: English",
+    "Development Status :: 4 - Beta",
+    "Programming Language :: Python :: 3.6",
+    "Programming Language :: Python :: 3.7",
+    "Programming Language :: Python :: 3.8",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3.14",
+]
+
+dependencies = [
+    "django>=3,<4",
+    "django-mptt>0.10.0",
+    "rsa<4.10",
+    "djangorestframework>3.10",
+    "django-ipware==4.0.2",
+    "requests",
+    "ifcfg",
+]
+
+[project.optional-dependencies]
+test = [
+    "factory-boy>=3.0,<4",
+    "mock>=4.0,<6",
+    "pytest>=6.2.5,<8",
+    "pytest-django==4.5.2",
+    "more-itertools<=10.0.0",
+]
+
+dev = [
+    "prek>=0.3.6; python_version>='3.8'",
+    "tox>=4; python_version>='3.9'",
+    "tox<4; python_version<'3.9'",
+    "tox-uv>=1.0; python_version>='3.9'",
+]
+
+docs = [
+    "sphinx",
+    "sphinx-intl",
+    "sphinx-rtd-theme",
+    "sphinx-autobuild",
+    "watchdog",
+    "m2r",
+    "sphinx-notfound-page",
+    "django==3.2.25",
+    "djangorestframework==3.14.0",
+    "django-mptt>=0.14.0,<1",
+    "rsa==3.4.2",
+    "ifcfg==0.21",
+]
+
+postgres = [
+    "M2Crypto==0.41.0",
+    "cryptography==40.0.2",
+    "psycopg2-binary>=2.9.8,<=2.9.9",
+]
+
+accelerated = [
+    "M2Crypto==0.41.0",
+    "cryptography==40.0.2",
+]
+
+[project.urls]
+Homepage = "https://github.com/learningequality/morango"
+Repository = "https://github.com/learningequality/morango"
+
+[tool.setuptools]
+include-package-data = true
+
+[tool.setuptools.packages.find]
+where = ["."]
+exclude = ["tests*", "docs*"]
+
+[tool.setuptools.package-data]
+morango = ["*.*"]
+
+[tool.setuptools_scm]
+version_file = "morango/_version.py"
+git_describe_command = "git describe --dirty --tags --long --match 'v*' --first-parent"
+
+[tool.flake8]
+max-line-length = 160
+max-complexity = 10
+exclude = [
+    "morango/*/migrations/*",
+    "docs",
+    "morango/sync/operations.py",
+    "morango/sync/backends/postgres.py",
+    "morango/sync/backends/sqlite.py",
+    "tests/testapp/tests/test_crypto.py"
+]
+ignore = "E203,W503"
+
+[tool.isort]
+atomic = true
+multi_line_output = 5
+line_length = 160
+indent = "    "
+combine_as_imports = true
+skip = ["wsgi.py", "docs", "env", "cli.py", "test", ".eggs", "build"]
+
+[tool.coverage.run]
+branch = true
+source = ["morango"]
+omit = [
+    "*/*/migrations/*",
+    "*/*/tests/*",
+    "*/*test_*.py"
+]
+
+[tool.coverage.report]
+ignore_errors = true
+show_missing = true
+precision = 2
+exclude_lines = [
+    "raise NotImplementedError",
+    "raise AssertionError",
+    "raise NotImplementedError",
+    "if __name__ == .__main__.:"
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests/", "morango/"]
+DJANGO_SETTINGS_MODULE = "testapp.settings"
+norecursedirs = ["dist", "tmp*", ".svn", ".*"]
+markers = [
+    "windows: mark a test as a windows test"
+]

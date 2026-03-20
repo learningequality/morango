@@ -12,10 +12,34 @@ jobs:
         uses: fkirc/skip-duplicate-actions@master
         with:
           github_token: ${{ github.token }}
-          paths: '["**.py", ".github/workflows/tox.yml", "tox.ini", "requirements/*.txt"]'
+          paths: '["**.py", ".github/workflows/tox.yml", "tox.ini", "pyproject.toml"]'
+  build:
+    name: Build wheel
+    needs: pre_job
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+      - name: Install uv
+        if: ${{ needs.pre_job.outputs.should_skip != 'true' }}
+        uses: astral-sh/setup-uv@v7
+        with:
+          python-version: 3.9
+          enable-cache: "true"
+      - name: Build wheel
+        if: ${{ needs.pre_job.outputs.should_skip != 'true' }}
+        run: uv build --wheel
+      - name: Upload wheel artifact
+        if: ${{ needs.pre_job.outputs.should_skip != 'true' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: wheel
+          path: dist/*.whl
+          retention-days: 1
   unit_test:
     name: Python unit tests
-    needs: pre_job
+    needs: [pre_job, build]
     runs-on: ubuntu-latest
     strategy:
       max-parallel: 5
@@ -23,28 +47,28 @@ jobs:
         python-version: [3.9, '3.10', '3.11', '3.12', '3.13', '3.14']
     steps:
       - uses: actions/checkout@v6
-      - name: Set up Python ${{ matrix.python-version }}
+      - name: Download wheel artifact
         if: ${{ needs.pre_job.outputs.should_skip != 'true' }}
-        uses: actions/setup-python@v6
+        uses: actions/download-artifact@v4
         with:
-          python-version: ${{ matrix.python-version }}
-      - name: Install tox
+          name: wheel
+          path: dist/
+      - name: Install uv
         if: ${{ needs.pre_job.outputs.should_skip != 'true' }}
-        run: |
-          python -m pip install --upgrade pip
-          pip install tox
-      - name: tox env cache
-        if: ${{ needs.pre_job.outputs.should_skip != 'true' }}
-        uses: actions/cache@v5
+        uses: astral-sh/setup-uv@v7
         with:
-          path: ${{ github.workspace }}/.tox/py${{ matrix.python-version }}
-          key: ${{ runner.os }}-tox-py${{ matrix.python-version }}-${{ hashFiles('setup.py', 'requirements/*.txt') }}
+          python-version: "${{ matrix.python-version }}"
+          activate-environment: "true"
+          enable-cache: "true"
+      - name: Install dependencies
+        if: ${{ needs.pre_job.outputs.should_skip != 'true' }}
+        run: uv sync --extra dev
       - name: Test with tox
         if: ${{ needs.pre_job.outputs.should_skip != 'true' }}
-        run: tox -e py${{ matrix.python-version }}
+        run: uv run tox --installpkg dist/*.whl -e py${{ matrix.python-version }}
   unit_test_eol_python:
     name: Python unit tests for EOL Python versions
-    needs: pre_job
+    needs: [pre_job, build]
     runs-on: ubuntu-latest
     strategy:
       max-parallel: 5
@@ -54,6 +78,12 @@ jobs:
       image: python:${{ matrix.python-version }}-buster
     steps:
       - uses: actions/checkout@v6
+      - name: Download wheel artifact
+        if: ${{ needs.pre_job.outputs.should_skip != 'true' }}
+        uses: actions/download-artifact@v4
+        with:
+          name: wheel
+          path: dist/
       - name: Install tox
         if: ${{ needs.pre_job.outputs.should_skip != 'true' }}
         run: |
@@ -64,13 +94,13 @@ jobs:
         uses: actions/cache@v5
         with:
           path: ${{ github.workspace }}/.tox/py${{ matrix.python-version }}
-          key: ${{ runner.os }}-tox-py${{ matrix.python-version }}-${{ hashFiles('setup.py', 'requirements/*.txt') }}
+          key: ${{ runner.os }}-tox-py${{ matrix.python-version }}-${{ hashFiles('pyproject.toml') }}
       - name: Test with tox
         if: ${{ needs.pre_job.outputs.should_skip != 'true' }}
-        run: tox -e py${{ matrix.python-version }}
+        run: tox --installpkg dist/*.whl -e py${{ matrix.python-version }}
   cryptography:
     name: Python unit tests + cryptography
-    needs: pre_job
+    needs: [pre_job, build]
     runs-on: ubuntu-latest
     env:
       cryptography_version: '40.0.2'
@@ -80,33 +110,32 @@ jobs:
         python-version: [3.9, '3.10', '3.11', '3.12', '3.13', '3.14']
     steps:
       - uses: actions/checkout@v6
-      - name: Set up Python ${{ matrix.python-version }}
+      - name: Download wheel artifact
         if: ${{ needs.pre_job.outputs.should_skip != 'true' }}
-        uses: actions/setup-python@v6
+        uses: actions/download-artifact@v4
         with:
-          python-version: ${{ matrix.python-version }}
+          name: wheel
+          path: dist/
       - name: Install system dependencies
         if: ${{ needs.pre_job.outputs.should_skip != 'true' }}
         run: |
           sudo apt-get -y -qq update
           sudo apt-get install -y openssl libssl-dev
-      - name: Install tox
+      - name: Install uv
         if: ${{ needs.pre_job.outputs.should_skip != 'true' }}
-        run: |
-          python -m pip install --upgrade pip
-          pip install tox
-      - name: tox env cache
-        if: ${{ needs.pre_job.outputs.should_skip != 'true' }}
-        uses: actions/cache@v5
+        uses: astral-sh/setup-uv@v7
         with:
-          path: ${{ github.workspace }}/.tox/py${{ matrix.python-version }}-cryptography${{ env.cryptography_version }}
-          key: ${{ runner.os }}-tox-py${{ matrix.python-version }}-crypto${{ env.cryptography_version }}-${{ hashFiles('setup.py', 'requirements/*.txt') }}
+          python-version: "${{ matrix.python-version }}"
+          enable-cache: "true"
+      - name: Install dependencies
+        if: ${{ needs.pre_job.outputs.should_skip != 'true' }}
+        run: uv sync --extra dev
       - name: Test with tox
         if: ${{ needs.pre_job.outputs.should_skip != 'true' }}
-        run: tox -e py${{ matrix.python-version }}-cryptography${{ env.cryptography_version }}
+        run: uv run tox --installpkg dist/*.whl -e py${{ matrix.python-version }}-cryptography${{ env.cryptography_version }}
   cryptography_eol_python:
     name: Python unit tests + cryptography for EOL Python versions
-    needs: pre_job
+    needs: [pre_job, build]
     runs-on: ubuntu-latest
     env:
       cryptography_version: '40.0.2'
@@ -118,6 +147,12 @@ jobs:
       image: python:${{ matrix.python-version }}-buster
     steps:
       - uses: actions/checkout@v6
+      - name: Download wheel artifact
+        if: ${{ needs.pre_job.outputs.should_skip != 'true' }}
+        uses: actions/download-artifact@v4
+        with:
+          name: wheel
+          path: dist/
       - name: Install system dependencies
         if: ${{ needs.pre_job.outputs.should_skip != 'true' }}
         run: |
@@ -136,13 +171,13 @@ jobs:
         uses: actions/cache@v5
         with:
           path: ${{ github.workspace }}/.tox/py${{ matrix.python-version }}-cryptography${{ env.cryptography_version }}
-          key: ${{ runner.os }}-tox-py${{ matrix.python-version }}-crypto${{ env.cryptography_version }}-${{ hashFiles('setup.py', 'requirements/*.txt') }}
+          key: ${{ runner.os }}-tox-py${{ matrix.python-version }}-crypto${{ env.cryptography_version }}-${{ hashFiles('pyproject.toml') }}
       - name: Test with tox
         if: ${{ needs.pre_job.outputs.should_skip != 'true' }}
-        run: tox -e py${{ matrix.python-version }}-cryptography${{ env.cryptography_version }}
+        run: tox --installpkg dist/*.whl -e py${{ matrix.python-version }}-cryptography${{ env.cryptography_version }}
   postgres:
     name: Python postgres unit tests
-    needs: pre_job
+    needs: [pre_job, build]
     runs-on: ubuntu-latest
     services:
       # Label used to access the service container
@@ -162,28 +197,28 @@ jobs:
           - 5432:5432
     steps:
       - uses: actions/checkout@v6
-      - name: Set up Python 3.9 for Postgres
+      - name: Download wheel artifact
         if: ${{ needs.pre_job.outputs.should_skip != 'true' }}
-        uses: actions/setup-python@v6
+        uses: actions/download-artifact@v4
         with:
-          python-version: 3.9
-      - name: Install tox
+          name: wheel
+          path: dist/
+      - name: Install uv
         if: ${{ needs.pre_job.outputs.should_skip != 'true' }}
-        run: |
-          python -m pip install --upgrade pip
-          pip install tox
-      - name: tox env cache
-        if: ${{ needs.pre_job.outputs.should_skip != 'true' }}
-        uses: actions/cache@v5
+        uses: astral-sh/setup-uv@v7
         with:
-          path: ${{ github.workspace }}/.tox/py3.9-postgres
-          key: ${{ runner.os }}-tox-py3.9-postgres-${{ hashFiles('setup.py', 'requirements/*.txt') }}
+          python-version: "3.9"
+          activate-environment: "true"
+          enable-cache: "true"
+      - name: Install dependencies
+        if: ${{ needs.pre_job.outputs.should_skip != 'true' }}
+        run: uv sync --extra dev
       - name: Test with tox
         if: ${{ needs.pre_job.outputs.should_skip != 'true' }}
-        run: tox -e postgres
+        run: uv run tox --installpkg dist/*.whl --discover $(uv python find 3.9) -e postgres
   windows:
     name: Python unit tests on Windows Server
-    needs: pre_job
+    needs: [pre_job, build]
     runs-on: windows-latest
     strategy:
       max-parallel: 5
@@ -191,6 +226,12 @@ jobs:
         python-version: [3.8]
     steps:
       - uses: actions/checkout@v6
+      - name: Download wheel artifact
+        if: ${{ needs.pre_job.outputs.should_skip != 'true' }}
+        uses: actions/download-artifact@v4
+        with:
+          name: wheel
+          path: dist/
       - name: Set up Python ${{ matrix.python-version }}
         if: ${{ needs.pre_job.outputs.should_skip != 'true' }}
         uses: actions/setup-python@v6
@@ -203,4 +244,6 @@ jobs:
           pip install tox
       - name: Test with tox
         if: ${{ needs.pre_job.outputs.should_skip != 'true' }}
-        run: tox -e windows
+        run: |
+          $wheel = Get-ChildItem dist\*.whl | Select-Object -ExpandProperty FullName -First 1
+          tox --installpkg $wheel -e windows
