@@ -1,7 +1,7 @@
 # Morango
 
-[![build](https://github.com/learningequality/morango/actions/workflows/tox.yml/badge.svg?branch=master)](https://github.com/learningequality/morango/actions)
-[![image](http://codecov.io/github/learningequality/morango/coverage.svg?branch=master)](http://codecov.io/github/learningequality/morango?branch=master)
+[![Python tests](https://github.com/learningequality/morango/actions/workflows/tox.yml/badge.svg?branch=release-v0.9.x)](https://github.com/learningequality/morango/actions)
+[![PyPI](https://img.shields.io/pypi/v/morango.svg?color=blue)](https://pypi.org/project/morango/)
 [![image](https://readthedocs.org/projects/morango/badge/?version=latest)](http://morango.readthedocs.org/en/latest/)
 
 Morango is a pure-Python database replication engine for Django that supports peer-to-peer syncing of data. It is structured as a Django app that can be included in projects to make specific application models syncable.
