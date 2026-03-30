@@ -1,0 +1,98 @@
+name: Compare MAC Address Methods
+on:
+  workflow_dispatch:
+  push:
+    branches: [compare-mac-methods]
+jobs:
+  compare-mac-methods-ubuntu:
+    runs-on: ubuntu-latest
+    strategy:
+      max-parallel: 3
+      matrix:
+        test-locale: ['en_US.UTF-8', 'es_MX.UTF-8', 'de_DE.UTF-8', 'pt_BR.UTF-8', 'fr_FR.UTF-8', 'ar_SA.UTF-8', 'zh_TW.UTF-8']
+    env:
+      LANG: ${{ matrix.test-locale }}
+      LC_ALL: ${{ matrix.test-locale }}
+    steps:
+      - uses: actions/checkout@v6
+      - name: Install uv
+        uses: astral-sh/setup-uv@v7
+        with:
+          python-version: 3.9
+      - name: Set up different locales on Ubuntu
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y locales
+          sudo locale-gen ${{ matrix.test-locale }}
+          sudo update-locale LANG=${{ matrix.test-locale }} LC_ALL=${{ matrix.test-locale }}
+      - name: Install dependencies
+        run: |
+          uv pip install ifcfg getmac
+      - name: Linux test locale ${{ matrix.test-locale }}
+        env:
+          LANG: ${{ matrix.test-locale }}
+          LC_ALL: ${{ matrix.test-locale }}
+        run: uv run scripts/compare_mac_methods.py
+  compare-mac-methods-macos:
+    runs-on: macos-latest
+    strategy:
+      max-parallel: 3
+      matrix:
+        test-locale: ['en_US.UTF-8', 'es_MX.UTF-8', 'de_DE.UTF-8', 'pt_BR.UTF-8', 'fr_FR.UTF-8', 'ar_SA.UTF-8', 'zh_TW.UTF-8']
+    env:
+      LANG: ${{ matrix.test-locale }}
+      LC_ALL: ${{ matrix.test-locale }}
+    steps:
+      - uses: actions/checkout@v6
+      - name: Install uv
+        uses: astral-sh/setup-uv@v7
+        with:
+          python-version: 3.9
+      - name: Install dependencies
+        run: |
+          uv pip install ifcfg getmac
+      - name: Mac test locale ${{ matrix.test-locale }}
+        env:
+          LANG: ${{ matrix.test-locale }}
+          LC_ALL: ${{ matrix.test-locale }}
+        run: uv run scripts/compare_mac_methods.py
+  compare-mac-methods-windows:
+    runs-on: windows-latest
+    strategy:
+      max-parallel: 3
+      matrix:
+        pair:
+          - test-locale: en_US.UTF-8
+            test-locale-id: en-US
+          - test-locale: es_MX.UTF-8
+            test-locale-id: es-MX
+          - test-locale: de_DE.UTF-8
+            test-locale-id: de-DE
+          - test-locale: pt_BR.UTF-8
+            test-locale-id: pt-BR
+          - test-locale: fr_FR.UTF-8
+            test-locale-id: fr-FR
+          - test-locale: ar_SA.UTF-8
+            test-locale-id: ar-SA
+          - test-locale: zh_TW.UTF-8
+            test-locale-id: zh-TW
+    steps:
+      - uses: actions/checkout@v6
+      - name: Install uv
+        uses: astral-sh/setup-uv@v7
+        with:
+          python-version: 3.9
+      - name: Install dependencies
+        run: |
+          uv pip install ifcfg getmac
+      - name: Set Windows System Locale and Culture
+        run: |
+          Install-Language -Language ${{ matrix.pair.test-locale-id }}
+          Set-WinSystemLocale -SystemLocale ${{ matrix.pair.test-locale-id }}
+          Set-Culture -CultureInfo ${{ matrix.pair.test-locale-id }}
+        shell: pwsh
+      - name: Windows test locale ${{ matrix.pair.test-locale }}
+        env:
+          LANG: ${{ matrix.pair.test-locale }}
+          LC_ALL: ${{ matrix.pair.test-locale }}
+        run: uv run scripts/compare_mac_methods.py
