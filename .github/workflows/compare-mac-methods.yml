@@ -88,14 +88,16 @@ jobs:
       - name: Install dependencies
         run: |
           uv pip install ifcfg getmac
-      - name: Set Windows System Locale and Culture
-        run: |
-          Install-Language -Language ${{ matrix.pair.test-locale-id }}
-          Set-WinSystemLocale -SystemLocale ${{ matrix.pair.test-locale-id }}
-          Set-Culture -CultureInfo ${{ matrix.pair.test-locale-id }}
-        shell: pwsh
       - name: Windows test locale ${{ matrix.pair.test-locale }}
-        env:
-          LANG: ${{ matrix.pair.test-locale }}
-          LC_ALL: ${{ matrix.pair.test-locale }}
-        run: uv run scripts/compare_mac_methods.py
+        run: |
+          $ErrorActionPreference = "Stop"
+          $culture = [System.Globalization.CultureInfo]::GetCultureInfo('${{ matrix.pair.test-locale-id }}')
+          [System.Threading.Thread]::CurrentThread.CurrentCulture = $culture
+          [System.Threading.Thread]::CurrentThread.CurrentUICulture = $culture
+          [System.Globalization.CultureInfo]::DefaultThreadCurrentCulture = $culture
+          [System.Globalization.CultureInfo]::DefaultThreadCurrentUICulture = $culture
+
+          $env:LANG = '${{ matrix.pair.test-locale }}'
+          $env:LC_ALL = '${{ matrix.pair.test-locale }}'
+          uv run scripts/compare_mac_methods.py
+        shell: pwsh

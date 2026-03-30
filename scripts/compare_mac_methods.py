@@ -8,6 +8,22 @@ import platform
 import sys
 
 
+def _device_sort_key(iface):
+    """
+    Sort interfaces by device name to give preference to interfaces
+    that are more likely to be stable (not change/be removed).
+    """
+    dev = (iface.get("device") or "").lower()
+    if dev.startswith("eth") or dev.startswith("en"):
+        return "0" + dev
+    if dev.startswith("wl"):
+        return "1" + dev
+    if dev.startswith("e") or dev.startswith("w"):
+        return "2" + dev
+    else:
+        return dev
+
+
 def get_system_language():
     """Get system language settings"""
     try:
@@ -35,7 +51,7 @@ def get_ifcfg_macs():
 
         interfaces = ifcfg.interfaces().values()
         results = {}
-        for iface in interfaces:
+        for iface in sorted(interfaces, key=_device_sort_key):
             ether = iface.get("ether")
             if ether:
                 results[iface.get("device", "unknown")] = ether
