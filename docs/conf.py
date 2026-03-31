@@ -17,7 +17,6 @@ import os
 import sys
 
 import django
-import sphinx_rtd_theme
 from django.utils.encoding import force_text
 from django.utils.html import strip_tags
 
@@ -51,7 +50,8 @@ from django.db.models.fields import files  # noqa
 files.FileDescriptor.__get__ = lambda *args: None
 
 
-# Auto list fields from django models - from https://djangosnippets.org/snippets/2533/#c5977
+# Auto list fields from django models
+# from https://djangosnippets.org/snippets/2533/#c5977
 def process_docstring(app, what, name, obj, options, lines):
     # This causes import errors if left outside the function
     from django.db import models
@@ -62,7 +62,8 @@ def process_docstring(app, what, name, obj, options, lines):
         fields = obj._meta.get_fields()
 
         for field in fields:
-            # Skip ManyToOneRel and ManyToManyRel fields which have no 'verbose_name' or 'help_text'
+            # Skip ManyToOneRel and ManyToManyRel fields
+            # which have no 'verbose_name' or 'help_text'
             if not hasattr(field, 'verbose_name'):
                 continue
 
@@ -85,9 +86,15 @@ def process_docstring(app, what, name, obj, options, lines):
             # Add the field's type to the docstring
             if isinstance(field, models.ForeignKey):
                 to = field.remote_field.model
-                lines.append(u':type %s: %s to :class:`~%s`' % (field.attname, type(field).__name__, to))
+                lines.append(
+                    u':type %s: %s to :class:`~%s`'
+                    % (field.attname, type(field).__name__, to)
+                )
             else:
-                lines.append(u':type %s: %s' % (field.attname, type(field).__name__))
+                lines.append(
+                    u':type %s: %s'
+                    % (field.attname, type(field).__name__)
+                )
 
     return lines
 
@@ -96,14 +103,14 @@ def process_docstring(app, what, name, obj, options, lines):
 
 # Add any Sphinx extension module names here, as strings. They can be
 # extensions coming with Sphinx (named 'sphinx.ext.*') or your custom ones.
-extensions = ["sphinx.ext.autodoc", "sphinx.ext.viewcode", "m2r"]
+extensions = ["sphinx.ext.autodoc", "sphinx.ext.viewcode"]
 
 # Add any paths that contain templates here, relative to this directory.
 templates_path = ['_templates']
 
 # The suffix(es) of source filenames.
 # You can specify multiple suffix as a list of string:
-source_suffix = [".rst", ".md"]
+source_suffix = [".rst"]
 
 # The master toctree document.
 master_doc = 'index'
@@ -168,18 +175,11 @@ pygments_style = 'sphinx'
 # html_theme = 'default'
 
 html_theme = "sphinx_rtd_theme"
-html_theme_path = [".", sphinx_rtd_theme.get_html_theme_path()]
 
 
-# Approach 2 for custom stylesheet:
-# adapted from: http://rackerlabs.github.io/docs-rackspace/tools/rtd-tables.html
-# and https://github.com/altair-viz/altair/pull/418/files
-# https://github.com/rtfd/sphinx_rtd_theme/issues/117
 def setup(app):
     # Register the docstring processor with sphinx
     app.connect("autodoc-process-docstring", process_docstring)
-    # Add our custom CSS overrides
-    app.add_css_file("theme_overrides.css")
 
 
 # Theme options are theme-specific and customize the look and feel of a
