@@ -442,8 +442,10 @@ def _save_deserialized_record(store_model, app_model, model_name, excluded_list)
 
     :returns: True if save succeeded, False otherwise
     """
+    from django.db import transaction as django_transaction
+
     try:
-        with transaction.atomic():
+        with django_transaction.atomic():
             with mute_signals(signals.pre_save, signals.post_save):
                 app_model.save(update_dirty_bit_to=False)
         store_model.dirty_bit = False
