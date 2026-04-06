@@ -442,10 +442,9 @@ def _save_deserialized_record(store_model, app_model, model_name, excluded_list)
 
     :returns: True if save succeeded, False otherwise
     """
-    from django.db import transaction as django_transaction
 
     try:
-        with django_transaction.atomic():
+        with transaction.atomic():
             with mute_signals(signals.pre_save, signals.post_save):
                 app_model.save(update_dirty_bit_to=False)
         store_model.dirty_bit = False
@@ -586,6 +585,9 @@ def _deserialize_from_store(profile, skip_erroring=False, filter=None):
                         if app_model:
                             app_models.append((store_model, app_model))
                         for fk_model, fk_refs in model_deferred_fks.items():
+                            # validate that the FK references aren't to anything already in the
+                            # excluded list, which should only contain models which failed to
+                            # deserialize for reasons other than broken FKs at this point
                             for fk_ref in fk_refs:
                                 if fk_ref.to_pk in excluded_list:
                                     raise exceptions.ValidationError(
@@ -599,6 +601,7 @@ def _deserialize_from_store(profile, skip_erroring=False, filter=None):
                         exceptions.ObjectDoesNotExist,
                         ValueError,
                     ) as e:
+                        # if the app model did not validate, we leave the store dirty bit set
                         excluded_list.append(store_model.id)
                         store_model.deserialization_error = str(e)
                         store_model.save(update_fields=["deserialization_error"])
