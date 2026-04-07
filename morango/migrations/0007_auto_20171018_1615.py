@@ -4,15 +4,13 @@ import datetime
 
 import django.db.models.deletion
 import django.utils.timezone
-from django.db import migrations
-from django.db import models
+from django.db import migrations, models
 from django.utils.timezone import utc
 
 import morango.models.fields.uuids
 
 
 class Migration(migrations.Migration):
-
     dependencies = [("morango", "0006_instanceidmodel_system_id")]
 
     operations = [
@@ -45,9 +43,7 @@ class Migration(migrations.Migration):
             old_name="write_scope_def",
             new_name="write_filter_template",
         ),
-        migrations.RenameField(
-            model_name="transfersession", old_name="incoming", new_name="push"
-        ),
+        migrations.RenameField(model_name="transfersession", old_name="incoming", new_name="push"),
         migrations.RemoveField(model_name="syncsession", name="host"),
         migrations.RemoveField(model_name="syncsession", name="local_scope"),
         migrations.RemoveField(model_name="syncsession", name="remote_scope"),

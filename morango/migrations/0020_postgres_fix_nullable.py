@@ -6,15 +6,23 @@ from django.db import migrations
 def apply(apps, schema_editor):
     # sqlite does not allow ALTER COLUMN, but also isn't affected by this issue
     if "postgresql" in schema_editor.connection.vendor:
-        schema_editor.execute("ALTER TABLE morango_transfersession ALTER COLUMN transfer_stage DROP NOT NULL")
-        schema_editor.execute("ALTER TABLE morango_transfersession ALTER COLUMN transfer_stage_status DROP NOT NULL")
+        schema_editor.execute(
+            "ALTER TABLE morango_transfersession ALTER COLUMN transfer_stage DROP NOT NULL"
+        )
+        schema_editor.execute(
+            "ALTER TABLE morango_transfersession ALTER COLUMN transfer_stage_status DROP NOT NULL"
+        )
 
 
 def revert(apps, schema_editor):
     # sqlite does not allow ALTER COLUMN, but also isn't affected by this issue
     if "postgresql" in schema_editor.connection.vendor:
-        schema_editor.execute("ALTER TABLE morango_transfersession ALTER COLUMN transfer_stage SET NOT NULL")
-        schema_editor.execute("ALTER TABLE morango_transfersession ALTER COLUMN transfer_stage_status SET NOT NULL")
+        schema_editor.execute(
+            "ALTER TABLE morango_transfersession ALTER COLUMN transfer_stage SET NOT NULL"
+        )
+        schema_editor.execute(
+            "ALTER TABLE morango_transfersession ALTER COLUMN transfer_stage_status SET NOT NULL"
+        )
 
 
 class Migration(migrations.Migration):

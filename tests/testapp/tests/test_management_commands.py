@@ -5,16 +5,14 @@ from django.core.management import call_command
 from django.test import TestCase
 from django.utils import timezone
 
+from morango.models.core import SyncSession, TransferSession
+
 from .helpers import create_buffer_and_store_dummy_data
-from morango.models.core import SyncSession
-from morango.models.core import TransferSession
 
 
 def _create_sessions(last_activity_offset=0, sync_session=None, push=True):
 
-    last_activity_timestamp = timezone.now() - datetime.timedelta(
-        hours=last_activity_offset
-    )
+    last_activity_timestamp = timezone.now() - datetime.timedelta(hours=last_activity_offset)
 
     if sync_session is None:
         sync_session = SyncSession.objects.create(
@@ -30,7 +28,7 @@ def _create_sessions(last_activity_offset=0, sync_session=None, push=True):
         sync_session=sync_session,
         push=push,
         last_activity_timestamp=last_activity_timestamp,
-        filter="1:2\n"
+        filter="1:2\n",
     )
 
     return sync_session, transfer_session
@@ -104,14 +102,18 @@ class CleanupSyncsTestCase(TestCase):
         self.assertSyncSessionIsActive(self.syncsession_new)
 
     def test_filtering_sessions_by_client_instance_id_cleared(self):
-        call_command("cleanupsyncs", client_instance_id=self.syncsession_old.client_instance_id, expiration=0)
+        call_command(
+            "cleanupsyncs", client_instance_id=self.syncsession_old.client_instance_id, expiration=0
+        )
         self.assertTransferSessionIsCleared(self.transfersession_old)
         self.assertSyncSessionIsNotActive(self.syncsession_old)
         self.assertTransferSessionIsNotCleared(self.transfersession_new)
         self.assertSyncSessionIsActive(self.syncsession_new)
 
     def test_filtering_sessions_by_server_instance_id_cleared(self):
-        call_command("cleanupsyncs", server_instance_id=self.syncsession_old.server_instance_id, expiration=0)
+        call_command(
+            "cleanupsyncs", server_instance_id=self.syncsession_old.server_instance_id, expiration=0
+        )
         self.assertTransferSessionIsCleared(self.transfersession_old)
         self.assertSyncSessionIsNotActive(self.syncsession_old)
         self.assertTransferSessionIsNotCleared(self.transfersession_new)

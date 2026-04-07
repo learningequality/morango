@@ -3,6 +3,7 @@ humanhash: Human-readable representations of digests.
 The simplest ways to use this module are the :func:`humanize` and :func:`uuid`
 functions. For tighter control over the output, see :class:`HumanHasher`.
 """
+
 import uuid
 
 # Copyright (c) 2014 SUNET. All rights reserved.

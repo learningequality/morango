@@ -1,6 +1,7 @@
 """
 Helper functions for use across syncing related functionality.
 """
+
 import json
 import uuid
 
@@ -12,28 +13,25 @@ from django.db.migrations.executor import MigrationExecutor
 from django.db.migrations.recorder import MigrationRecorder
 from django.test.testcases import LiveServerTestCase
 from django.utils import timezone
-from facility_profile.models import Facility
-from facility_profile.models import InteractionLog
-from facility_profile.models import MyUser
-from facility_profile.models import SummaryLog
+from facility_profile.models import Facility, InteractionLog, MyUser, SummaryLog
+
+from morango.api.serializers import BufferSerializer
+from morango.models.core import (
+    AbstractStore,
+    Buffer,
+    DatabaseIDModel,
+    InstanceIDModel,
+    RecordMaxCounter,
+    RecordMaxCounterBuffer,
+    Store,
+    SyncSession,
+    TransferSession,
+)
+from morango.sync.context import SessionContext
+from morango.sync.controller import MorangoProfileController, SessionController
+from morango.sync.syncsession import NetworkSyncConnection, SyncSessionClient, TransferClient
 
 from .compat import EnvironmentVarGuard
-from morango.api.serializers import BufferSerializer
-from morango.models.core import AbstractStore
-from morango.models.core import Buffer
-from morango.models.core import DatabaseIDModel
-from morango.models.core import InstanceIDModel
-from morango.models.core import RecordMaxCounter
-from morango.models.core import RecordMaxCounterBuffer
-from morango.models.core import Store
-from morango.models.core import SyncSession
-from morango.models.core import TransferSession
-from morango.sync.context import SessionContext
-from morango.sync.controller import MorangoProfileController
-from morango.sync.controller import SessionController
-from morango.sync.syncsession import NetworkSyncConnection
-from morango.sync.syncsession import SyncSessionClient
-from morango.sync.syncsession import TransferClient
 
 
 class FacilityModelFactory(factory.django.DjangoModelFactory):
@@ -79,12 +77,10 @@ def serialized_facility_factory(identifier):
 def create_dummy_store_data():
     data = {}
     DatabaseIDModel.objects.create()
-    data["group1_id"] = InstanceIDModel.get_or_create_current_instance()[
-        0
-    ]  # counter is at 0
+    data["group1_id"] = InstanceIDModel.get_or_create_current_instance()[0]  # counter is at 0
 
     # create controllers for app/store/buffer operations
-    conn = mock.Mock(spec='morango.sync.syncsession.NetworkSyncConnection')
+    conn = mock.Mock(spec="morango.sync.syncsession.NetworkSyncConnection")
     conn.server_info = dict(capabilities=[])
     data["mc"] = MorangoProfileController("facilitydata")
     data["sc"] = TransferClient(conn, "host", SessionController.build())
@@ -110,9 +106,7 @@ def create_dummy_store_data():
 
     # create users and logs associated with user
     data["user1"] = MyUser.objects.create(username="bob")
-    data["user1_sumlogs"] = [
-        SummaryLog.objects.create(user=data["user1"]) for _ in range(5)
-    ]
+    data["user1_sumlogs"] = [SummaryLog.objects.create(user=data["user1"]) for _ in range(5)]
 
     data["mc"].serialize_into_store()  # counter is at 3
 
@@ -120,9 +114,7 @@ def create_dummy_store_data():
     with EnvironmentVarGuard() as env:
         env["MORANGO_SYSTEM_ID"] = "new_sys_id"
 
-        data["group2_id"] = InstanceIDModel.get_or_create_current_instance(
-            clear_cache=True
-        )[
+        data["group2_id"] = InstanceIDModel.get_or_create_current_instance(clear_cache=True)[
             0
         ]  # new counter is at 0
 
@@ -131,26 +123,20 @@ def create_dummy_store_data():
 
         # create users and logs associated with user
         data["user2"] = MyUser.objects.create(username="rob")
-        data["user2_sumlogs"] = [
-            SummaryLog.objects.create(user=data["user2"]) for _ in range(5)
-        ]
+        data["user2_sumlogs"] = [SummaryLog.objects.create(user=data["user2"]) for _ in range(5)]
         data["user2_interlogs"] = [
             InteractionLog.objects.create(user=data["user2"]) for _ in range(5)
         ]
 
         data["user3"] = MyUser.objects.create(username="zob")
-        data["user3_sumlogs"] = [
-            SummaryLog.objects.create(user=data["user3"]) for _ in range(5)
-        ]
+        data["user3_sumlogs"] = [SummaryLog.objects.create(user=data["user3"]) for _ in range(5)]
         data["user3_interlogs"] = [
             InteractionLog.objects.create(user=data["user3"]) for _ in range(5)
         ]
 
         data["mc"].serialize_into_store()  # new counter is at 2
 
-        data["user4"] = MyUser.objects.create(
-            username="invalid", _morango_partition="badpartition"
-        )
+        data["user4"] = MyUser.objects.create(username="invalid", _morango_partition="badpartition")
         data["mc"].serialize_into_store()  # new counter is at 3
 
     return data
@@ -199,9 +185,7 @@ def create_buffer_and_store_dummy_data(transfer_session_id):
         model_uuid=data["model1"],
         transfer_session_id=transfer_session_id,
     )
-    create_rmcb_data(
-        1, 2, 3, 4, data["model1_rmcb_ids"], data["model1"], transfer_session_id
-    )
+    create_rmcb_data(1, 2, 3, 4, data["model1_rmcb_ids"], data["model1"], transfer_session_id)
 
     # example data for merge conflict (rmcb.counter > rmc.counter)
     data["model2"] = uuid.uuid4().hex
@@ -227,9 +211,7 @@ def create_buffer_and_store_dummy_data(transfer_session_id):
         transfer_session_id=transfer_session_id,
         deleted=1,
     )
-    create_rmcb_data(
-        3, 2, 3, 4, data["model2_rmcb_ids"], data["model2"], transfer_session_id
-    )
+    create_rmcb_data(3, 2, 3, 4, data["model2_rmcb_ids"], data["model2"], transfer_session_id)
 
     # example data for merge conflict (rmcb.counter <= rmc.counter)
     data["model5"] = uuid.uuid4().hex
@@ -254,9 +236,7 @@ def create_buffer_and_store_dummy_data(transfer_session_id):
         model_uuid=data["model5"],
         transfer_session_id=transfer_session_id,
     )
-    create_rmcb_data(
-        1, 2, 3, 4, data["model5_rmcb_ids"], data["model5"], transfer_session_id
-    )
+    create_rmcb_data(1, 2, 3, 4, data["model5_rmcb_ids"], data["model5"], transfer_session_id)
 
     # example data for merge conflict with hard delete(rmcb.counter <= rmc.counter)
     data["model7"] = uuid.uuid4().hex
@@ -282,9 +262,7 @@ def create_buffer_and_store_dummy_data(transfer_session_id):
         transfer_session_id=transfer_session_id,
         hard_deleted=True,
     )
-    create_rmcb_data(
-        1, 2, 3, 4, data["model7_rmcb_ids"], data["model7"], transfer_session_id
-    )
+    create_rmcb_data(1, 2, 3, 4, data["model7_rmcb_ids"], data["model7"], transfer_session_id)
 
     # example data for ff
     data["model3"] = uuid.uuid4().hex
@@ -308,9 +286,7 @@ def create_buffer_and_store_dummy_data(transfer_session_id):
         model_uuid=data["model3"],
         transfer_session_id=transfer_session_id,
     )
-    create_rmcb_data(
-        3, 2, 3, 4, data["model3_rmcb_ids"], data["model3"], transfer_session_id
-    )
+    create_rmcb_data(3, 2, 3, 4, data["model3_rmcb_ids"], data["model3"], transfer_session_id)
 
     # example for missing store data
     data["model4"] = uuid.uuid4().hex
@@ -322,9 +298,7 @@ def create_buffer_and_store_dummy_data(transfer_session_id):
         model_uuid=data["model4"],
         transfer_session_id=transfer_session_id,
     )
-    create_rmcb_data(
-        1, 2, 3, 4, data["model4_rmcb_ids"], data["model4"], transfer_session_id
-    )
+    create_rmcb_data(1, 2, 3, 4, data["model4_rmcb_ids"], data["model4"], transfer_session_id)
 
     # buffer record with different transfer session id
     session = SyncSession.objects.create(
@@ -345,9 +319,7 @@ def create_buffer_and_store_dummy_data(transfer_session_id):
         model_uuid=data["model6"],
         transfer_session_id=data["tfs_id"],
     )
-    create_rmcb_data(
-        1, 2, 3, 4, data["model6_rmcb_ids"], data["model6"], data["tfs_id"]
-    )
+    create_rmcb_data(1, 2, 3, 4, data["model6_rmcb_ids"], data["model6"], data["tfs_id"])
 
     return data
 
@@ -385,9 +357,7 @@ class BaseClientTestCase(LiveServerTestCase):
             "partition": kwargs.get("partition", "partition"),
             "source_id": kwargs.get("source_id", uuid.uuid4().hex),
             "model_name": kwargs.get("model_name", "contentsummarylog"),
-            "conflicting_serialized_data": kwargs.get(
-                "conflicting_serialized_data", ""
-            ),
+            "conflicting_serialized_data": kwargs.get("conflicting_serialized_data", ""),
             "model_uuid": kwargs.get("model_uuid", None),
             "transfer_session": transfer_session,
         }
@@ -399,9 +369,7 @@ class BaseClientTestCase(LiveServerTestCase):
             )
             Buffer.objects.create(**data)
 
-        buffered_items = Buffer.objects.filter(
-            transfer_session=transfer_session
-        )
+        buffered_items = Buffer.objects.filter(transfer_session=transfer_session)
         serialized_records = BufferSerializer(buffered_items, many=True)
         return json.dumps(serialized_records.data)
 
@@ -418,7 +386,9 @@ class BaseTransferClientTestCase(BaseClientTestCase):
                 records_total=3,
             )
 
-        client = super(BaseTransferClientTestCase, self).build_client(client_class=client_class, controller=controller)
+        client = super(BaseTransferClientTestCase, self).build_client(
+            client_class=client_class, controller=controller
+        )
         if client.context.is_push is None:
             client.context.update(is_push=self.transfer_session.push)
         if update_context:
@@ -463,10 +433,10 @@ class TestMigrationsMixin(object):
         cls.latest_migration = (cls.app, latest_migration.name)
 
     def setUp(self):
-        assert (
-            self.migrate_from and self.migrate_to
-        ), "TestCase '{}' must define migrate_from and migrate_to properties".format(
-            type(self).__name__
+        assert self.migrate_from and self.migrate_to, (
+            "TestCase '{}' must define migrate_from and migrate_to properties".format(
+                type(self).__name__
+            )
         )
 
         migrate_from = [(self.app, self.migrate_from)]

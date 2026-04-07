@@ -1,18 +1,17 @@
 from django.test import TestCase
 from facility_profile.models import Facility
 
-from ..helpers import FacilityModelFactory
-from morango.models.core import DeletedModels
-from morango.models.core import InstanceIDModel
+from morango.models.core import DeletedModels, InstanceIDModel
 from morango.sync.controller import MorangoProfileController
+
+from ..helpers import FacilityModelFactory
 
 
 class PostDeleteSignalsTestCase(TestCase):
-
     def setUp(self):
         InstanceIDModel.get_or_create_current_instance()
         [FacilityModelFactory() for _ in range(10)]
-        self.mc = MorangoProfileController('facilitydata')
+        self.mc = MorangoProfileController("facilitydata")
         self.mc.serialize_into_store()
 
     def test_deleted_flag_gets_set(self):

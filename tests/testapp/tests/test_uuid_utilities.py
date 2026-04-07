@@ -3,19 +3,19 @@ import uuid
 
 import mock
 from django.test import TestCase
-from facility_profile.models import Facility
-from facility_profile.models import InteractionLog
-from facility_profile.models import MyUser
+from facility_profile.models import Facility, InteractionLog, MyUser
+
+from morango.errors import InvalidMorangoSourceId
+from morango.models.core import DatabaseIDModel, InstanceIDModel
+from morango.models.fields.uuids import sha2_uuid
+from morango.models.utils import (
+    _calculate_0_4_uuid,
+    get_0_4_system_parameters,
+    get_0_5_mac_address,
+    get_0_5_system_id,
+)
 
 from .compat import EnvironmentVarGuard
-from morango.errors import InvalidMorangoSourceId
-from morango.models.core import DatabaseIDModel
-from morango.models.core import InstanceIDModel
-from morango.models.fields.uuids import sha2_uuid
-from morango.models.utils import _calculate_0_4_uuid
-from morango.models.utils import get_0_4_system_parameters
-from morango.models.utils import get_0_5_mac_address
-from morango.models.utils import get_0_5_system_id
 
 
 class UUIDModelMixinTestCase(TestCase):
@@ -24,9 +24,7 @@ class UUIDModelMixinTestCase(TestCase):
 
     def test_calculate_uuid(self):
         log_with_random_id = InteractionLog(user=MyUser.objects.create(username="Test"))
-        with mock.patch(
-            "uuid.uuid4", return_value=uuid.UUID("12345678123456781234567812345678")
-        ):
+        with mock.patch("uuid.uuid4", return_value=uuid.UUID("12345678123456781234567812345678")):
             target_uuid = sha2_uuid(
                 log_with_random_id.calculate_partition(),
                 "12345678123456781234567812345678",
@@ -74,32 +72,24 @@ class InstanceIDModelTestCase(TestCase):
         self.assertEqual(len(InstanceIDModel.objects.filter(current=True)), 1)
 
     def test_same_node_id(self):
-        with mock.patch(
-            "uuid.getnode", return_value=67002173923623
-        ):  # fake (random) address
+        with mock.patch("uuid.getnode", return_value=67002173923623):  # fake (random) address
             (IDModel, _) = InstanceIDModel.get_or_create_current_instance()
             ident = IDModel.id
 
-        with mock.patch(
-            "uuid.getnode", return_value=69002173923623
-        ):  # fake (random) address
+        with mock.patch("uuid.getnode", return_value=69002173923623):  # fake (random) address
             (IDModel, _) = InstanceIDModel.get_or_create_current_instance()
 
-        with mock.patch(
-            "uuid.getnode", return_value=67002173923623
-        ):  # fake (random) address
+        with mock.patch("uuid.getnode", return_value=67002173923623):  # fake (random) address
             (IDModel, _) = InstanceIDModel.get_or_create_current_instance()
 
-        self.assertFalse(
-            InstanceIDModel.objects.exclude(id=ident).filter(current=True).exists()
-        )
+        self.assertFalse(InstanceIDModel.objects.exclude(id=ident).filter(current=True).exists())
         self.assertTrue(InstanceIDModel.objects.get(id=ident).current)
 
     @mock.patch("uuid.getnode", return_value=24359248572014)
     @mock.patch("platform.platform", return_value="Windows 3.1")
     @mock.patch("platform.node", return_value="myhost")
     @mock.patch("morango.models.utils._get_database_path", return_value="<dummypath>")
-    @mock.patch('sys.version', '2.7.333')
+    @mock.patch("sys.version", "2.7.333")
     def test_consistent_with_0_4_instance_id_calculation(self, *args):
         """
         This test ensures that we don't accidentally make changes that impact how we calculate
@@ -155,9 +145,7 @@ class InstanceIDModelTestCase(TestCase):
             env["MORANGO_SYSTEM_ID"] = "magicsysid"
 
             DatabaseIDModel.objects.all().update(current=False)
-            DatabaseIDModel.objects.create(
-                id="7fe445b75cea11858c00fb97bdee8878", current=True
-            )
+            DatabaseIDModel.objects.create(id="7fe445b75cea11858c00fb97bdee8878", current=True)
 
             self.assertEqual(get_0_5_system_id(), "54940f560a55bbf7d86b")
             self.assertEqual(get_0_5_mac_address(), "804f4c20d3b2b5a29b95")
@@ -205,7 +193,6 @@ class InstanceIDModelTestCase(TestCase):
         """
 
         with EnvironmentVarGuard() as env:
-
             env["MORANGO_SYSTEM_ID"] = "oldmagicsysid"
 
             old_instance, created = InstanceIDModel.get_or_create_current_instance(clear_cache=True)
@@ -216,7 +203,9 @@ class InstanceIDModelTestCase(TestCase):
             cached_instance, created = InstanceIDModel.get_or_create_current_instance()
             self.assertFalse(created)
 
-            uncached_instance, created = InstanceIDModel.get_or_create_current_instance(clear_cache=True)
+            uncached_instance, created = InstanceIDModel.get_or_create_current_instance(
+                clear_cache=True
+            )
             self.assertTrue(created)
 
             recached_instance, created = InstanceIDModel.get_or_create_current_instance()

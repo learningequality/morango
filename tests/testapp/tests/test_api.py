@@ -3,8 +3,7 @@ import uuid
 from base64 import encodebytes as b64encode
 
 from django.db import connection
-from django.test.utils import CaptureQueriesContext
-from django.test.utils import override_settings
+from django.test.utils import CaptureQueriesContext, override_settings
 from django.urls import reverse
 from django.urls.exceptions import NoReverseMatch
 from django.utils import timezone
@@ -12,26 +11,23 @@ from django.utils.functional import SimpleLazyObject
 from facility_profile.models import MyUser
 from rest_framework.test import APITestCase
 
-from .compat import EnvironmentVarGuard
-from morango.api.serializers import BufferSerializer
-from morango.api.serializers import CertificateSerializer
-from morango.api.serializers import InstanceIDSerializer
-from morango.constants import transfer_stages
-from morango.constants import transfer_statuses
-from morango.models.certificates import Certificate
-from morango.models.certificates import Key
-from morango.models.certificates import Nonce
-from morango.models.certificates import ScopeDefinition
-from morango.models.core import Buffer
-from morango.models.core import DatabaseMaxCounter
-from morango.models.core import InstanceIDModel
-from morango.models.core import RecordMaxCounterBuffer
-from morango.models.core import SyncSession
-from morango.models.core import TransferSession
+from morango.api.serializers import BufferSerializer, CertificateSerializer, InstanceIDSerializer
+from morango.constants import transfer_stages, transfer_statuses
+from morango.models.certificates import Certificate, Key, Nonce, ScopeDefinition
+from morango.models.core import (
+    Buffer,
+    DatabaseMaxCounter,
+    InstanceIDModel,
+    RecordMaxCounterBuffer,
+    SyncSession,
+    TransferSession,
+)
 from morango.models.fields.crypto import SharedKey
 from morango.registry import syncable_models
 from morango.sync.syncsession import compress_string
 from morango.sync.utils import validate_and_create_buffer_data
+
+from .compat import EnvironmentVarGuard
 
 
 class CertificateTestCaseMixin(object):
@@ -74,9 +70,7 @@ class CertificateTestCaseMixin(object):
             read_write_filter_template="",
         )
 
-        self.root_cert1_with_key = Certificate.generate_root_certificate(
-            self.root_scope_def.id
-        )
+        self.root_cert1_with_key = Certificate.generate_root_certificate(self.root_scope_def.id)
 
         self.subset_cert1_without_key = Certificate(
             parent=self.root_cert1_with_key,
@@ -108,9 +102,7 @@ class CertificateTestCaseMixin(object):
         self.subset_cert1_without_key._private_key = None
         self.subset_cert1_without_key.save()
 
-        self.root_cert2_without_key = Certificate.generate_root_certificate(
-            self.root_scope_def.id
-        )
+        self.root_cert2_without_key = Certificate.generate_root_certificate(self.root_scope_def.id)
 
         self.subset_cert2_with_key = Certificate(
             parent=self.root_cert2_without_key,
@@ -196,9 +188,7 @@ class CertificateTestCaseMixin(object):
             ),
             "connection_path": "http://127.0.0.1:8000",
             "instance": json.dumps(
-                InstanceIDSerializer(
-                    InstanceIDModel.get_or_create_current_instance()[0]
-                ).data
+                InstanceIDSerializer(InstanceIDModel.get_or_create_current_instance()[0]).data
             ),
             "nonce": nonce,
         }
@@ -213,13 +203,7 @@ class CertificateTestCaseMixin(object):
         return SyncSession.objects.get(id=data["id"])
 
     def make_transfersession_creation_request(
-        self,
-        filter,
-        push,
-        syncsession=None,
-        expected_status=201,
-        expected_message=None,
-        **kwargs
+        self, filter, push, syncsession=None, expected_status=201, expected_message=None, **kwargs
     ):
 
         if not syncsession:
@@ -234,9 +218,7 @@ class CertificateTestCaseMixin(object):
         }
 
         # make the API call to attempt to create the TransferSession
-        response = self.client.post(
-            reverse("transfersessions-list"), data, format="json"
-        )
+        response = self.client.post(reverse("transfersessions-list"), data, format="json")
         self.assertEqual(response.status_code, expected_status)
 
         if expected_status == 201:
@@ -274,9 +256,7 @@ class CertificateListingTestCase(CertificateTestCaseMixin, APITestCase):
         self.assertEqual(data[0]["id"], self.subset_cert2_with_key.id)
 
         # check that no certificates are returned when the partition doesn't exist
-        _, data = self.make_cert_endpoint_request(
-            params={"primary_partition": "a" * 32}
-        )
+        _, data = self.make_cert_endpoint_request(params={"primary_partition": "a" * 32})
         self.assertEqual(len(data), 0)
 
         # check that no certificates are returned when profile doesn't match
@@ -360,9 +340,7 @@ class CertificateCreationTestCase(CertificateTestCaseMixin, APITestCase):
         params = {
             "parent": parent.id,
             "profile": kwargs.get("profile", self.profile),
-            "scope_definition": kwargs.get(
-                "scope_definition", parent.scope_definition_id
-            ),
+            "scope_definition": kwargs.get("scope_definition", parent.scope_definition_id),
             "scope_version": kwargs.get("scope_version", parent.scope_version),
             "scope_params": kwargs.get("scope_params", parent.scope_params),
             "public_key": kwargs.get("public_key", key.get_public_key_string()),
@@ -436,9 +414,7 @@ class CertificateCreationTestCase(CertificateTestCaseMixin, APITestCase):
                 [self.unsaved_root_cert, self.unsaved_subset_cert], many=True
             ).data
         )
-        response = self.client.post(
-            reverse("certificatechain-list"), data=data, format="json"
-        )
+        response = self.client.post(reverse("certificatechain-list"), data=data, format="json")
         self.assertEqual(response.status_code, 201)
         saved_subset_cert = Certificate.objects.get(id=self.unsaved_subset_cert.id)
         self.assertEqual(
@@ -459,9 +435,7 @@ class CertificateCreationTestCase(CertificateTestCaseMixin, APITestCase):
                 [self.unsaved_root_cert, self.unsaved_subset_cert], many=True
             ).data
         )
-        response = self.client.post(
-            reverse("certificatechain-list"), data=data, format="json"
-        )
+        response = self.client.post(reverse("certificatechain-list"), data=data, format="json")
         self.assertEqual(response.status_code, 403)
 
     @override_settings(ALLOW_CERTIFICATE_PUSHING=True)
@@ -477,9 +451,7 @@ class CertificateCreationTestCase(CertificateTestCaseMixin, APITestCase):
                 [self.unsaved_root_cert, self.unsaved_subset_cert], many=True
             ).data
         )
-        response = self.client.post(
-            reverse("certificatechain-list"), data=data, format="json"
-        )
+        response = self.client.post(reverse("certificatechain-list"), data=data, format="json")
         self.assertEqual(response.status_code, 400)
 
 
@@ -532,17 +504,13 @@ class SyncSessionEndpointTestCase(CertificateTestCaseMixin, APITestCase):
             ),
             "connection_path": "http://127.0.0.1:8000",
             "instance": json.dumps(
-                InstanceIDSerializer(
-                    InstanceIDModel.get_or_create_current_instance()[0]
-                ).data
+                InstanceIDSerializer(InstanceIDModel.get_or_create_current_instance()[0]).data
             ),
             "nonce": nonce,
         }
 
         # sign the nonce/ID combo to attach to the request
-        data["signature"] = self.sub_subset_cert1_with_key.sign(
-            "{nonce}:{id}".format(**data)
-        )
+        data["signature"] = self.sub_subset_cert1_with_key.sign("{nonce}:{id}".format(**data))
 
         return data
 
@@ -578,12 +546,8 @@ class SyncSessionEndpointTestCase(CertificateTestCaseMixin, APITestCase):
         # check that the syncsession was created
         syncsession = SyncSession.objects.get()
         self.assertEqual(syncsession.id, data["id"])
-        self.assertEqual(
-            syncsession.server_certificate_id, data["server_certificate_id"]
-        )
-        self.assertEqual(
-            syncsession.client_certificate_id, data["client_certificate_id"]
-        )
+        self.assertEqual(syncsession.server_certificate_id, data["server_certificate_id"])
+        self.assertEqual(syncsession.client_certificate_id, data["client_certificate_id"])
         self.assertTrue(syncsession.active)
 
     def test_syncsession_creation_fails_with_bad_signature(self):
@@ -611,9 +575,7 @@ class SyncSessionEndpointTestCase(CertificateTestCaseMixin, APITestCase):
         data = self.get_initial_syncsession_data_for_request()
 
         Nonce.objects.all().update(
-            timestamp=timezone.datetime(
-                2000, 1, 1, tzinfo=timezone.get_current_timezone()
-            )
+            timestamp=timezone.datetime(2000, 1, 1, tzinfo=timezone.get_current_timezone())
         )
 
         self.assertSyncSessionCreationFails(data)
@@ -667,9 +629,7 @@ class SyncSessionEndpointTestCase(CertificateTestCaseMixin, APITestCase):
         data = self.get_initial_syncsession_data_for_request()
         self.client.post(reverse("syncsessions-list"), data, format="json")
 
-        response = self.client.get(
-            reverse("syncsessions-detail", kwargs={"pk": data["id"]})
-        )
+        response = self.client.get(reverse("syncsessions-detail", kwargs={"pk": data["id"]}))
         self.assertEqual(response.status_code, 200)
 
 
@@ -684,9 +644,7 @@ class TransferSessionEndpointTestCase(CertificateTestCaseMixin, APITestCase):
     def test_transfersession_can_be_created_with_smaller_subset_filter(self):
 
         self.make_transfersession_creation_request(
-            filter=str(self.sub_subset_cert1_with_key.get_scope().read_filter).split()[
-                0
-            ],
+            filter=str(self.sub_subset_cert1_with_key.get_scope().read_filter).split()[0],
             push=False,
         )
 
@@ -833,12 +791,8 @@ class TransferSessionEndpointTestCase(CertificateTestCaseMixin, APITestCase):
 class BufferEndpointTestCase(CertificateTestCaseMixin, APITestCase):
     def setUp(self):
         super(BufferEndpointTestCase, self).setUp()
-        self.default_push_filter = str(
-            self.sub_subset_cert1_with_key.get_scope().write_filter
-        )
-        self.default_pull_filter = str(
-            self.sub_subset_cert1_with_key.get_scope().read_filter
-        )
+        self.default_push_filter = str(self.sub_subset_cert1_with_key.get_scope().write_filter)
+        self.default_pull_filter = str(self.sub_subset_cert1_with_key.get_scope().read_filter)
 
     def build_buffer_item(self, **kwargs):
 
@@ -854,17 +808,11 @@ class BufferEndpointTestCase(CertificateTestCaseMixin, APITestCase):
         kwargs["transfer_session"].records_total = records_total + 1
         kwargs["transfer_session"].save()
 
-        filt = (
-            server_cert.get_scope().write_filter
-            if push
-            else server_cert.get_scope().read_filter
-        )
+        filt = server_cert.get_scope().write_filter if push else server_cert.get_scope().read_filter
         partition = filt._filter_tuple[0] + ":furthersubpart"
 
         data = {
-            "profile": kwargs.get(
-                "profile", kwargs["transfer_session"].sync_session.profile
-            ),
+            "profile": kwargs.get("profile", kwargs["transfer_session"].sync_session.profile),
             "serialized": kwargs.get("serialized", '{"test": 99}'),
             "deleted": kwargs.get("deleted", False),
             "last_saved_instance": kwargs.get("last_saved_instance", uuid.uuid4().hex),
@@ -872,9 +820,7 @@ class BufferEndpointTestCase(CertificateTestCaseMixin, APITestCase):
             "partition": kwargs.get("partition", partition),
             "source_id": kwargs.get("source_id", uuid.uuid4().hex),
             "model_name": kwargs.get("model_name", "contentsummarylog"),
-            "conflicting_serialized_data": kwargs.get(
-                "conflicting_serialized_data", ""
-            ),
+            "conflicting_serialized_data": kwargs.get("conflicting_serialized_data", ""),
             "model_uuid": kwargs.get("model_uuid", None),
             "transfer_session": kwargs["transfer_session"],
         }
@@ -927,12 +873,10 @@ class BufferEndpointTestCase(CertificateTestCaseMixin, APITestCase):
     def test_push_valid_gzipped_buffer_chunk(self):
         rec_1 = self.build_buffer_item(push=True, filter=self.default_push_filter)
         rec_2 = self.build_buffer_item(
-            serialized=u"unicode", transfer_session=rec_1.transfer_session
+            serialized="unicode", transfer_session=rec_1.transfer_session
         )
         rec_3 = self.build_buffer_item(transfer_session=rec_1.transfer_session)
-        self.make_buffer_post_request(
-            [rec_1, rec_2, rec_3], expected_status=201, gzip=True
-        )
+        self.make_buffer_post_request([rec_1, rec_2, rec_3], expected_status=201, gzip=True)
 
     def test_push_valid_buffer_chunk(self):
         rec_1 = self.build_buffer_item(push=True, filter=self.default_push_filter)
@@ -982,21 +926,15 @@ class BufferEndpointTestCase(CertificateTestCaseMixin, APITestCase):
             records.append(self.build_buffer_item(transfer_session=transfer_session))
 
         # also make some dummy records so we can make sure they don't get returned
-        records.append(
-            self.build_buffer_item(push=False, filter=self.default_pull_filter)
-        )
-        records.append(
-            self.build_buffer_item(transfer_session=records[-1].transfer_session)
-        )
+        records.append(self.build_buffer_item(push=False, filter=self.default_pull_filter))
+        records.append(self.build_buffer_item(transfer_session=records[-1].transfer_session))
 
         # save all the records to the database
         [rec.save() for rec in records]
 
         return records[0].transfer_session.id
 
-    def make_buffer_get_request(
-        self, expected_status=200, expected_count=None, **get_params
-    ):
+    def make_buffer_get_request(self, expected_status=200, expected_count=None, **get_params):
         """Make a GET request to the buffer endpoint. Warning: Deletes the local buffer instances before validating."""
 
         response = self.client.get(reverse("buffers-list"), get_params, format="json")
@@ -1004,7 +942,6 @@ class BufferEndpointTestCase(CertificateTestCaseMixin, APITestCase):
         self.assertEqual(response.status_code, expected_status)
 
         if expected_status == 200:
-
             t_id = get_params.get("transfer_session_id")
 
             if expected_count is None:
@@ -1021,22 +958,16 @@ class BufferEndpointTestCase(CertificateTestCaseMixin, APITestCase):
             model_uuids = [d["model_uuid"] for d in data]
 
             # delete "local" buffer records to avoid uniqueness constraint failures in validation
-            Buffer.objects.filter(
-                transfer_session_id=t_id, model_uuid__in=model_uuids
-            ).delete()
+            Buffer.objects.filter(transfer_session_id=t_id, model_uuid__in=model_uuids).delete()
 
             # run the validation logic to ensure no errors were returned
-            errors = validate_and_create_buffer_data(
-                data, TransferSession.objects.get(id=t_id)
-            )
+            errors = validate_and_create_buffer_data(data, TransferSession.objects.get(id=t_id))
             self.assertFalse(errors)
 
             # check that the correct number of buffer items were created
             self.assertEqual(
                 expected_count,
-                Buffer.objects.filter(
-                    transfer_session_id=t_id, model_uuid__in=model_uuids
-                ).count(),
+                Buffer.objects.filter(transfer_session_id=t_id, model_uuid__in=model_uuids).count(),
             )
 
             # check that the correct number of buffer items was returned
@@ -1053,7 +984,7 @@ class BufferEndpointTestCase(CertificateTestCaseMixin, APITestCase):
         with CaptureQueriesContext(connection) as ctx:
             BufferSerializer(instance=buffers[0]).data
             for q in ctx.captured_queries:
-                self.assertFalse('morango_transfersession' in q['sql'])
+                self.assertFalse("morango_transfersession" in q["sql"])
 
     def test_pull_valid_buffer_list(self):
 
@@ -1137,18 +1068,14 @@ class BufferEndpointTestCase(CertificateTestCaseMixin, APITestCase):
                 limit=5,
                 offset=offset,
             )
-            response = self.client.get(
-                reverse("buffers-list"), get_params, format="json"
-            )
+            response = self.client.get(reverse("buffers-list"), get_params, format="json")
             self.assertEqual(response.status_code, 200)
             data = json.loads(response.content.decode())
             model_uuids = {d["model_uuid"] for d in data["results"]}
             self.assertFalse(model_uuids & returned_uuids)
             returned_uuids.update(model_uuids)
             if last_transfer_session_id:
-                Buffer.objects.filter(
-                    transfer_session_id=last_transfer_session_id
-                ).delete()
+                Buffer.objects.filter(transfer_session_id=last_transfer_session_id).delete()
             last_transfer_session_id = self.create_records_for_pulling(count=10)
             offset += 5
 
@@ -1172,9 +1099,7 @@ class MorangoInfoTestCase(APITestCase):
         with EnvironmentVarGuard() as env:
             env["MORANGO_SYSTEM_ID"] = "new_sys_id"
             InstanceIDModel.get_or_create_current_instance(clear_cache=True)
-            m_info = self.client.get(
-                reverse("morangoinfo-detail", kwargs={"pk": 1}), format="json"
-            )
+            m_info = self.client.get(reverse("morangoinfo-detail", kwargs={"pk": 1}), format="json")
         self.assertNotEqual(m_info.data["instance_hash"], old_id_hash)
 
     @override_settings(MORANGO_INSTANCE_INFO={"this_is_a_test": "yes"})
@@ -1185,9 +1110,7 @@ class MorangoInfoTestCase(APITestCase):
         self.assertIn("this_is_a_test", self.m_info.data)
         self.assertEqual(self.m_info.data["this_is_a_test"], "yes")
 
-    @override_settings(
-        MORANGO_INSTANCE_INFO="facility_profile.custom:CUSTOM_INSTANCE_INFO"
-    )
+    @override_settings(MORANGO_INSTANCE_INFO="facility_profile.custom:CUSTOM_INSTANCE_INFO")
     def test_custom_instance_info__import_path(self):
         self.m_info = self.client.get(
             reverse("morangoinfo-detail", kwargs={"pk": 1}), format="json"

@@ -5,16 +5,15 @@ from django.db.models import Q
 from django.test import SimpleTestCase
 
 from morango.models.certificates import Filter
-from morango.models.core import InstanceIDModel
-from morango.models.core import RecordMaxCounter
-from morango.models.core import Store
-from morango.models.core import SyncableModel
-from morango.sync.stream.serialize import AppModelSource
-from morango.sync.stream.serialize import ModelPartitionBuffer
-from morango.sync.stream.serialize import SerializeTask
-from morango.sync.stream.serialize import StoreLookup
-from morango.sync.stream.serialize import StoreUpdate
-from morango.sync.stream.serialize import WriteSink
+from morango.models.core import InstanceIDModel, RecordMaxCounter, Store, SyncableModel
+from morango.sync.stream.serialize import (
+    AppModelSource,
+    ModelPartitionBuffer,
+    SerializeTask,
+    StoreLookup,
+    StoreUpdate,
+    WriteSink,
+)
 
 
 class SerializeTaskTestCase(SimpleTestCase):
@@ -58,9 +57,7 @@ class AppModelSourceTestCase(SimpleTestCase):
         source = AppModelSource(profile="test", sync_filter=sync_filter)
         conditions = list(source.prefix_conditions())
         self.assertEqual(len(conditions), 2)
-        self.assertEqual(
-            str(conditions[0]), "(AND: ('_morango_partition__startswith', 'a'))"
-        )
+        self.assertEqual(str(conditions[0]), "(AND: ('_morango_partition__startswith', 'a'))")
 
     @mock.patch("morango.sync.stream.serialize.syncable_models.get_model_querysets")
     def test_stream__no_partition(self, mock_get_model_querysets):
@@ -107,9 +104,7 @@ class AppModelSourceTestCase(SimpleTestCase):
         qs.filter.return_value = qs
         qs.iterator.return_value = [obj, obj]
 
-        source = AppModelSource(
-            profile="test", sync_filter=Filter("a"), dirty_only=False
-        )
+        source = AppModelSource(profile="test", sync_filter=Filter("a"), dirty_only=False)
         tasks = list(source.stream())
 
         self.assertEqual(len(tasks), 1)
@@ -273,16 +268,12 @@ class WriteSinkTestCase(SimpleTestCase):
 
         # Verify dirty bit update on app models
         model.syncing_objects.filter.assert_called_once_with(id__in=["obj_1", "obj_2"])
-        model.syncing_objects.filter().update.assert_called_once_with(
-            update_dirty_bit_to=False
-        )
+        model.syncing_objects.filter().update.assert_called_once_with(update_dirty_bit_to=False)
 
     @mock.patch("morango.sync.stream.serialize.RecordMaxCounter.objects.filter")
     @mock.patch("morango.sync.stream.serialize.RecordMaxCounter.objects.bulk_create")
     @mock.patch("morango.sync.stream.serialize.Store.objects.bulk_create")
-    def test_consume__create_fail(
-        self, mock_store_bulk, mock_counter_bulk, mock_counter_filter
-    ):
+    def test_consume__create_fail(self, mock_store_bulk, mock_counter_bulk, mock_counter_filter):
         model = mock.Mock()
         obj1 = mock.Mock(id="obj_1")
         task1 = SerializeTask(model, obj1)
@@ -315,9 +306,7 @@ class WriteSinkTestCase(SimpleTestCase):
 
         # Verify dirty bit update on app models
         model.syncing_objects.filter.assert_called_once_with(id__in=["obj_1"])
-        model.syncing_objects.filter().update.assert_called_once_with(
-            update_dirty_bit_to=False
-        )
+        model.syncing_objects.filter().update.assert_called_once_with(update_dirty_bit_to=False)
 
     @mock.patch("morango.sync.stream.serialize.RecordMaxCounter.objects.filter")
     @mock.patch("morango.sync.stream.serialize.RecordMaxCounter.objects.bulk_create")
@@ -344,15 +333,11 @@ class WriteSinkTestCase(SimpleTestCase):
         mock_counter_filter.assert_called_once_with(
             instance_id=self.current_id.id, store_model_id__in=["del_1"]
         )
-        mock_counter_filter().update.assert_called_once_with(
-            counter=self.current_id.counter
-        )
+        mock_counter_filter().update.assert_called_once_with(counter=self.current_id.counter)
         mock_store_records.exclude.assert_called_once_with(
             recordmaxcounter__instance_id=self.current_id.id
         )
-        mock_store_records.exclude().values_list.assert_called_once_with(
-            "id", flat=True
-        )
+        mock_store_records.exclude().values_list.assert_called_once_with("id", flat=True)
         mock_rmc_bulk.assert_called_once()
         rmc = mock_rmc_bulk.call_args[0][0][0]
         self.assertEqual(rmc.store_model_id, "del_1")
@@ -375,9 +360,7 @@ class WriteSinkTestCase(SimpleTestCase):
         )
         mock_hard_deleted_filter().delete.assert_called_once()
 
-    @mock.patch(
-        "morango.sync.stream.serialize.DatabaseMaxCounter.objects.update_or_create"
-    )
+    @mock.patch("morango.sync.stream.serialize.DatabaseMaxCounter.objects.update_or_create")
     def test_update_counters(self, mock_update_or_create):
         self.sink.sync_filter = Filter("a")
         self.sink._update_counters()
@@ -388,9 +371,7 @@ class WriteSinkTestCase(SimpleTestCase):
             defaults={"counter": self.current_id.counter},
         )
 
-    @mock.patch(
-        "morango.sync.stream.serialize.DatabaseMaxCounter.objects.update_or_create"
-    )
+    @mock.patch("morango.sync.stream.serialize.DatabaseMaxCounter.objects.update_or_create")
     def test_update_counters__no_filter(self, mock_update_or_create):
         self.sink._update_counters()
         self.assertEqual(mock_update_or_create.call_count, 1)

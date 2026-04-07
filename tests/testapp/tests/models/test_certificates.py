@@ -1,21 +1,18 @@
 import json
 
-from django.test import SimpleTestCase
-from django.test import TestCase
+from django.test import SimpleTestCase, TestCase
 
-from morango.errors import CertificateIDInvalid
-from morango.errors import CertificateProfileInvalid
-from morango.errors import CertificateRootScopeInvalid
-from morango.errors import CertificateScopeNotSubset
-from morango.errors import CertificateSignatureInvalid
-from morango.models.certificates import Certificate
-from morango.models.certificates import Filter
-from morango.models.certificates import Key
-from morango.models.certificates import ScopeDefinition
+from morango.errors import (
+    CertificateIDInvalid,
+    CertificateProfileInvalid,
+    CertificateRootScopeInvalid,
+    CertificateScopeNotSubset,
+    CertificateSignatureInvalid,
+)
+from morango.models.certificates import Certificate, Filter, Key, ScopeDefinition
 
 
 class CertificateTestCaseMixin(object):
-
     def setUp(self):
 
         self.profile = "testprofile"
@@ -49,7 +46,9 @@ class CertificateTestCaseMixin(object):
             profile=self.profile,
             scope_definition=self.subset_scope_def,
             scope_version=self.subset_scope_def.version,
-            scope_params=json.dumps({"mainpartition": self.root_cert.id, "subpartition": "abracadabra"}),
+            scope_params=json.dumps(
+                {"mainpartition": self.root_cert.id, "subpartition": "abracadabra"}
+            ),
             private_key=Key(),
         )
         self.root_cert.sign_certificate(self.subset_cert)
@@ -57,7 +56,6 @@ class CertificateTestCaseMixin(object):
 
 
 class CertificateCheckingTestCase(CertificateTestCaseMixin, TestCase):
-
     def test_good_certificates_validate(self):
 
         self.root_cert.check_certificate()
@@ -114,11 +112,14 @@ class CertificateCheckingTestCase(CertificateTestCaseMixin, TestCase):
 
 
 class CertificateSerializationTestCase(CertificateTestCaseMixin, TestCase):
-
     def setUp(self):
         super(CertificateSerializationTestCase, self).setUp()
-        self.root_cert_deserialized = Certificate.deserialize(self.root_cert.serialized, self.root_cert.signature)
-        self.subset_cert_deserialized = Certificate.deserialize(self.subset_cert.serialized, self.subset_cert.signature)
+        self.root_cert_deserialized = Certificate.deserialize(
+            self.root_cert.serialized, self.root_cert.signature
+        )
+        self.subset_cert_deserialized = Certificate.deserialize(
+            self.subset_cert.serialized, self.subset_cert.signature
+        )
 
     def test_deserialized_certs_validate(self):
         self.subset_cert_deserialized.check_certificate()
@@ -131,8 +132,12 @@ class CertificateSerializationTestCase(CertificateTestCaseMixin, TestCase):
         self.root_cert_deserialized.full_clean()
 
     def test_deserialized_cert_signatures_verify(self):
-        self.assertTrue(self.root_cert_deserialized.verify("testval", self.root_cert.sign("testval")))
-        self.assertTrue(self.subset_cert_deserialized.verify("testval", self.subset_cert.sign("testval")))
+        self.assertTrue(
+            self.root_cert_deserialized.verify("testval", self.root_cert.sign("testval"))
+        )
+        self.assertTrue(
+            self.subset_cert_deserialized.verify("testval", self.subset_cert.sign("testval"))
+        )
 
     def test_deserialized_certs_can_be_saved(self):
         Certificate.objects.all().delete()
@@ -141,7 +146,6 @@ class CertificateSerializationTestCase(CertificateTestCaseMixin, TestCase):
 
 
 class CertificateKeySettingTestCase(TestCase):
-
     def test_setting_private_key_sets_public_key(self):
         cert = Certificate()
         cert.private_key = Key()

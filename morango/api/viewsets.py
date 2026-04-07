@@ -6,34 +6,20 @@ import uuid
 from django.core.exceptions import ValidationError
 from django.utils import timezone
 from ipware import get_client_ip
-from rest_framework import mixins
-from rest_framework import pagination
-from rest_framework import response
-from rest_framework import status
-from rest_framework import viewsets
+from rest_framework import mixins, pagination, response, status, viewsets
 from rest_framework.parsers import JSONParser
 
 import morango
 from morango import errors
-from morango.api import permissions
-from morango.api import serializers
-from morango.constants import transfer_stages
-from morango.constants import transfer_statuses
-from morango.constants.capabilities import ASYNC_OPERATIONS
-from morango.constants.capabilities import GZIP_BUFFER_POST
+from morango.api import permissions, serializers
+from morango.constants import transfer_stages, transfer_statuses
+from morango.constants.capabilities import ASYNC_OPERATIONS, GZIP_BUFFER_POST
 from morango.models import certificates
-from morango.models.core import Buffer
-from morango.models.core import Certificate
-from morango.models.core import InstanceIDModel
-from morango.models.core import SyncSession
-from morango.models.core import TransferSession
+from morango.models.core import Buffer, Certificate, InstanceIDModel, SyncSession, TransferSession
 from morango.models.fields.crypto import SharedKey
 from morango.sync.context import LocalSessionContext
 from morango.sync.controller import SessionController
-from morango.utils import _assert
-from morango.utils import CAPABILITIES
-from morango.utils import parse_capabilities_from_server_request
-
+from morango.utils import CAPABILITIES, _assert, parse_capabilities_from_server_request
 
 if GZIP_BUFFER_POST in CAPABILITIES:
     from .parsers import GzipParser
@@ -83,9 +69,7 @@ class CertificateChainViewSet(viewsets.ViewSet):
             )
 
         # create an in-memory instance of the cert from the serialized data and signature
-        certificate = Certificate.deserialize(
-            client_cert["serialized"], client_cert["signature"]
-        )
+        certificate = Certificate.deserialize(client_cert["serialized"], client_cert["signature"])
 
         # check if certificate's public key is in our list of shared keys
         try:
@@ -114,9 +98,7 @@ class CertificateChainViewSet(viewsets.ViewSet):
             return response.Response(
                 {
                     "error_class": e.__class__.__name__,
-                    "error_message": getattr(
-                        e, "message", (getattr(e, "args") or ("",))[0]
-                    ),
+                    "error_message": getattr(e, "message", (getattr(e, "args") or ("",))[0]),
                 },
                 status=status.HTTP_400_BAD_REQUEST,
             )
@@ -124,9 +106,7 @@ class CertificateChainViewSet(viewsets.ViewSet):
         # we got this far, and everything looks good, so we can save the certificate
         certificate.save()
 
-        return response.Response(
-            "Certificate chain has been saved", status=status.HTTP_201_CREATED
-        )
+        return response.Response("Certificate chain has been saved", status=status.HTTP_201_CREATED)
 
 
 class CertificateViewSet(
@@ -144,7 +124,6 @@ class CertificateViewSet(
         serialized_cert = serializers.CertificateSerializer(data=request.data)
 
         if serialized_cert.is_valid():
-
             # inflate the provided data into an actual in-memory certificate
             certificate = Certificate(**serialized_cert.validated_data)
 
@@ -166,9 +145,7 @@ class CertificateViewSet(
                 return response.Response(
                     {
                         "error_class": e.__class__.__name__,
-                        "error_message": getattr(
-                            e, "message", (getattr(e, "args") or ("",))[0]
-                        ),
+                        "error_message": getattr(e, "message", (getattr(e, "args") or ("",))[0]),
                     },
                     status=status.HTTP_400_BAD_REQUEST,
                 )
@@ -183,9 +160,7 @@ class CertificateViewSet(
             )
 
         else:
-            return response.Response(
-                serialized_cert.errors, status=status.HTTP_400_BAD_REQUEST
-            )
+            return response.Response(serialized_cert.errors, status=status.HTTP_400_BAD_REQUEST)
 
     def get_queryset(self):
 
@@ -198,13 +173,10 @@ class CertificateViewSet(
             base_queryset = base_queryset.filter(profile=params["profile"])
 
         try:
-
             # if specified, filter by primary partition, and only include certs the server owns
             if "primary_partition" in params:
                 target_cert = base_queryset.get(id=params["primary_partition"])
-                return target_cert.get_descendants(include_self=True).exclude(
-                    _private_key=None
-                )
+                return target_cert.get_descendants(include_self=True).exclude(_private_key=None)
 
             # if specified, return the certificate chain for a certificate owned by the server
             if "ancestors_of" in params:
@@ -256,12 +228,8 @@ class SyncSessionViewSet(
 
         # attempt to load the requested certificates
         try:
-            server_cert = Certificate.objects.get(
-                id=request.data.get("server_certificate_id")
-            )
-            client_cert = Certificate.objects.get(
-                id=request.data.get("client_certificate_id")
-            )
+            server_cert = Certificate.objects.get(id=request.data.get("server_certificate_id"))
+            client_cert = Certificate.objects.get(id=request.data.get("client_certificate_id"))
         except Certificate.DoesNotExist:
             return response.Response(
                 "Requested certificate does not exist!",
@@ -275,9 +243,7 @@ class SyncSessionViewSet(
             )
 
         # check that the nonce/id were properly signed
-        message = "{nonce}:{id}".format(
-            nonce=request.data.get("nonce"), id=request.data.get("id")
-        )
+        message = "{nonce}:{id}".format(nonce=request.data.get("nonce"), id=request.data.get("id"))
         if not client_cert.verify(message, request.data["signature"]):
             return response.Response(
                 "Client certificate failed to verify signature",
@@ -288,9 +254,7 @@ class SyncSessionViewSet(
         try:
             certificates.Nonce.use_nonce(request.data["nonce"])
         except errors.MorangoNonceError:
-            return response.Response(
-                "Nonce is not valid", status=status.HTTP_403_FORBIDDEN
-            )
+            return response.Response("Nonce is not valid", status=status.HTTP_403_FORBIDDEN)
 
         client_instance_json = request.data.get("instance")
         client_instance_id = None
@@ -370,12 +334,16 @@ class TransferSessionViewSet(
         client_scope = syncsession.client_certificate.get_scope()
         if is_a_push:
             if not requested_filter.is_subset_of(client_scope.write_filter):
-                scope_error_msg = "Client certificate scope does not permit pushing for the requested filter."
+                scope_error_msg = (
+                    "Client certificate scope does not permit pushing for the requested filter."
+                )
             if not requested_filter.is_subset_of(server_scope.read_filter):
                 scope_error_msg = "Server certificate scope does not permit receiving pushes for the requested filter."
         else:
             if not requested_filter.is_subset_of(client_scope.read_filter):
-                scope_error_msg = "Client certificate scope does not permit pulling for the requested filter."
+                scope_error_msg = (
+                    "Client certificate scope does not permit pulling for the requested filter."
+                )
             if not requested_filter.is_subset_of(server_scope.write_filter):
                 scope_error_msg = "Server certificate scope does not permit responding to pulls for the requested filter."
         if scope_error_msg:
@@ -391,11 +359,7 @@ class TransferSessionViewSet(
         # If both client and ourselves allow async, we just return accepted status, and the client
         # should PATCH the transfer_session to the appropriate stage. If not async, we wait until
         # queuing is complete
-        to_stage = (
-            transfer_stages.INITIALIZING
-            if self.async_allowed()
-            else transfer_stages.QUEUING
-        )
+        to_stage = transfer_stages.INITIALIZING if self.async_allowed() else transfer_stages.QUEUING
         result = session_controller.proceed_to_and_wait_for(
             to_stage, context=context, max_interval=2
         )
@@ -469,9 +433,7 @@ class TransferSessionViewSet(
         :return: A boolean if async ops are allowed by client and self
         """
         client_capabilities = parse_capabilities_from_server_request(self.request)
-        return (
-            ASYNC_OPERATIONS in client_capabilities and ASYNC_OPERATIONS in CAPABILITIES
-        )
+        return ASYNC_OPERATIONS in client_capabilities and ASYNC_OPERATIONS in CAPABILITIES
 
 
 class BufferViewSet(mixins.ListModelMixin, viewsets.GenericViewSet):
@@ -495,12 +457,8 @@ class BufferViewSet(mixins.ListModelMixin, viewsets.GenericViewSet):
                 status=status.HTTP_403_FORBIDDEN,
             )
 
-        context = LocalSessionContext.from_request(
-            request, transfer_session=transfer_session
-        )
-        result = session_controller.proceed_to(
-            transfer_stages.TRANSFERRING, context=context
-        )
+        context = LocalSessionContext.from_request(request, transfer_session=transfer_session)
+        result = session_controller.proceed_to(transfer_stages.TRANSFERRING, context=context)
 
         if result == transfer_statuses.ERRORED:
             if context.error:

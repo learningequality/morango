@@ -1,22 +1,21 @@
 import pickle
 
 import mock
-from django.test import SimpleTestCase
-from django.test import TestCase
+from django.test import SimpleTestCase, TestCase
 
-from ..helpers import create_dummy_store_data
-from ..helpers import TestSessionContext
-from morango.constants import transfer_stages
-from morango.constants import transfer_statuses
+from morango.constants import transfer_stages, transfer_statuses
 from morango.errors import MorangoContextUpdateError
 from morango.models.certificates import Filter
-from morango.models.core import SyncSession
-from morango.models.core import TransferSession
-from morango.sync.context import CompositeSessionContext
-from morango.sync.context import LocalSessionContext
-from morango.sync.context import NetworkSessionContext
-from morango.sync.context import SessionContext
+from morango.models.core import SyncSession, TransferSession
+from morango.sync.context import (
+    CompositeSessionContext,
+    LocalSessionContext,
+    NetworkSessionContext,
+    SessionContext,
+)
 from morango.sync.controller import SessionController
+
+from ..helpers import TestSessionContext, create_dummy_store_data
 
 
 class SessionContextTestCase(SimpleTestCase):
@@ -41,7 +40,9 @@ class SessionContextTestCase(SimpleTestCase):
         sync_session = mock.Mock(spec=SyncSession)
         sync_filter = Filter("a")
 
-        context = TestSessionContext(sync_session=sync_session, sync_filter=sync_filter, is_push=True)
+        context = TestSessionContext(
+            sync_session=sync_session, sync_filter=sync_filter, is_push=True
+        )
         self.assertEqual(sync_session, context.sync_session)
         self.assertEqual(sync_filter, context.filter)
         self.assertTrue(context.is_push)
@@ -159,7 +160,7 @@ class SessionContextTestCase(SimpleTestCase):
             is_push=True,
             stage=transfer_stages.TRANSFERRING,
             stage_status=transfer_statuses.STARTED,
-            capabilities={"testing"}
+            capabilities={"testing"},
         )
         self.assertEqual(sync_filter, context.filter)
         self.assertTrue(context.is_push)
@@ -169,9 +170,7 @@ class SessionContextTestCase(SimpleTestCase):
 
     @mock.patch("morango.sync.context.CAPABILITIES", {"testing"})
     def test_update__with_transfer_session(self):
-        context = TestSessionContext(
-            capabilities={"testing"}
-        )
+        context = TestSessionContext(capabilities={"testing"})
 
         sync_session = mock.Mock(spec=SyncSession)
         sync_filter = Filter("a")
@@ -273,8 +272,9 @@ class ContextPicklingTestCase(TestCase):
 
     @mock.patch("morango.sync.context.parse_capabilities_from_server_request")
     def test_network(self, mock_parse_capabilities):
-        conn = mock.Mock(spec="morango.sync.syncsession.NetworkSyncConnection",
-                         server_info=dict(capabilities={}))
+        conn = mock.Mock(
+            spec="morango.sync.syncsession.NetworkSyncConnection", server_info=dict(capabilities={})
+        )
         mock_parse_capabilities.return_value = {}
 
         context = NetworkSessionContext(conn)
@@ -292,8 +292,9 @@ class ContextPicklingTestCase(TestCase):
         request = mock.Mock(spec="django.http.request.HttpRequest")
         local = LocalSessionContext(request=request)
 
-        conn = mock.Mock(spec="morango.sync.syncsession.NetworkSyncConnection",
-                         server_info=dict(capabilities={}))
+        conn = mock.Mock(
+            spec="morango.sync.syncsession.NetworkSyncConnection", server_info=dict(capabilities={})
+        )
         network = NetworkSessionContext(conn)
 
         composite = CompositeSessionContext([local, network])
@@ -340,8 +341,12 @@ class CompositeSessionContextTestCase(SimpleTestCase):
         for stage in self.stages:
             self.context.update(stage=stage, stage_status=transfer_statuses.PENDING)
 
-            self.sub_context_a.update_state.assert_called_with(stage=stage, stage_status=transfer_statuses.PENDING)
-            self.sub_context_b.update_state.assert_called_with(stage=stage, stage_status=transfer_statuses.PENDING)
+            self.sub_context_a.update_state.assert_called_with(
+                stage=stage, stage_status=transfer_statuses.PENDING
+            )
+            self.sub_context_b.update_state.assert_called_with(
+                stage=stage, stage_status=transfer_statuses.PENDING
+            )
 
             self.sub_context_a.update_state.reset_mock()
             self.sub_context_b.update_state.reset_mock()
@@ -371,8 +376,12 @@ class CompositeSessionContextTestCase(SimpleTestCase):
             self.assertIs(prepared_context, self.sub_context_b)
 
             self.context.update(stage_status=transfer_statuses.COMPLETED)
-            self.sub_context_a.update_state.assert_called_once_with(stage=None, stage_status=transfer_statuses.COMPLETED)
-            self.sub_context_b.update_state.assert_called_once_with(stage=None, stage_status=transfer_statuses.COMPLETED)
+            self.sub_context_a.update_state.assert_called_once_with(
+                stage=None, stage_status=transfer_statuses.COMPLETED
+            )
+            self.sub_context_b.update_state.assert_called_once_with(
+                stage=None, stage_status=transfer_statuses.COMPLETED
+            )
 
             self.sub_context_a.update_state.reset_mock()
             self.sub_context_b.update_state.reset_mock()
@@ -402,7 +411,7 @@ class CompositeSessionContextTestCase(SimpleTestCase):
             context.transfer_session = TransferSession(
                 sync_session=SyncSession(),
                 transfer_stage=transfer_stages.INITIALIZING,
-                transfer_stage_status=transfer_statuses.PENDING
+                transfer_stage_status=transfer_statuses.PENDING,
             )
             return transfer_statuses.COMPLETED
 
@@ -427,7 +436,7 @@ class CompositeSessionContextTestCase(SimpleTestCase):
             context.transfer_session = TransferSession(
                 sync_session=SyncSession(),
                 transfer_stage=transfer_stages.DESERIALIZING,
-                transfer_stage_status=transfer_statuses.PENDING
+                transfer_stage_status=transfer_statuses.PENDING,
             )
             return transfer_statuses.COMPLETED
 

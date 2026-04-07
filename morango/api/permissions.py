@@ -1,10 +1,7 @@
 import json
 
-from django.contrib.auth import authenticate
-from django.contrib.auth import get_user_model
-from rest_framework import authentication
-from rest_framework import exceptions
-from rest_framework import permissions
+from django.contrib.auth import authenticate, get_user_model
+from rest_framework import authentication, exceptions, permissions
 
 from morango.models.core import TransferSession
 from morango.utils import SETTINGS
@@ -61,11 +58,7 @@ class CertificatePermissions(permissions.BasePermission):
             if hasattr(request.user, "has_morango_certificate_scope_permission"):
                 scope_definition_id = request.data.get("scope_definition")
                 scope_params = json.loads(request.data.get("scope_params"))
-                if (
-                    scope_definition_id
-                    and scope_params
-                    and isinstance(scope_params, dict)
-                ):
+                if scope_definition_id and scope_params and isinstance(scope_params, dict):
                     return request.user.has_morango_certificate_scope_permission(
                         scope_definition_id, scope_params
                     )
@@ -89,9 +82,7 @@ class BufferPermissions(permissions.BasePermission):
             sesh_id = request.query_params.get("transfer_session_id")
             if not sesh_id:
                 return False
-            if not TransferSession.objects.filter(
-                id=sesh_id, active=True, push=False
-            ).exists():
+            if not TransferSession.objects.filter(id=sesh_id, active=True, push=False).exists():
                 return False
             return True
 

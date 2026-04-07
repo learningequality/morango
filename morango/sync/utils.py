@@ -5,11 +5,8 @@ import logging
 from django.db import transaction
 from rest_framework.exceptions import ValidationError
 
-from morango.models.core import Buffer
-from morango.models.core import RecordMaxCounterBuffer
-from morango.models.core import SyncableModel
+from morango.models.core import Buffer, RecordMaxCounterBuffer, SyncableModel
 from morango.registry import syncable_models
-
 
 logger = logging.getLogger(__name__)
 
@@ -83,9 +80,7 @@ def validate_and_create_buffer_data(  # noqa: C901
         except KeyError:
             Model = SyncableModel
 
-        partition = record["partition"].replace(
-            record["model_uuid"], Model.ID_PLACEHOLDER
-        )
+        partition = record["partition"].replace(record["model_uuid"], Model.ID_PLACEHOLDER)
         expected_model_uuid = Model.compute_namespaced_id(
             partition, record["source_id"], record["model_name"]
         )

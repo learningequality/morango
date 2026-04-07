@@ -1,6 +1,7 @@
 """
 This module contains constants representing the possible statuses of a transfer session stage.
 """
+
 from django.utils.translation import gettext_lazy as _
 
 PENDING = "pending"

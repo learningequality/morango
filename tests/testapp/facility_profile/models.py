@@ -1,7 +1,6 @@
 import uuid
 
-from django.contrib.auth.models import AbstractBaseUser
-from django.contrib.auth.models import UserManager
+from django.contrib.auth.models import AbstractBaseUser, UserManager
 from django.db import models
 from django.utils import timezone
 
@@ -11,7 +10,7 @@ from morango.models.manager import SyncableModelManager
 
 
 class FacilityDataSyncableModel(SyncableModel):
-    morango_profile = 'facilitydata'
+    morango_profile = "facilitydata"
 
     class Meta:
         abstract = True
@@ -26,7 +25,14 @@ class Facility(FacilityDataSyncableModel):
 
     name = models.CharField(max_length=100)
     now_date = models.DateTimeField(default=timezone.now)
-    parent = models.ForeignKey('self', null=True, blank=True, related_name='children', db_index=True, on_delete=models.CASCADE)
+    parent = models.ForeignKey(
+        "self",
+        null=True,
+        blank=True,
+        related_name="children",
+        db_index=True,
+        on_delete=models.CASCADE,
+    )
 
     def calculate_source_id(self, *args, **kwargs):
         return self.name
@@ -35,7 +41,7 @@ class Facility(FacilityDataSyncableModel):
         if self.id:
             return uuid.UUID(self.id).hex
         else:
-            return '{id}'.format(id=self.ID_PLACEHOLDER)
+            return "{id}".format(id=self.ID_PLACEHOLDER)
 
     def clean_fields(self, *args, **kwargs):
         # reference parent here just to trigger a non-validation error to make sure we handle it
@@ -62,7 +68,7 @@ class MyUser(AbstractBaseUser, FacilityDataSyncableModel):
             return uuid.uuid5(uuid.UUID("a" * 32), self.username).hex
 
     def calculate_partition(self, *args, **kwargs):
-        return '{id}:user'.format(id=self.ID_PLACEHOLDER)
+        return "{id}:user".format(id=self.ID_PLACEHOLDER)
 
     def has_morango_certificate_scope_permission(self, scope_definition_id, scope_params):
         return self.is_superuser
@@ -79,10 +85,10 @@ class SummaryLog(FacilityDataSyncableModel):
     content_id = UUIDField(db_index=True, default=uuid.uuid4)
 
     def calculate_source_id(self, *args, **kwargs):
-        return '{}:{}'.format(self.user_id, self.content_id)
+        return "{}:{}".format(self.user_id, self.content_id)
 
     def calculate_partition(self, *args, **kwargs):
-        return '{user_id}:user:summary'.format(user_id=self.user_id)
+        return "{user_id}:user:summary".format(user_id=self.user_id)
 
 
 class InteractionLog(FacilityDataSyncableModel):
@@ -95,7 +101,7 @@ class InteractionLog(FacilityDataSyncableModel):
         return None
 
     def calculate_partition(self, *args, **kwargs):
-        return '{user_id}:user:interaction'.format(user_id=self.user_id)
+        return "{user_id}:user:interaction".format(user_id=self.user_id)
 
 
 class ConditionalLog(FacilityDataSyncableModel):
@@ -146,4 +152,4 @@ class TestModel(FacilityDataSyncableModel):
         return self.name
 
     def calculate_partition(self, *args, **kwargs):
-        return 'testmodel'
+        return "testmodel"

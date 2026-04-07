@@ -2,22 +2,12 @@ import functools
 import json
 import logging
 import uuid
-from collections import defaultdict
-from collections import namedtuple
+from collections import defaultdict, namedtuple
 from functools import reduce
 
 from django.core import exceptions
-from django.db import connection
-from django.db import models
-from django.db import router
-from django.db import transaction
-from django.db.models import F
-from django.db.models import Func
-from django.db.models import Max
-from django.db.models import Q
-from django.db.models import signals
-from django.db.models import TextField
-from django.db.models import Value
+from django.db import connection, models, router, transaction
+from django.db.models import F, Func, Max, Q, TextField, Value, signals
 from django.db.models.deletion import Collector
 from django.db.models.expressions import CombinedExpression
 from django.db.models.fields.related import ForeignKey
@@ -26,22 +16,15 @@ from django.utils import timezone
 from django.utils.functional import cached_property
 
 from morango import proquint
-from morango.constants import transfer_stages
-from morango.constants import transfer_statuses
+from morango.constants import transfer_stages, transfer_statuses
 from morango.errors import InvalidMorangoSourceId
-from morango.models.certificates import Certificate
-from morango.models.certificates import Filter
-from morango.models.fields.uuids import sha2_uuid
-from morango.models.fields.uuids import UUIDField
-from morango.models.fields.uuids import UUIDModelMixin
+from morango.models.certificates import Certificate, Filter
+from morango.models.fields.uuids import UUIDField, UUIDModelMixin, sha2_uuid
 from morango.models.fsic_utils import remove_redundant_instance_counters
 from morango.models.manager import SyncableModelManager
-from morango.models.utils import get_0_4_system_parameters
-from morango.models.utils import get_0_5_mac_address
-from morango.models.utils import get_0_5_system_id
+from morango.models.utils import get_0_4_system_parameters, get_0_5_mac_address, get_0_5_system_id
 from morango.registry import syncable_models
-from morango.utils import _assert
-from morango.utils import SETTINGS
+from morango.utils import SETTINGS, _assert
 
 logger = logging.getLogger(__name__)
 
@@ -154,7 +137,6 @@ class InstanceIDModel(models.Model):
                 pass
 
         with transaction.atomic():
-
             # check if a matching legacy instance ID is already current, and don't mess with it
             kwargs = get_0_4_system_parameters(
                 database_id=DatabaseIDModel.get_or_create_current_database_id().id
@@ -169,15 +151,13 @@ class InstanceIDModel(models.Model):
             # calculate the new ID based on system ID and mac address
             kwargs["system_id"] = get_0_5_system_id()
             kwargs["node_id"] = get_0_5_mac_address()
-            kwargs["id"] = sha2_uuid(
-                kwargs["database_id"], kwargs["system_id"], kwargs["node_id"]
-            )
+            kwargs["id"] = sha2_uuid(kwargs["database_id"], kwargs["system_id"], kwargs["node_id"])
             kwargs["current"] = True
 
             # ensure we only ever have 1 current instance ID
-            InstanceIDModel.objects.filter(current=True).exclude(
-                id=kwargs["id"]
-            ).update(current=False)
+            InstanceIDModel.objects.filter(current=True).exclude(id=kwargs["id"]).update(
+                current=False
+            )
             # create the model, or get existing if one already exists with this ID
             instance, created = InstanceIDModel.objects.update_or_create(
                 id=kwargs["id"], defaults=kwargs
@@ -216,10 +196,18 @@ class SyncSession(models.Model):
 
     # track the certificates being used by each side for this session
     client_certificate = models.ForeignKey(
-        Certificate, blank=True, null=True, related_name="syncsessions_client", on_delete=models.CASCADE
+        Certificate,
+        blank=True,
+        null=True,
+        related_name="syncsessions_client",
+        on_delete=models.CASCADE,
     )
     server_certificate = models.ForeignKey(
-        Certificate, blank=True, null=True, related_name="syncsessions_server", on_delete=models.CASCADE
+        Certificate,
+        blank=True,
+        null=True,
+        related_name="syncsessions_server",
+        on_delete=models.CASCADE,
     )
 
     # track the morango profile this sync session is happening for
@@ -266,9 +254,7 @@ class TransferSession(models.Model):
     """
 
     id = UUIDField(primary_key=True)
-    filter = (
-        models.TextField()
-    )  # partition/filter to know what subset of data is to be synced
+    filter = models.TextField()  # partition/filter to know what subset of data is to be synced
     push = models.BooleanField()  # is session pushing or pulling data?
     active = models.BooleanField(default=True)  # is this transfer session still active?
     records_transferred = models.IntegerField(
@@ -341,9 +327,7 @@ class TransferSession(models.Model):
         against the database for better performance
         """
         with connection.cursor() as cursor:
-            cursor.execute(
-                "DELETE FROM morango_buffer WHERE transfer_session_id = %s", (self.id,)
-            )
+            cursor.execute("DELETE FROM morango_buffer WHERE transfer_session_id = %s", (self.id,))
             cursor.execute(
                 "DELETE FROM morango_recordmaxcounterbuffer WHERE transfer_session_id = %s",
                 (self.id,),
@@ -355,9 +339,9 @@ class TransferSession(models.Model):
         ):
             model = model.morango_model_name
         _assert(isinstance(model, str), "Model must resolve to string")
-        return Store.objects.filter(
-            model_name=model, last_transfer_session_id=self.id
-        ).values_list("id", flat=True)
+        return Store.objects.filter(model_name=model, last_transfer_session_id=self.id).values_list(
+            "id", flat=True
+        )
 
 
 class DeletedModels(models.Model):
@@ -418,7 +402,13 @@ class StoreQueryset(models.QuerySet):
             self.annotate(id_cast=Cast("id", TextField()))
             # remove dashes from char uuid
             .annotate(
-                fixed_id=Func(F("id_cast"), Value("-"), Value(""), function="replace", output_field=TextField())
+                fixed_id=Func(
+                    F("id_cast"),
+                    Value("-"),
+                    Value(""),
+                    function="replace",
+                    output_field=TextField(),
+                )
             )
             # return as list
             .values_list("fixed_id", flat=True)
@@ -441,16 +431,18 @@ class Store(AbstractStore):
     dirty_bit = models.BooleanField(default=False)
     deserialization_error = models.TextField(blank=True)
 
-    last_transfer_session_id = UUIDField(
-        blank=True, null=True, default=None, db_index=True
-    )
+    last_transfer_session_id = UUIDField(blank=True, null=True, default=None, db_index=True)
 
     objects = StoreManager()
 
     class Meta:
         indexes = [
             models.Index(fields=["partition"], name="idx_morango_store_partition"),
-            models.Index(fields=["profile", "model_name", "partition", "dirty_bit"], condition=models.Q(dirty_bit=True), name="idx_morango_deserialize"),
+            models.Index(
+                fields=["profile", "model_name", "partition", "dirty_bit"],
+                condition=models.Q(dirty_bit=True),
+                name="idx_morango_deserialize",
+            ),
         ]
 
     def _deserialize_store_model(self, fk_cache, defer_fks=False, sync_filter=None):  # noqa: C901
@@ -479,12 +471,15 @@ class Store(AbstractStore):
             # Import here to avoid circular import, as the utils module
             # imports core models.
             from morango.sync.utils import mute_signals
+
             with mute_signals(signals.post_delete):
                 klass_model.syncing_objects.filter(id=self.id).delete()
             return None, deferred_fks
         else:
             # load model into memory
-            app_model = klass_model.deserialize(json.loads(self.serialized), sync_filter=sync_filter)
+            app_model = klass_model.deserialize(
+                json.loads(self.serialized), sync_filter=sync_filter
+            )
             app_model._morango_source_id = self.source_id
             app_model._morango_partition = self.partition
             app_model._morango_dirty_bit = False
@@ -498,7 +493,6 @@ class Store(AbstractStore):
                 return app_model, deferred_fks
 
             except (exceptions.ValidationError, exceptions.ObjectDoesNotExist) as e:
-
                 logger.warning(
                     "Error deserializing instance of {model} with id {id}: {error}".format(
                         model=klass_model.__name__, id=app_model.id, error=e
@@ -578,9 +572,7 @@ class ValueStartsWithField(CombinedExpression):
         super(ValueStartsWithField, self).__init__(
             Value(value, output_field=models.CharField()),
             "LIKE",
-            CombinedExpression(
-                F(field), "||", Value("%", output_field=models.CharField())
-            ),
+            CombinedExpression(F(field), "||", Value("%", output_field=models.CharField())),
             output_field=models.BooleanField(),
         )
 
@@ -626,7 +618,7 @@ class DatabaseMaxCounter(AbstractCounter):
                     updated_fsic[key] = fsics[key]
 
             # load database max counters
-            for (key, value) in updated_fsic.items():
+            for key, value in updated_fsic.items():
                 for f in sync_filter:
                     DatabaseMaxCounter.objects.update_or_create(
                         instance_id=key, partition=f, defaults={"counter": value}
@@ -679,7 +671,6 @@ class DatabaseMaxCounter(AbstractCounter):
     ):
 
         if v2_format:
-
             queryset = cls.objects.all()
 
             # get the DMC records with partitions that fall under the filter prefixes
@@ -688,24 +679,18 @@ class DatabaseMaxCounter(AbstractCounter):
                 [Q(partition__startswith=prefix) for prefix in filters],
             )
             sub_partitions = set(
-                queryset.filter(sub_condition)
-                .values_list("partition", flat=True)
-                .distinct()
+                queryset.filter(sub_condition).values_list("partition", flat=True).distinct()
             )
 
             # get the DMC records with partitions that are prefixes of the filters
             super_partitions = set()
             for filt in filters:
                 qs = (
-                    queryset.annotate(
-                        filter_matches=ValueStartsWithField(filt, "partition")
-                    )
+                    queryset.annotate(filter_matches=ValueStartsWithField(filt, "partition"))
                     .filter(filter_matches=True)
                     .exclude(partition=filt)
                 )
-                super_partitions.update(
-                    qs.values_list("partition", flat=True).distinct()
-                )
+                super_partitions.update(qs.values_list("partition", flat=True).distinct())
 
             # get the instance counters for the partitions, also filtering out old unnecessary instance_ids
             super_fsics = cls.get_instance_counters_for_partitions(
@@ -726,21 +711,16 @@ class DatabaseMaxCounter(AbstractCounter):
             return raw_fsic
 
         else:
-
             queryset = cls.objects.all()
 
             per_filter_max = []
 
             for filt in filters:
                 # {filt} LIKE partition || '%'
-                qs = queryset.annotate(
-                    filter_matches=ValueStartsWithField(filt, "partition")
-                )
+                qs = queryset.annotate(filter_matches=ValueStartsWithField(filt, "partition"))
                 qs = qs.filter(filter_matches=True)
                 filt_maxes = qs.values("instance_id").annotate(maxval=Max("counter"))
-                per_filter_max.append(
-                    {dmc["instance_id"]: dmc["maxval"] for dmc in filt_maxes}
-                )
+                per_filter_max.append({dmc["instance_id"]: dmc["maxval"] for dmc in filt_maxes})
 
             instance_id_lists = [maxes.keys() for maxes in per_filter_max]
             all_instance_ids = reduce(set.union, instance_id_lists, set())
@@ -754,9 +734,7 @@ class DatabaseMaxCounter(AbstractCounter):
                 # when we're receiving, we don't want to overpromise on what we have
                 result = {
                     instance_id: min([d.get(instance_id, 0) for d in per_filter_max])
-                    for instance_id in reduce(
-                        set.intersection, instance_id_lists, all_instance_ids
-                    )
+                    for instance_id in reduce(set.intersection, instance_id_lists, all_instance_ids)
                 }
 
         return result
@@ -785,9 +763,7 @@ class RecordMaxCounterBuffer(AbstractCounter):
     model_uuid = UUIDField(db_index=True)
 
 
-ForeignKeyReference = namedtuple(
-    "ForeignKeyReference", ["from_field", "from_pk", "to_pk"]
-)
+ForeignKeyReference = namedtuple("ForeignKeyReference", ["from_field", "from_pk", "to_pk"])
 
 
 class SyncableModel(UUIDModelMixin):
@@ -840,9 +816,7 @@ class SyncableModel(UUIDModelMixin):
             self._morango_dirty_bit = False
         super(SyncableModel, self).save(*args, **kwargs)
 
-    def delete(
-        self, using=None, keep_parents=False, hard_delete=False, *args, **kwargs
-    ):
+    def delete(self, using=None, keep_parents=False, hard_delete=False, *args, **kwargs):
         using = using or router.db_for_write(self.__class__, instance=self)
         _assert(
             self._get_pk_val() is not None,
@@ -885,15 +859,11 @@ class SyncableModel(UUIDModelMixin):
         :type sync_filter: Filter|None
         """
         excluded_fields = exclude or []
-        fk_fields = [
-            field for field in self._meta.fields if isinstance(field, models.ForeignKey)
-        ]
+        fk_fields = [field for field in self._meta.fields if isinstance(field, models.ForeignKey)]
 
         for f in fk_fields:
             raw_value = getattr(self, f.attname)
-            key = "{id}_{db_table}".format(
-                db_table=f.related_model._meta.db_table, id=raw_value
-            )
+            key = "{id}_{db_table}".format(db_table=f.related_model._meta.db_table, id=raw_value)
             try:
                 fk_lookup_cache[key]
                 excluded_fields.append(f.name)
@@ -1012,9 +982,7 @@ class SyncableModel(UUIDModelMixin):
                 # undefined behavior, which due to dynamic nature of calculating it, this could be an unintentional bug
                 # so we raise an error to strictly enforce this
                 raise InvalidMorangoSourceId(
-                    "{}.calculate_source_id() returned empty string".format(
-                        self.__class__.__name__
-                    )
+                    "{}.calculate_source_id() returned empty string".format(self.__class__.__name__)
                 )
 
         namespaced_id = self.compute_namespaced_id(

@@ -1,11 +1,8 @@
-from morango.constants import transfer_stages
-from morango.constants import transfer_statuses
+from morango.constants import transfer_stages, transfer_statuses
 from morango.errors import MorangoContextUpdateError
 from morango.models.certificates import Filter
-from morango.models.core import SyncSession
-from morango.models.core import TransferSession
-from morango.utils import CAPABILITIES
-from morango.utils import parse_capabilities_from_server_request
+from morango.models.core import SyncSession, TransferSession
+from morango.utils import CAPABILITIES, parse_capabilities_from_server_request
 
 
 class SessionContext(object):
@@ -90,7 +87,11 @@ class SessionContext(object):
         :type capabilities: str[]|None
         :type error: BaseException|None
         """
-        if transfer_session and self.transfer_session and transfer_session.id != self.transfer_session.id:
+        if (
+            transfer_session
+            and self.transfer_session
+            and transfer_session.id != self.transfer_session.id
+        ):
             raise MorangoContextUpdateError("Transfer session already exists")
         elif (
             transfer_session
@@ -101,8 +102,12 @@ class SessionContext(object):
 
         if sync_filter and self.filter and sync_filter != self.filter:
             if not self.filter.is_subset_of(sync_filter):
-                raise MorangoContextUpdateError("The existing filter must be a subset of the new filter")
-            if transfer_stages.stage(self.stage) > transfer_stages.stage(transfer_stages.INITIALIZING):
+                raise MorangoContextUpdateError(
+                    "The existing filter must be a subset of the new filter"
+                )
+            if transfer_stages.stage(self.stage) > transfer_stages.stage(
+                transfer_stages.INITIALIZING
+            ):
                 raise MorangoContextUpdateError("Cannot update filter after initializing stage")
 
         if is_push is not None and self.is_push is not None:
@@ -160,9 +165,7 @@ class SessionContext(object):
         """Return dict of simplified data for serialization"""
         return dict(
             sync_session_id=self.sync_session.id if self.sync_session else None,
-            transfer_session_id=(
-                self.transfer_session.id if self.transfer_session else None
-            ),
+            transfer_session_id=(self.transfer_session.id if self.transfer_session else None),
             filter=str(self.filter),
             is_push=self.is_push,
             stage=self.stage,
@@ -465,9 +468,7 @@ class CompositeSessionContext(SessionContext):
             return
 
         # advance the composite's stage when we move forward only
-        if stage is not None and transfer_stages.stage(stage) > transfer_stages.stage(
-            self._stage
-        ):
+        if stage is not None and transfer_stages.stage(stage) > transfer_stages.stage(self._stage):
             self._stage = stage
 
         # when finishing a stage without an error, we'll increment the counter by one such that
@@ -477,10 +478,7 @@ class CompositeSessionContext(SessionContext):
 
         # when we've completed a loop through all contexts (modulus is zero), we want to bring
         # all the contexts' states up to date
-        if (
-            self._counter % len(self.children) == 0
-            or stage_status == transfer_statuses.ERRORED
-        ):
+        if self._counter % len(self.children) == 0 or stage_status == transfer_statuses.ERRORED:
             for context in self.children:
                 context.update_state(stage=stage, stage_status=stage_status)
             if stage_status is not None:

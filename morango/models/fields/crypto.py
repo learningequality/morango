@@ -4,17 +4,16 @@ desirability/efficiency from left to right). We have a base ``Key`` class which 
 ``Key`` has methods for signing messages using a private key and verifying signed messages using a public key.
 ``Key`` classes are used for signing/verifying certificates that give various permissions.
 """
+
 import hashlib
 import re
 import sys
 
 import rsa as PYRSA
-from django.db import models
-from django.db import transaction
+from django.db import models, transaction
 
 try:
-    from M2Crypto import RSA as M2RSA
-    from M2Crypto import BIO as M2BIO
+    from M2Crypto import BIO as M2BIO, RSA as M2RSA
 
     M2CRYPTO_EXISTS = True
 except ImportError:
@@ -31,17 +30,17 @@ try:
             if cffi.__version_info__ < (1, 17, 1):
                 raise ImportError
 
-    from cryptography.hazmat.backends import default_backend
     from cryptography import exceptions as crypto_exceptions
+    from cryptography.hazmat.backends import default_backend
 
     crypto_backend = default_backend()
-    from cryptography.hazmat.primitives.asymmetric import (
-        rsa as crypto_rsa,
-        padding as crypto_padding,
-    )
     from cryptography.hazmat.primitives import (
-        serialization as crypto_serialization,
         hashes as crypto_hashes,
+        serialization as crypto_serialization,
+    )
+    from cryptography.hazmat.primitives.asymmetric import (
+        padding as crypto_padding,
+        rsa as crypto_rsa,
     )
 
     # Ignore cryptography versions that do not support the 'sign' method
@@ -58,8 +57,7 @@ except BaseException as e:
         # Otherwise raise the error again to avoid silently catching other errors
         raise
 
-from base64 import encodebytes as b64encode, decodebytes as b64decode
-
+from base64 import decodebytes as b64decode, encodebytes as b64encode
 
 PKCS8_HEADER = "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8A"
 
@@ -140,9 +138,7 @@ class BaseKey(object):
 
         private_key_string = self.ensure_unicode(private_key_string)
 
-        private_key_string = self._add_pem_headers(
-            private_key_string, "RSA PRIVATE KEY"
-        )
+        private_key_string = self._add_pem_headers(private_key_string, "RSA PRIVATE KEY")
 
         self._set_private_key_string(private_key_string)
 
@@ -150,11 +146,7 @@ class BaseKey(object):
         if not pem_string.strip().startswith("-----"):
             return pem_string
         return "\n".join(
-            [
-                line
-                for line in pem_string.split("\n")
-                if line and not line.startswith("---")
-            ]
+            [line for line in pem_string.split("\n") if line and not line.startswith("---")]
         )
 
     def _add_pem_headers(self, pem_string, header_string):
@@ -163,8 +155,7 @@ class BaseKey(object):
             "header_string": header_string,
         }
         return (
-            "-----BEGIN %(header_string)s-----\n%(key)s\n-----END %(header_string)s-----"
-            % context
+            "-----BEGIN %(header_string)s-----\n%(key)s\n-----END %(header_string)s-----" % context
         )
 
     def ensure_bytes(self, message):
@@ -184,7 +175,6 @@ class BaseKey(object):
 
 
 class PythonRSAKey(BaseKey):
-
     _public_key = None
     _private_key = None
 
@@ -229,7 +219,6 @@ class PythonRSAKey(BaseKey):
 
 
 class M2CryptoKey(BaseKey):
-
     _public_key = None
     _private_key = None
 
@@ -243,9 +232,7 @@ class M2CryptoKey(BaseKey):
     def _verify(self, message, signature):
 
         try:
-            self._public_key.verify(
-                hashlib.sha256(message).digest(), signature, algo="sha256"
-            )
+            self._public_key.verify(hashlib.sha256(message).digest(), signature, algo="sha256")
             return True
         except M2RSA.RSAError:
             return False
@@ -279,7 +266,6 @@ class M2CryptoKey(BaseKey):
 
 
 class CryptographyKey(BaseKey):
-
     _public_key = None
     _private_key = None
 
@@ -290,9 +276,7 @@ class CryptographyKey(BaseKey):
         self._public_key = self._private_key.public_key()
 
     def _sign(self, message):
-        return self._private_key.sign(
-            message, crypto_padding.PKCS1v15(), crypto_hashes.SHA256()
-        )
+        return self._private_key.sign(message, crypto_padding.PKCS1v15(), crypto_hashes.SHA256())
 
     def _verify(self, message, signature):
         try:
@@ -342,11 +326,7 @@ class CryptographyKey(BaseKey):
 
 
 # alias the most-preferred key wrapper class we have available as `Key`
-Key = (
-    CryptographyKey
-    if CRYPTOGRAPHY_EXISTS
-    else (M2CryptoKey if M2CRYPTO_EXISTS else PythonRSAKey)
-)
+Key = CryptographyKey if CRYPTOGRAPHY_EXISTS else (M2CryptoKey if M2CRYPTO_EXISTS else PythonRSAKey)
 
 
 class RSAKeyBaseField(models.TextField):
@@ -404,6 +384,7 @@ class SharedKey(models.Model):
     who would like to allow certificates to be pushed to the server must also enable ``ALLOW_CERTIFICATE_PUSHING``.
     Clients generate a ``Certificate`` object and set the ``public_key`` field to the shared public key of the server.
     """
+
     public_key = PublicKeyField()
     private_key = PrivateKeyField()
     current = models.BooleanField(default=True)
@@ -418,14 +399,10 @@ class SharedKey(models.Model):
             with transaction.atomic():
                 SharedKey.objects.filter(current=True).update(current=False)
                 key = Key()
-                return SharedKey.objects.create(
-                    public_key=key, private_key=key, current=True
-                )
+                return SharedKey.objects.create(public_key=key, private_key=key, current=True)
         # create a new shared key if one doesn't exist
         try:
             return SharedKey.objects.get(current=True)
         except SharedKey.DoesNotExist:
             key = Key()
-            return SharedKey.objects.create(
-                public_key=key, private_key=key, current=True
-            )
+            return SharedKey.objects.create(public_key=key, private_key=key, current=True)

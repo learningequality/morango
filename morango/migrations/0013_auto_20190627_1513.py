@@ -6,7 +6,6 @@ import morango.models.fields.uuids
 
 
 class Migration(migrations.Migration):
-
     dependencies = [("morango", "0012_auto_20180927_1658")]
 
     operations = [

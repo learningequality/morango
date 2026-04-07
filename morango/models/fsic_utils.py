@@ -137,9 +137,7 @@ def calculate_directional_fsic_diff_v2(fsic1, fsic2):
     :param fsic2: dict containing FSIC v2 in expanded format, for the receiving device
     :return ``dict`` in expanded FSIC v2 format to be used in queueing the correct records to the buffer
     """
-    prefixes = _build_prefix_mapper(
-        list(fsic1.keys()) + list(fsic2.keys()), include_self=True
-    )
+    prefixes = _build_prefix_mapper(list(fsic1.keys()) + list(fsic2.keys()), include_self=True)
 
     result = defaultdict(dict)
 
@@ -148,9 +146,7 @@ def calculate_directional_fsic_diff_v2(fsic1, fsic2):
         # check for counters in the sending FSIC that are higher than the receiving FSIC
         for inst, sending_counter in insts.items():
             # get the maximum counter in the receiving FSIC for the same instance
-            receiving_counter = max(
-                fsic2.get(prefix, {}).get(inst, 0) for prefix in prefixes[part]
-            )
+            receiving_counter = max(fsic2.get(prefix, {}).get(inst, 0) for prefix in prefixes[part])
             if receiving_counter < sending_counter:
                 result[part][inst] = receiving_counter
 

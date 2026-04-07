@@ -1,21 +1,21 @@
-from rest_framework import exceptions
-from rest_framework import serializers
+from rest_framework import exceptions, serializers
 from rest_framework.fields import ReadOnlyField
 
 from ..models.certificates import Nonce
-from ..models.core import Buffer
-from ..models.core import Certificate
-from ..models.core import InstanceIDModel
-from ..models.core import RecordMaxCounterBuffer
-from ..models.core import SyncSession
-from ..models.core import TransferSession
+from ..models.core import (
+    Buffer,
+    Certificate,
+    InstanceIDModel,
+    RecordMaxCounterBuffer,
+    SyncSession,
+    TransferSession,
+)
 from ..models.fields.crypto import SharedKey
 from ..utils import SETTINGS
 from .fields import PublicKeyField
 
 
 class CertificateSerializer(serializers.ModelSerializer):
-
     public_key = PublicKeyField()
 
     def validate_parent(self, parent):
@@ -60,8 +60,8 @@ class NonceSerializer(serializers.ModelSerializer):
 
 
 class SyncSessionSerializer(serializers.ModelSerializer):
-    client_instance = serializers.CharField(source='client_instance_json')
-    server_instance = serializers.CharField(source='server_instance_json')
+    client_instance = serializers.CharField(source="client_instance_json")
+    server_instance = serializers.CharField(source="server_instance_json")
 
     class Meta:
         model = SyncSession

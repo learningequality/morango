@@ -4,6 +4,7 @@ Only imports the specific parts of the module that are used by Django.
 Informed by the PR that removed its use in Django:
 https://github.com/django/django/pull/15679
 """
+
 from django.utils.regex_helper import _lazy_re_compile
 
 

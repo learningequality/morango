@@ -2,7 +2,8 @@
 import os
 import sys
 
-import morango # noqa F401
+import morango  # noqa F401
+
 # Import morango to ensure that we do the monkey patching needed
 # for Django 1.11 to work with Python 3.10+
 
