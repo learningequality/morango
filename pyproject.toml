@@ -155,3 +155,6 @@ norecursedirs = ["dist", "tmp*", ".svn", ".*"]
 markers = [
     "windows: mark a test as a windows test"
 ]
+
+[tool.uv]
+exclude-newer = "7 days"

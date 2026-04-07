@@ -12,6 +12,10 @@ resolution-markers = [
     "python_full_version < '3.6.8'",
 ]
 
+[options]
+exclude-newer = "2026-03-26T07:53:50.714888877Z"
+exclude-newer-span = "P7D"
+
 [[package]]
 name = "alabaster"
 version = "0.7.13"
