@@ -432,7 +432,7 @@ def _validate_store_foreign_keys(from_model_name, fk_references):
     return exclude_pks, deleted_pks
 
 
-def _save_deserialized_record(store_model, app_model, model_name, excluded_list):
+def _save_deserialized_record(store_model, app_model, model_name, excluded_list=None):
     """
     Attempt to save one deserialized app model into the app table.
 
@@ -459,7 +459,8 @@ def _save_deserialized_record(store_model, app_model, model_name, excluded_list)
         ValueError,
         IntegrityError,
     ) as e:
-        excluded_list.append(store_model.id)
+        if excluded_list is not None:
+            excluded_list.append(store_model.id)
         store_model.deserialization_error = str(e)
         store_model.save(update_fields=["deserialization_error"])
         logger.warning(
@@ -622,7 +623,7 @@ def _deserialize_from_store(profile, skip_erroring=False, filter=None):
                     ):
                         continue
                     _save_deserialized_record(
-                        store_model, app_model, model.__name__, excluded_list
+                        store_model, app_model, model.__name__
                     )
 
 
