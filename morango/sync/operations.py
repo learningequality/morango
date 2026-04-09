@@ -13,6 +13,7 @@ from django.db import transaction
 from django.db.models import CharField
 from django.db.models import Q
 from django.db.models import signals
+from django.db.utils import IntegrityError
 from django.db.utils import OperationalError
 from django.utils import timezone
 from rest_framework.exceptions import ValidationError
@@ -431,6 +432,46 @@ def _validate_store_foreign_keys(from_model_name, fk_references):
     return exclude_pks, deleted_pks
 
 
+def _save_deserialized_record(store_model, app_model, model_name, excluded_list=None):
+    """
+    Attempt to save one deserialized app model into the app table.
+
+    On success: clears dirty_bit and deserialization_error on the Store record.
+    On failure: records the error on the Store record, keeps dirty_bit True,
+    and logs a warning.
+
+    :returns: True if save succeeded, False otherwise
+    """
+
+    try:
+        with transaction.atomic():
+            with mute_signals(signals.pre_save, signals.post_save):
+                app_model.save(update_dirty_bit_to=False)
+        store_model.dirty_bit = False
+        store_model.deserialization_error = ""
+        store_model.save(
+            update_fields=["dirty_bit", "deserialization_error"]
+        )
+        return True
+    except (
+        exceptions.ValidationError,
+        exceptions.ObjectDoesNotExist,
+        ValueError,
+        IntegrityError,
+    ) as e:
+        if excluded_list is not None:
+            excluded_list.append(store_model.id)
+        store_model.deserialization_error = str(e)
+        store_model.save(update_fields=["deserialization_error"])
+        logger.warning(
+            "Failed to deserialize Store record %s for %s: %s",
+            store_model.id,
+            model_name,
+            e,
+        )
+        return False
+
+
 def _deserialize_from_store(profile, skip_erroring=False, filter=None):
     """
     Takes data from the store and integrates into the application.
@@ -438,7 +479,9 @@ def _deserialize_from_store(profile, skip_erroring=False, filter=None):
     ALGORITHM: On a per syncable model basis, we iterate through each class model and we go through 2 possible cases:
 
     1. For class models that have a self referential foreign key, we iterate down the dependency tree deserializing model by model.
-    2. On a per app model basis, we append the field values to a single list, and do a single bulk insert/replace query.
+    2. For other models, we deserialize and validate each record, then save individually so that DB-level errors
+       (e.g. unique constraint violations) are caught and recorded per-record rather than silently lost or crashing
+       the entire deserialization.
 
     If a model fails to deserialize/validate, we exclude it from being marked as clean in the store.
     """
@@ -487,24 +530,25 @@ def _deserialize_from_store(profile, skip_erroring=False, filter=None):
                             app_model, _ = store_model._deserialize_store_model(
                                 fk_cache, sync_filter=filter
                             )
-                            if app_model:
-                                with mute_signals(signals.pre_save, signals.post_save):
-                                    app_model.save(update_dirty_bit_to=False)
-                            # we update a store model after we have deserialized it to be able to mark it as a clean parent
-                            store_model.dirty_bit = False
-                            store_model.deserialization_error = ""
-                            store_model.save(
-                                update_fields=["dirty_bit", "deserialization_error"]
-                            )
                         except (
                             exceptions.ValidationError,
                             exceptions.ObjectDoesNotExist,
                             ValueError,
                         ) as e:
                             excluded_list.append(store_model.id)
-                            # if the app model did not validate, we leave the store dirty bit set, but mark the error
                             store_model.deserialization_error = str(e)
                             store_model.save(update_fields=["deserialization_error"])
+                            continue
+                        if app_model:
+                            _save_deserialized_record(
+                                store_model, app_model, model.__name__, excluded_list
+                            )
+                        else:
+                            store_model.dirty_bit = False
+                            store_model.deserialization_error = ""
+                            store_model.save(
+                                update_fields=["dirty_bit", "deserialization_error"]
+                            )
 
                     # update lists with new clean parents and dirty children
                     clean_parents = store_models.filter(dirty_bit=False).char_ids_list()
@@ -529,9 +573,8 @@ def _deserialize_from_store(profile, skip_erroring=False, filter=None):
                 )
 
             else:
-                # collect all initially valid app models
+                # collect all initially valid app models and validate their FKs
                 app_models = []
-                fields = model._meta.fields
                 for store_model in store_models.filter(dirty_bit=True):
                     try:
                         (
@@ -541,7 +584,7 @@ def _deserialize_from_store(profile, skip_erroring=False, filter=None):
                             fk_cache, defer_fks=True, sync_filter=filter,
                         )
                         if app_model:
-                            app_models.append(app_model)
+                            app_models.append((store_model, app_model))
                         for fk_model, fk_refs in model_deferred_fks.items():
                             # validate that the FK references aren't to anything already in the
                             # excluded list, which should only contain models which failed to
@@ -571,40 +614,17 @@ def _deserialize_from_store(profile, skip_erroring=False, filter=None):
                 excluded_list.extend(model_excluded_pks)
                 deleted_list.extend(model_deleted_pks)
 
-                # array for holding db values from the fields of each model for this class
-                db_values = []
-                for app_model in app_models:
+                # save each app model individually so we can catch per-record
+                # DB-level errors (e.g. unique constraint violations)
+                for store_model, app_model in app_models:
                     if (
-                        app_model.pk not in excluded_list
-                        and app_model.pk not in deleted_list
+                        app_model.pk in excluded_list
+                        or app_model.pk in deleted_list
                     ):
-                        # handle any errors that might come from `get_db_prep_value`
-                        try:
-                            new_db_values = []
-                            for f in fields:
-                                value = getattr(app_model, f.attname)
-                                db_value = f.get_db_prep_value(value, connection)
-                                new_db_values.append(db_value)
-                            db_values += new_db_values
-                        except ValueError as e:
-                            excluded_list.append(app_model.pk)
-                            store_model = store_models.get(pk=app_model.pk)
-                            store_model.deserialization_error = str(e)
-                            store_model.save(update_fields=["deserialization_error"])
-
-                if db_values:
-                    with connection.cursor() as cursor:
-                        DBBackend._bulk_full_record_upsert(
-                            cursor,
-                            model._meta.db_table,
-                            fields,
-                            db_values,
-                        )
-
-                # clear dirty bit for all store records for this model/profile except for rows that did not validate
-                store_models.exclude(id__in=excluded_list).filter(
-                    dirty_bit=True
-                ).update(dirty_bit=False)
+                        continue
+                    _save_deserialized_record(
+                        store_model, app_model, model.__name__
+                    )
 
 
 def _queue_into_buffer_v1(transfersession):
