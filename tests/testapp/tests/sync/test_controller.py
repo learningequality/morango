@@ -590,7 +590,8 @@ class UniqueConstraintDeserializationTestCase(TestCase):
         # At least one Store record should have deserialization_error set
         errored_stores = Store.objects.filter(
             id__in=[self.user1_id, self.user2_id],
-        ).exclude(deserialization_error="")
+            deserialization_error__isnull=False,
+        )
         self.assertGreater(
             errored_stores.count(),
             0,
@@ -633,6 +634,34 @@ class UniqueConstraintDeserializationTestCase(TestCase):
             "deserialization, but none was found. Logs: {}".format(cm.output),
         )
 
+    def test_unique_violation_sets_deserialization_exception(self):
+        """At least one conflicting record should have deserialization_exception set."""
+        self._create_conflicting_user_store_records()
+
+        self.mc.deserialize_from_store()
+
+        # At least one Store record should have deserialization_exception set
+        errored_stores = Store.objects.filter(
+            id__in=[self.user1_id, self.user2_id],
+            deserialization_exception__isnull=False,
+        )
+        self.assertGreater(
+            errored_stores.count(),
+            0,
+            "Expected at least one Store record to have deserialization_exception "
+            "set for unique constraint violation, but none did.",
+        )
+
+        # Verify the exception is a fully-qualified class path
+        for store in errored_stores:
+            self.assertEqual(
+                "django.db.utils.IntegrityError",
+                store.deserialization_exception,
+                "Expected deserialization_exception to be a fully-qualified class path like 'module.ClassName', got: {}".format(
+                    store.deserialization_exception
+                ),
+            )
+
     def test_non_conflicting_records_still_deserialize(self):
         """Records that don't conflict should still be deserialized even when others conflict."""
         self._create_conflicting_user_store_records()
@@ -651,7 +680,7 @@ class UniqueConstraintDeserializationTestCase(TestCase):
 
         ok_store = Store.objects.get(id=ok_user_id)
         self.assertFalse(ok_store.dirty_bit)
-        self.assertEqual(ok_store.deserialization_error, "")
+        self.assertIsNone(ok_store.deserialization_error)
 
 
 class SelfReferentialFKDeserializationTestCase(TestCase):
@@ -793,7 +822,7 @@ class ForeignKeyDeserializationTestCase(TestCase):
 
         new_log.refresh_from_db()
         self.assertFalse(new_log.dirty_bit)
-        self.assertTrue(new_log.deserialization_error == "")
+        self.assertIsNone(new_log.deserialization_error)
         self.assertTrue(InteractionLog.objects.filter(id=new_log.id).exists())
 
     def test_deserialization_of_model_with_valid_foreignkey_referent(self):
@@ -813,7 +842,7 @@ class ForeignKeyDeserializationTestCase(TestCase):
 
         new_log.refresh_from_db()
         self.assertFalse(new_log.dirty_bit)
-        self.assertTrue(new_log.deserialization_error == "")
+        self.assertIsNone(new_log.deserialization_error)
         self.assertTrue(SummaryLog.objects.filter(id=new_log.id).exists())
 
 

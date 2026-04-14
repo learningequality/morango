@@ -129,3 +129,17 @@ def _assert(condition, message, error_type=AssertionError):
     """
     if not condition:
         raise error_type(message)
+
+
+def exception_path(exc):
+    """
+    Produces a string of the fully qualified class name of the exception
+
+    :param exc: An exception instance
+    :type exc: Exception|Type[Exception]
+    :return: A string of the fully qualified class name of the exception
+    """
+    exc_cls = exc
+    if isinstance(exc, Exception):
+        exc_cls = exc.__class__
+    return f"{exc_cls.__module__}.{exc_cls.__name__}"

@@ -392,3 +392,108 @@ class SyncableModelTestCase(TestCase):
         sync_filter = Filter("test")
         f.deferred_clean_fields(exclude=["test1"], sync_filter=sync_filter)
         mock_clean_fields.assert_called_once_with(exclude=["test1"], sync_filter=sync_filter)
+
+
+class StoreDeserializationErrorTestCase(TestCase):
+    """Tests for Store.set_deserialization_error() and Store.unset_deserialization_error()"""
+
+    def test_set_deserialization_error_with_validation_error(self):
+        """Test that set_deserialization_error correctly captures ValidationError."""
+        from django.core.exceptions import ValidationError
+
+        store = StoreFactory(
+            id=uuid.uuid4().hex,
+            partition="test",
+            serialized="{}",
+            last_saved_instance="a" * 32,
+            last_saved_counter=1,
+        )
+        exc = ValidationError("Invalid data")
+        store.set_deserialization_error(exc)
+
+        # ValidationError str() returns a list representation like "['Invalid data']"
+        self.assertIn("Invalid data", store.deserialization_error)
+        self.assertEqual(
+            store.deserialization_exception,
+            "django.core.exceptions.ValidationError",
+        )
+
+    def test_set_deserialization_error_with_integrity_error(self):
+        """Test that set_deserialization_error correctly captures IntegrityError."""
+        from django.db.utils import IntegrityError
+
+        store = StoreFactory(
+            id=uuid.uuid4().hex,
+            partition="test",
+            serialized="{}",
+            last_saved_instance="a" * 32,
+            last_saved_counter=1,
+        )
+        exc = IntegrityError("UNIQUE constraint failed")
+        store.set_deserialization_error(exc)
+
+        self.assertEqual(store.deserialization_error, "UNIQUE constraint failed")
+        self.assertEqual(
+            store.deserialization_exception,
+            "django.db.utils.IntegrityError",
+        )
+
+    def test_set_deserialization_error_with_value_error(self):
+        """Test that set_deserialization_error correctly captures ValueError."""
+        store = StoreFactory(
+            id=uuid.uuid4().hex,
+            partition="test",
+            serialized="{}",
+            last_saved_instance="a" * 32,
+            last_saved_counter=1,
+        )
+        exc = ValueError("Invalid value")
+        store.set_deserialization_error(exc)
+
+        self.assertEqual(store.deserialization_error, "Invalid value")
+        self.assertEqual(
+            store.deserialization_exception,
+            "builtins.ValueError",
+        )
+
+    def test_unset_deserialization_error(self):
+        """Test that unset_deserialization_error clears both fields."""
+        store = StoreFactory(
+            id=uuid.uuid4().hex,
+            partition="test",
+            serialized="{}",
+            last_saved_instance="a" * 32,
+            last_saved_counter=1,
+            deserialization_error="some error",
+            deserialization_exception="module.Error",
+        )
+
+        store.unset_deserialization_error()
+
+        self.assertIsNone(store.deserialization_error)
+        self.assertIsNone(store.deserialization_exception)
+
+    def test_set_and_unset_deserialization_error(self):
+        """Test that set_deserialization_error followed by unset_deserialization_error works correctly."""
+        from django.core.exceptions import ValidationError
+
+        store = StoreFactory(
+            id=uuid.uuid4().hex,
+            partition="test",
+            serialized="{}",
+            last_saved_instance="a" * 32,
+            last_saved_counter=1,
+        )
+
+        exc = ValidationError("Test error")
+        store.set_deserialization_error(exc)
+        # ValidationError str() returns a list representation like "['Test error']"
+        self.assertIn("Test error", store.deserialization_error)
+        self.assertEqual(
+            store.deserialization_exception,
+            "django.core.exceptions.ValidationError",
+        )
+
+        store.unset_deserialization_error()
+        self.assertIsNone(store.deserialization_error)
+        self.assertIsNone(store.deserialization_exception)
