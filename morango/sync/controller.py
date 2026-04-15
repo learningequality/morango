@@ -2,11 +2,9 @@ import logging
 import math
 from time import sleep
 
-from morango.constants import transfer_stages
-from morango.constants import transfer_statuses
+from morango.constants import transfer_stages, transfer_statuses
 from morango.registry import session_middleware
-from morango.sync.operations import _deserialize_from_store
-from morango.sync.operations import OperationLogger
+from morango.sync.operations import OperationLogger, _deserialize_from_store
 from morango.sync.stream.serialize import serialize_into_store
 from morango.sync.utils import SyncSignalGroup
 from morango.utils import _assert
@@ -33,9 +31,7 @@ class MorangoProfileController(object):
         with OperationLogger("Deserializing records", "Deserialization complete"):
             # we first serialize to avoid deserialization merge conflicts
             serialize_into_store(self.profile, sync_filter=sync_filter)
-            _deserialize_from_store(
-                self.profile, filter=sync_filter, skip_erroring=skip_erroring
-            )
+            _deserialize_from_store(self.profile, filter=sync_filter, skip_erroring=skip_erroring)
 
     def create_network_connection(self, base_url, **kwargs):
         from morango.sync.syncsession import NetworkSyncConnection
@@ -175,9 +171,7 @@ class SessionController(object):
         # should always be a non-False status
         return result
 
-    def proceed_to_and_wait_for(
-        self, target_stage, context=None, max_interval=None, callback=None
-    ):
+    def proceed_to_and_wait_for(self, target_stage, context=None, max_interval=None, callback=None):
         """
         Same as `proceed_to` but waits for a finished status to be returned by sleeping between
         calls to `proceed_to` if status is not complete

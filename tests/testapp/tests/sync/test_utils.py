@@ -1,8 +1,7 @@
 import mock
 from django.test import TestCase
 
-from morango.sync.utils import SyncSignal
-from morango.sync.utils import SyncSignalGroup
+from morango.sync.utils import SyncSignal, SyncSignalGroup
 
 
 class SyncSignalTestCase(TestCase):
@@ -70,9 +69,7 @@ class SyncSignalGroupTestCase(TestCase):
         with signaler.send(other="A") as status:
             start_handler.assert_called_once_with(this_is_a_default=True, other="A")
             status.in_progress.fire(this_is_a_default=False, other="B")
-            in_progress_handler.assert_called_once_with(
-                this_is_a_default=False, other="B"
-            )
+            in_progress_handler.assert_called_once_with(this_is_a_default=False, other="B")
             completed_handler.assert_not_called()
 
         completed_handler.assert_called_once_with(this_is_a_default=True, other="A")

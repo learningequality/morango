@@ -1,9 +1,11 @@
-from morango.models.fsic_utils import chunk_fsic_v2
-from morango.models.fsic_utils import expand_fsic_for_use
-from morango.models.fsic_utils import remove_redundant_instance_counters
-from morango.models.fsic_utils import calculate_directional_fsic_diff_v2
-
 from django.test import TestCase
+
+from morango.models.fsic_utils import (
+    calculate_directional_fsic_diff_v2,
+    chunk_fsic_v2,
+    expand_fsic_for_use,
+    remove_redundant_instance_counters,
+)
 
 
 class TestFSICUtils(TestCase):

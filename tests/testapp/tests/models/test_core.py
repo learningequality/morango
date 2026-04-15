@@ -2,22 +2,16 @@ import uuid
 
 import factory
 import mock
-from django.test import override_settings
-from django.test import TestCase
+from django.test import TestCase, override_settings
 from django.utils import timezone
-from facility_profile.models import Facility
-from facility_profile.models import MyUser
+from facility_profile.models import Facility, MyUser
 
-from ..helpers import RecordMaxCounterFactory
-from ..helpers import StoreFactory
-from morango.constants import transfer_stages
-from morango.constants import transfer_statuses
+from morango.constants import transfer_stages, transfer_statuses
 from morango.models.certificates import Filter
-from morango.models.core import DatabaseMaxCounter
-from morango.models.core import Store
-from morango.models.core import SyncSession
-from morango.models.core import TransferSession
+from morango.models.core import DatabaseMaxCounter, Store, SyncSession, TransferSession
 from morango.sync.controller import MorangoProfileController
+
+from ..helpers import RecordMaxCounterFactory, StoreFactory
 
 
 class DatabaseMaxCounterFactory(factory.django.DjangoModelFactory):
@@ -38,9 +32,7 @@ class BaseDatabaseMaxCounterTestCase(TestCase):
         self.user2_prefix_b = "BBB:user_id:emily"
 
         # instance A dmc
-        DatabaseMaxCounterFactory(
-            instance_id=self.instance_a, partition=self.prefix_a, counter=15
-        )
+        DatabaseMaxCounterFactory(instance_id=self.instance_a, partition=self.prefix_a, counter=15)
         DatabaseMaxCounterFactory(
             instance_id=self.instance_a, partition=self.user_prefix_a, counter=20
         )
@@ -52,9 +44,7 @@ class BaseDatabaseMaxCounterTestCase(TestCase):
         DatabaseMaxCounterFactory(
             instance_id=self.instance_b, partition=self.user_prefix_a, counter=10
         )
-        DatabaseMaxCounterFactory(
-            instance_id=self.instance_b, partition=self.prefix_b, counter=12
-        )
+        DatabaseMaxCounterFactory(instance_id=self.instance_b, partition=self.prefix_b, counter=12)
         DatabaseMaxCounterFactory(
             instance_id=self.instance_b, partition=self.user_prefix_b, counter=5
         )
@@ -66,9 +56,7 @@ class BaseDatabaseMaxCounterTestCase(TestCase):
 @override_settings(MORANGO_DISABLE_FSIC_V2_FORMAT=True)
 class OldFilterMaxCounterTestCase(BaseDatabaseMaxCounterTestCase):
     def test_filter_not_in_dmc(self):
-        fmcs = DatabaseMaxCounter.calculate_filter_specific_instance_counters(
-            Filter("ZZZ")
-        )
+        fmcs = DatabaseMaxCounter.calculate_filter_specific_instance_counters(Filter("ZZZ"))
         self.assertEqual(fmcs, {})
 
     def test_instances_for_one_partition_but_not_other(self):
@@ -131,17 +119,13 @@ class OldDatabaseMaxCounterUpdateCalculation(TestCase):
     def test_update_some_fsics(self):
         client_fsic = {"a" * 32: 1, "e" * 32: 2, "c" * 32: 1}
         server_fsic = {"a" * 32: 2, "b" * 32: 1, "c" * 32: 2}
-        self.assertFalse(
-            DatabaseMaxCounter.objects.filter(instance_id="e" * 32).exists()
-        )
+        self.assertFalse(DatabaseMaxCounter.objects.filter(instance_id="e" * 32).exists())
         for instance_id, counter in server_fsic.items():
             DatabaseMaxCounter.objects.create(
                 instance_id=instance_id, counter=counter, partition=self.filter
             )
         DatabaseMaxCounter.update_fsics(client_fsic, Filter(self.filter))
-        self.assertTrue(
-            DatabaseMaxCounter.objects.filter(instance_id="e" * 32).exists()
-        )
+        self.assertTrue(DatabaseMaxCounter.objects.filter(instance_id="e" * 32).exists())
 
     def test_no_fsics_get_updated(self):
         client_fsic = {"a" * 32: 1, "b" * 32: 1, "c" * 32: 1}
@@ -215,7 +199,9 @@ class DatabaseMaxCounterTestCase(BaseDatabaseMaxCounterTestCase):
         )
 
     def test_get_instance_counters_for_partitions__producer(self):
-        counters = DatabaseMaxCounter.get_instance_counters_for_partitions([self.user_prefix_a], is_producer=True)
+        counters = DatabaseMaxCounter.get_instance_counters_for_partitions(
+            [self.user_prefix_a], is_producer=True
+        )
         self.assertEqual(1, len(counters))
         partition_counters = counters.get(self.user_prefix_a)
         self.assertEqual(1, len(partition_counters))
@@ -223,7 +209,9 @@ class DatabaseMaxCounterTestCase(BaseDatabaseMaxCounterTestCase):
 
     @override_settings(MORANGO_DISABLE_FSIC_REDUCTION=True)
     def test_get_instance_counters_for_partitions__producer__no_reduction(self):
-        counters = DatabaseMaxCounter.get_instance_counters_for_partitions([self.user_prefix_a], is_producer=True)
+        counters = DatabaseMaxCounter.get_instance_counters_for_partitions(
+            [self.user_prefix_a], is_producer=True
+        )
         self.assertEqual(1, len(counters))
         partition_counters = counters.get(self.user_prefix_a)
         self.assertEqual(2, len(partition_counters))
@@ -277,9 +265,7 @@ class TransferSessionTestCase(TestCase):
         self.assertEqual(transfer_stages.QUEUING, self.instance.transfer_stage)
         self.assertEqual(transfer_statuses.PENDING, self.instance.transfer_stage_status)
         self.assertLess(previous_activity, self.instance.last_activity_timestamp)
-        self.assertLess(
-            previous_sync_activity, self.sync_session.last_activity_timestamp
-        )
+        self.assertLess(previous_sync_activity, self.sync_session.last_activity_timestamp)
 
     def test_update_state__only_stage(self):
         self.assertIsNone(self.instance.transfer_stage)
@@ -292,9 +278,7 @@ class TransferSessionTestCase(TestCase):
         self.assertEqual(transfer_stages.QUEUING, self.instance.transfer_stage)
         self.assertIsNone(self.instance.transfer_stage_status)
         self.assertLess(previous_activity, self.instance.last_activity_timestamp)
-        self.assertLess(
-            previous_sync_activity, self.sync_session.last_activity_timestamp
-        )
+        self.assertLess(previous_sync_activity, self.sync_session.last_activity_timestamp)
 
     def test_update_state__only_status(self):
         self.assertIsNone(self.instance.transfer_stage)
@@ -307,9 +291,7 @@ class TransferSessionTestCase(TestCase):
         self.assertIsNone(self.instance.transfer_stage)
         self.assertEqual(transfer_statuses.PENDING, self.instance.transfer_stage_status)
         self.assertLess(previous_activity, self.instance.last_activity_timestamp)
-        self.assertLess(
-            previous_sync_activity, self.sync_session.last_activity_timestamp
-        )
+        self.assertLess(previous_sync_activity, self.sync_session.last_activity_timestamp)
 
     def test_update_state__none(self):
         self.assertIsNone(self.instance.transfer_stage)
@@ -322,9 +304,7 @@ class TransferSessionTestCase(TestCase):
         self.assertIsNone(self.instance.transfer_stage)
         self.assertIsNone(self.instance.transfer_stage_status)
         self.assertEqual(previous_activity, self.instance.last_activity_timestamp)
-        self.assertEqual(
-            previous_sync_activity, self.sync_session.last_activity_timestamp
-        )
+        self.assertEqual(previous_sync_activity, self.sync_session.last_activity_timestamp)
 
 
 class TransferSessionAndStoreTestCase(TestCase):
@@ -363,11 +343,7 @@ class TransferSessionAndStoreTestCase(TestCase):
     def test_get_touched_record_ids_for_model__string(self):
         self.assertEqual(
             [self.user.id],
-            list(
-                self.instance.get_touched_record_ids_for_model(
-                    MyUser.morango_model_name
-                )
-            ),
+            list(self.instance.get_touched_record_ids_for_model(MyUser.morango_model_name)),
         )
 
 
@@ -384,7 +360,9 @@ class SyncableModelTestCase(TestCase):
         f = Facility(name="test")
         sync_filter = Filter("test")
         f.cached_clean_fields({}, exclude=["test1"], sync_filter=sync_filter)
-        mock_clean_fields.assert_called_once_with(exclude=["test1", "parent"], sync_filter=sync_filter)
+        mock_clean_fields.assert_called_once_with(
+            exclude=["test1", "parent"], sync_filter=sync_filter
+        )
 
     @mock.patch("morango.models.core.SyncableModel.clean_fields")
     def test_deferred_clean_fields(self, mock_clean_fields):

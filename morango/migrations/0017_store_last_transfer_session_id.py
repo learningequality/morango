@@ -6,15 +6,16 @@ import morango.models.fields.uuids
 
 
 class Migration(migrations.Migration):
-
     dependencies = [
-        ('morango', '0016_store_deserialization_error'),
+        ("morango", "0016_store_deserialization_error"),
     ]
 
     operations = [
         migrations.AddField(
-            model_name='store',
-            name='last_transfer_session_id',
-            field=morango.models.fields.uuids.UUIDField(blank=True, db_index=True, default=None, null=True),
+            model_name="store",
+            name="last_transfer_session_id",
+            field=morango.models.fields.uuids.UUIDField(
+                blank=True, db_index=True, default=None, null=True
+            ),
         ),
     ]

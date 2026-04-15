@@ -4,26 +4,16 @@ import uuid
 
 import factory
 import mock
-from django.test import SimpleTestCase
-from django.test import TestCase
-from facility_profile.models import Facility
-from facility_profile.models import InteractionLog
-from facility_profile.models import MyUser
-from facility_profile.models import SummaryLog
+from django.test import SimpleTestCase, TestCase
+from facility_profile.models import Facility, InteractionLog, MyUser, SummaryLog
+
+from morango.constants import transfer_stages, transfer_statuses
+from morango.models.certificates import Filter
+from morango.models.core import DeletedModels, InstanceIDModel, RecordMaxCounter, Store
+from morango.sync.controller import MorangoProfileController, SessionController
 
 from ..compat import EnvironmentVarGuard
-from ..helpers import FacilityModelFactory
-from ..helpers import serialized_facility_factory
-from ..helpers import TestSessionContext
-from morango.constants import transfer_stages
-from morango.constants import transfer_statuses
-from morango.models.certificates import Filter
-from morango.models.core import DeletedModels
-from morango.models.core import InstanceIDModel
-from morango.models.core import RecordMaxCounter
-from morango.models.core import Store
-from morango.sync.controller import MorangoProfileController
-from morango.sync.controller import SessionController
+from ..helpers import FacilityModelFactory, TestSessionContext, serialized_facility_factory
 
 
 class StoreModelFacilityFactory(factory.django.DjangoModelFactory):
@@ -52,10 +42,7 @@ class SerializeIntoStoreTestCase(TestCase):
 
     def test_no_models_get_serialized(self):
         # set dirty bit off on new models created
-        [
-            FacilityModelFactory.build().save(update_dirty_bit_to=False)
-            for _ in range(self.range)
-        ]
+        [FacilityModelFactory.build().save(update_dirty_bit_to=False) for _ in range(self.range)]
         # only models with dirty bit on should be serialized
         self.mc.serialize_into_store()
         self.assertFalse(Store.objects.exists())
@@ -298,9 +285,7 @@ class RecordMaxCounterUpdatesDuringSerialization(TestCase):
             Facility.objects.update(name="facility")
             self.mc.serialize_into_store()
 
-        new_rmc = RecordMaxCounter.objects.get(
-            instance_id=new_id.id, store_model_id=self.fac1.id
-        )
+        new_rmc = RecordMaxCounter.objects.get(instance_id=new_id.id, store_model_id=self.fac1.id)
         new_store_record = Store.objects.get(id=self.fac1.id)
 
         self.assertEqual(new_rmc.counter, new_store_record.last_saved_counter)
@@ -335,9 +320,7 @@ class RecordMaxCounterUpdatesDuringSerialization(TestCase):
             new_fac = FacilityModelFactory(name="college")
             self.mc.serialize_into_store()
 
-        new_rmc = RecordMaxCounter.objects.get(
-            instance_id=new_id.id, store_model_id=new_fac.id
-        )
+        new_rmc = RecordMaxCounter.objects.get(instance_id=new_id.id, store_model_id=new_fac.id)
         new_store_record = Store.objects.get(id=new_fac.id)
 
         self.assertNotEqual(new_id.id, self.current_id.id)
@@ -377,9 +360,7 @@ class DeserializationFromStoreIntoAppTestCase(TestCase):
         self.mc.deserialize_from_store()
 
         # deleted flag on store should delete model in app layer
-        Store.objects.update_or_create(
-            defaults={"deleted": True, "dirty_bit": True}, id=self.ident
-        )
+        Store.objects.update_or_create(defaults={"deleted": True, "dirty_bit": True}, id=self.ident)
         self.mc.deserialize_from_store()
         self.assertFalse(Facility.objects.filter(id=self.ident).exists())
 
@@ -422,9 +403,7 @@ class DeserializationFromStoreIntoAppTestCase(TestCase):
 
     def test_broken_fk_leaves_store_dirty_bit(self):
         log_id = uuid.uuid4().hex
-        serialized = json.dumps(
-            {"user_id": "40de9a3fded95d7198f200c78e559353", "id": log_id}
-        )
+        serialized = json.dumps({"user_id": "40de9a3fded95d7198f200c78e559353", "id": log_id})
         st = StoreModelFacilityFactory(
             id=log_id, serialized=serialized, model_name="contentsummarylog"
         )
@@ -585,14 +564,10 @@ class SelfReferentialFKDeserializationTestCase(TestCase):
         self.assertEqual(child2[0].parent_id, root.id)
 
     def test_deserialization_of_model_with_missing_parent(self):
-        self._test_deserialization_of_model_with_missing_parent(
-            correct_self_ref_fk=True
-        )
+        self._test_deserialization_of_model_with_missing_parent(correct_self_ref_fk=True)
 
     def test_deserialization_of_model_with_mismatched_self_ref_fk(self):
-        self._test_deserialization_of_model_with_missing_parent(
-            correct_self_ref_fk=False
-        )
+        self._test_deserialization_of_model_with_missing_parent(correct_self_ref_fk=False)
 
     def _test_deserialization_of_model_with_missing_parent(self, correct_self_ref_fk):
         root = FacilityModelFactory()
@@ -709,19 +684,13 @@ class ForeignKeyDeserializationTestCase(TestCase):
 class SessionControllerTestCase(SimpleTestCase):
     def setUp(self):
         super(SessionControllerTestCase, self).setUp()
-        self.middleware = [
-            mock.Mock(related_stage=stage) for stage, _ in transfer_stages.CHOICES
-        ]
+        self.middleware = [mock.Mock(related_stage=stage) for stage, _ in transfer_stages.CHOICES]
         self.context = TestSessionContext()
-        self.controller = SessionController.build(
-            middleware=self.middleware, context=self.context
-        )
+        self.controller = SessionController.build(middleware=self.middleware, context=self.context)
 
     @contextlib.contextmanager
     def _mock_method(self, method):
-        with mock.patch(
-            "morango.sync.controller.SessionController.{}".format(method)
-        ) as invoke:
+        with mock.patch("morango.sync.controller.SessionController.{}".format(method)) as invoke:
             yield invoke
             invoke.reset_mock()
 
@@ -847,9 +816,7 @@ class SessionControllerTestCase(SimpleTestCase):
         middleware = self.middleware[0]
         middleware.return_value = transfer_statuses.STARTED
 
-        with mock.patch.object(
-            TestSessionContext, "update_state", wraps=context.update_state
-        ) as m:
+        with mock.patch.object(TestSessionContext, "update_state", wraps=context.update_state) as m:
             result = self.controller._invoke_middleware(context, middleware)
             self.assertEqual(result, transfer_statuses.STARTED)
 

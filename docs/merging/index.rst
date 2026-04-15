@@ -36,4 +36,3 @@ In the illustration above:
 5. When *Device A* syncs data with *Device B* again (the arrow), there is a conflict because both devices have modified ``r``.
 
 It is up to the implementing application to determine what the merge conflict resolution strategy is.
-

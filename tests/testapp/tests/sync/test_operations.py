@@ -3,45 +3,44 @@ import uuid
 
 import mock
 from django.db import connection
-from django.test import override_settings
-from django.test import TestCase
+from django.test import TestCase, override_settings
 from django.utils import timezone
-from facility_profile.models import ConditionalLog
-from facility_profile.models import Facility
-from facility_profile.models import MyUser
-from facility_profile.models import SummaryLog
+from facility_profile.models import ConditionalLog, Facility, MyUser, SummaryLog
 
-from ..helpers import create_buffer_and_store_dummy_data
-from ..helpers import create_dummy_store_data
 from morango.constants import transfer_statuses
 from morango.constants.capabilities import FSIC_V2_FORMAT
 from morango.errors import MorangoLimitExceeded
 from morango.models.certificates import Filter
-from morango.models.core import Buffer
-from morango.models.core import DatabaseIDModel
-from morango.models.core import DatabaseMaxCounter
-from morango.models.core import InstanceIDModel
-from morango.models.core import RecordMaxCounter
-from morango.models.core import RecordMaxCounterBuffer
-from morango.models.core import Store
-from morango.models.core import SyncSession
-from morango.models.core import TransferSession
+from morango.models.core import (
+    Buffer,
+    DatabaseIDModel,
+    DatabaseMaxCounter,
+    InstanceIDModel,
+    RecordMaxCounter,
+    RecordMaxCounterBuffer,
+    Store,
+    SyncSession,
+    TransferSession,
+)
 from morango.sync.backends.utils import load_backend
 from morango.sync.context import LocalSessionContext
-from morango.sync.controller import MorangoProfileController
-from morango.sync.controller import SessionController
-from morango.sync.operations import _dequeue_into_store
-from morango.sync.operations import _deserialize_from_store
-from morango.sync.operations import _queue_into_buffer_v1
-from morango.sync.operations import _queue_into_buffer_v2
-from morango.sync.operations import CleanupOperation
-from morango.sync.operations import InitializeOperation
-from morango.sync.operations import ProducerDequeueOperation
-from morango.sync.operations import ProducerQueueOperation
-from morango.sync.operations import ReceiverDequeueOperation
-from morango.sync.operations import ReceiverDeserializeOperation
-from morango.sync.operations import ReceiverQueueOperation
+from morango.sync.controller import MorangoProfileController, SessionController
+from morango.sync.operations import (
+    CleanupOperation,
+    InitializeOperation,
+    ProducerDequeueOperation,
+    ProducerQueueOperation,
+    ReceiverDequeueOperation,
+    ReceiverDeserializeOperation,
+    ReceiverQueueOperation,
+    _dequeue_into_store,
+    _deserialize_from_store,
+    _queue_into_buffer_v1,
+    _queue_into_buffer_v2,
+)
 from morango.sync.syncsession import TransferClient
+
+from ..helpers import create_buffer_and_store_dummy_data, create_dummy_store_data
 
 DBBackend = load_backend(connection)
 
@@ -215,9 +214,7 @@ class QueueStoreIntoBufferV1TestCase(TestCase):
         operation = InitializeOperation()
         self.assertEqual(transfer_statuses.COMPLETED, operation.handle(self.context))
         self.context.update.assert_called_once()
-        transfer_session = self.context.update.call_args_list[0][1].get(
-            "transfer_session"
-        )
+        transfer_session = self.context.update.call_args_list[0][1].get("transfer_session")
         self.assertEqual(id, transfer_session.id)
         self.assertEqual(records_total, transfer_session.records_total)
         self.assertEqual(client_fsic, transfer_session.client_fsic)
@@ -235,9 +232,7 @@ class QueueStoreIntoBufferV1TestCase(TestCase):
         self.context.transfer_session = None
         operation = InitializeOperation()
         self.assertEqual(transfer_statuses.COMPLETED, operation.handle(self.context))
-        self.context.update.assert_called_once_with(
-            transfer_session=self.transfer_session
-        )
+        self.context.update.assert_called_once_with(transfer_session=self.transfer_session)
 
     def test_local_queue_operation(self):
         fsics = {self.data["group1_id"].id: 1, self.data["group2_id"].id: 1}
@@ -288,7 +283,10 @@ class QueueStoreIntoBufferV2TestCase(TestCase):
         """
         Regression test against 'Expression tree is too large (maximum depth 1000)' error with large fsics
         """
-        fsics = {"super": {}, "sub": {"": {self.data["group1_id"].id: 1, self.data["group2_id"].id: 1}}}
+        fsics = {
+            "super": {},
+            "sub": {"": {self.data["group1_id"].id: 1, self.data["group2_id"].id: 1}},
+        }
         fsics["sub"][""].update({uuid.uuid4().hex: i for i in range(10000)})
         self.transfer_session.client_fsic = json.dumps(fsics)
         self.transfer_session.server_fsic = json.dumps({"super": {}, "sub": {}})
@@ -303,7 +301,10 @@ class QueueStoreIntoBufferV2TestCase(TestCase):
         """
         Regression test against 'Expression tree is too large (maximum depth 1000)' error with large fsics
         """
-        fsics = {"super": {}, "sub": {"": {self.data["group1_id"].id: 1, self.data["group2_id"].id: 1}}}
+        fsics = {
+            "super": {},
+            "sub": {"": {self.data["group1_id"].id: 1, self.data["group2_id"].id: 1}},
+        }
         for i in range(10000):
             fsics["sub"][uuid.uuid4().hex] = {uuid.uuid4().hex: i}
         self.transfer_session.client_fsic = json.dumps(fsics)
@@ -319,7 +320,10 @@ class QueueStoreIntoBufferV2TestCase(TestCase):
         """
         Regression test against 'Expression tree is too large (maximum depth 1000)' error with large fsics
         """
-        fsics = {"super": {}, "sub": {"": {self.data["group1_id"].id: 1, self.data["group2_id"].id: 1}}}
+        fsics = {
+            "super": {},
+            "sub": {"": {self.data["group1_id"].id: 1, self.data["group2_id"].id: 1}},
+        }
         for i in range(99):
             fsics["sub"][uuid.uuid4().hex] = {uuid.uuid4().hex: i for i in range(999)}
         self.transfer_session.client_fsic = json.dumps(fsics)
@@ -331,7 +335,10 @@ class QueueStoreIntoBufferV2TestCase(TestCase):
         assertRecordsBuffered(self.data["group2_c1"])
 
     def test_too_many_fsic_partitions(self):
-        fsics = {"super": {}, "sub": {"": {self.data["group1_id"].id: 1, self.data["group2_id"].id: 1}}}
+        fsics = {
+            "super": {},
+            "sub": {"": {self.data["group1_id"].id: 1, self.data["group2_id"].id: 1}},
+        }
         for i in range(5000):
             fsics["sub"][uuid.uuid4().hex] = {uuid.uuid4().hex: i for i in range(2)}
         self.transfer_session.client_fsic = json.dumps(fsics)
@@ -340,7 +347,10 @@ class QueueStoreIntoBufferV2TestCase(TestCase):
             _queue_into_buffer_v2(self.transfer_session, chunk_size=10)
 
     def test_too_many_fsic_instances(self):
-        fsics = {"super": {}, "sub": {"": {self.data["group1_id"].id: 1, self.data["group2_id"].id: 1}}}
+        fsics = {
+            "super": {},
+            "sub": {"": {self.data["group1_id"].id: 1, self.data["group2_id"].id: 1}},
+        }
         for i in range(2):
             fsics["sub"][uuid.uuid4().hex] = {uuid.uuid4().hex: i for i in range(5000)}
         self.transfer_session.client_fsic = json.dumps(fsics)
@@ -371,7 +381,10 @@ class QueueStoreIntoBufferV2TestCase(TestCase):
         assertRecordsNotBuffered(self.data["group2_c1"])
 
     def test_fsic_counters_too_high(self):
-        fsics = {"super": {}, "sub": {"": {self.data["group1_id"].id: 100, self.data["group2_id"].id: 100}}}
+        fsics = {
+            "super": {},
+            "sub": {"": {self.data["group1_id"].id: 100, self.data["group2_id"].id: 100}},
+        }
         self.transfer_session.client_fsic = json.dumps(fsics)
         self.transfer_session.server_fsic = json.dumps(fsics)
         _queue_into_buffer_v2(self.transfer_session)
@@ -390,7 +403,10 @@ class QueueStoreIntoBufferV2TestCase(TestCase):
         assertRecordsNotBuffered([self.data["user4"]])
 
     def test_local_queue_operation(self):
-        fsics = {"super": {}, "sub": {"": {self.data["group1_id"].id: 1, self.data["group2_id"].id: 1}}}
+        fsics = {
+            "super": {},
+            "sub": {"": {self.data["group1_id"].id: 1, self.data["group2_id"].id: 1}},
+        }
         self.transfer_session.client_fsic = json.dumps(fsics)
         self.transfer_session.server_fsic = json.dumps({"super": {}, "sub": {}})
         self.assertEqual(0, self.transfer_session.records_total or 0)
@@ -405,7 +421,10 @@ class QueueStoreIntoBufferV2TestCase(TestCase):
 
     @mock.patch("morango.sync.operations._queue_into_buffer_v2")
     def test_local_queue_operation__noop(self, mock_queue):
-        fsics = {"super": {}, "sub": {"": {self.data["group1_id"].id: 1, self.data["group2_id"].id: 1}}}
+        fsics = {
+            "super": {},
+            "sub": {"": {self.data["group1_id"].id: 1, self.data["group2_id"].id: 1}},
+        }
         self.transfer_session.client_fsic = json.dumps(fsics)
         self.transfer_session.server_fsic = json.dumps({"super": {}, "sub": {}})
 
@@ -418,9 +437,7 @@ class QueueStoreIntoBufferV2TestCase(TestCase):
         mock_queue.assert_not_called()
 
 
-@override_settings(
-    MORANGO_SERIALIZE_BEFORE_QUEUING=False, MORANGO_DISABLE_FSIC_V2_FORMAT=False
-)
+@override_settings(MORANGO_SERIALIZE_BEFORE_QUEUING=False, MORANGO_DISABLE_FSIC_V2_FORMAT=False)
 class FSICPartitionEdgeCaseQueuingTestCase(TestCase):
     def setUp(self):
         # instance IDs
@@ -461,7 +478,9 @@ class FSICPartitionEdgeCaseQueuingTestCase(TestCase):
 
     def fsic_from_dmcs(self, filters, dmc_tuples):
         self.create_dmcs(dmc_tuples)
-        return DatabaseMaxCounter.calculate_filter_specific_instance_counters(filters, v2_format=True)
+        return DatabaseMaxCounter.calculate_filter_specific_instance_counters(
+            filters, v2_format=True
+        )
 
     def initialize_sessions(self, filters):
         # create controllers for store/buffer operations
@@ -474,13 +493,13 @@ class FSICPartitionEdgeCaseQueuingTestCase(TestCase):
             profile="facilitydata",
             last_activity_timestamp=timezone.now(),
         )
-        self.transfer_session = (
-            self.sync_session.current_transfer_session
-        ) = TransferSession.objects.create(
-            id=uuid.uuid4().hex,
-            sync_session=self.sync_session,
-            push=True,
-            last_activity_timestamp=timezone.now(),
+        self.transfer_session = self.sync_session.current_transfer_session = (
+            TransferSession.objects.create(
+                id=uuid.uuid4().hex,
+                sync_session=self.sync_session,
+                push=True,
+                last_activity_timestamp=timezone.now(),
+            )
         )
 
         self.transfer_session.filter = str(filters)
@@ -623,11 +642,7 @@ class DequeueBufferIntoStoreTestCase(TestCase):
             push=True,
             last_activity_timestamp=timezone.now(),
         )
-        self.data.update(
-            create_buffer_and_store_dummy_data(
-                self.transfer_session.id
-            )
-        )
+        self.data.update(create_buffer_and_store_dummy_data(self.transfer_session.id))
         self.context = mock.Mock(
             spec=LocalSessionContext,
             transfer_session=self.transfer_session,
@@ -645,27 +660,20 @@ class DequeueBufferIntoStoreTestCase(TestCase):
         session_id = self.transfer_session.id
         for store_id in store_ids:
             try:
-                assert (
-                    Store.objects.get(id=store_id).last_transfer_session_id
-                    != session_id
-                )
+                assert Store.objects.get(id=store_id).last_transfer_session_id != session_id
             except Store.DoesNotExist:
                 pass
 
     def test_dequeuing_sets_last_session(self):
-        store_ids = [
-            self.data[key] for key in ["model2", "model3", "model4", "model5", "model7"]
-        ]
+        store_ids = [self.data[key] for key in ["model2", "model3", "model4", "model5", "model7"]]
         self.assert_store_records_not_tagged_with_last_session(store_ids)
-        _dequeue_into_store(self.transfer_session, self.transfer_session.client_fsic, v2_format=False)
+        _dequeue_into_store(
+            self.transfer_session, self.transfer_session.client_fsic, v2_format=False
+        )
         # this one is a reverse fast forward, so it doesn't modify the store record and shouldn't be tagged
         self.assert_store_records_not_tagged_with_last_session([self.data["model1"]])
         self.assert_store_records_tagged_with_last_session(store_ids)
-        tagged_actual = set(
-            self.transfer_session.get_touched_record_ids_for_model(
-                "facility"
-            )
-        )
+        tagged_actual = set(self.transfer_session.get_touched_record_ids_for_model("facility"))
         tagged_expected = set(store_ids)
         assert tagged_actual == tagged_expected
 
@@ -695,9 +703,7 @@ class DequeueBufferIntoStoreTestCase(TestCase):
     def test_dequeuing_delete_buffered_records(self):
         self.assertTrue(Buffer.objects.filter(model_uuid=self.data["model1"]).exists())
         with connection.cursor() as cursor:
-            DBBackend._dequeuing_delete_buffered_records(
-                cursor, self.transfer_session.id
-            )
+            DBBackend._dequeuing_delete_buffered_records(cursor, self.transfer_session.id)
         self.assertFalse(Buffer.objects.filter(model_uuid=self.data["model1"]).exists())
         # ensure other records were not deleted
         self.assertTrue(Buffer.objects.filter(model_uuid=self.data["model2"]).exists())
@@ -752,9 +758,7 @@ class DequeueBufferIntoStoreTestCase(TestCase):
         self.assertFalse(store.deleted)
         with connection.cursor() as cursor:
             current_id = InstanceIDModel.get_current_instance_and_increment_counter()
-            DBBackend._dequeuing_merge_conflict_buffer(
-                cursor, current_id, self.transfer_session.id
-            )
+            DBBackend._dequeuing_merge_conflict_buffer(cursor, current_id, self.transfer_session.id)
         store = Store.objects.get(id=self.data["model2"])
         self.assertEqual(store.last_saved_instance, current_id.id)
         self.assertEqual(store.last_saved_counter, current_id.counter)
@@ -767,9 +771,7 @@ class DequeueBufferIntoStoreTestCase(TestCase):
         self.assertEqual(store.conflicting_serialized_data, "store")
         with connection.cursor() as cursor:
             current_id = InstanceIDModel.get_current_instance_and_increment_counter()
-            DBBackend._dequeuing_merge_conflict_buffer(
-                cursor, current_id, self.transfer_session.id
-            )
+            DBBackend._dequeuing_merge_conflict_buffer(cursor, current_id, self.transfer_session.id)
         store = Store.objects.get(id=self.data["model5"])
         self.assertEqual(store.last_saved_instance, current_id.id)
         self.assertEqual(store.last_saved_counter, current_id.counter)
@@ -781,25 +783,19 @@ class DequeueBufferIntoStoreTestCase(TestCase):
         self.assertEqual(store.conflicting_serialized_data, "store")
         with connection.cursor() as cursor:
             current_id = InstanceIDModel.get_current_instance_and_increment_counter()
-            DBBackend._dequeuing_merge_conflict_buffer(
-                cursor, current_id, self.transfer_session.id
-            )
+            DBBackend._dequeuing_merge_conflict_buffer(cursor, current_id, self.transfer_session.id)
         store.refresh_from_db()
         self.assertEqual(store.serialized, "")
         self.assertEqual(store.conflicting_serialized_data, "")
 
     def test_dequeuing_update_rmcs_last_saved_by(self):
-        self.assertFalse(
-            RecordMaxCounter.objects.filter(instance_id=self.current_id.id).exists()
-        )
+        self.assertFalse(RecordMaxCounter.objects.filter(instance_id=self.current_id.id).exists())
         with connection.cursor() as cursor:
             current_id = InstanceIDModel.get_current_instance_and_increment_counter()
             DBBackend._dequeuing_update_rmcs_last_saved_by(
                 cursor, current_id, self.transfer_session.id
             )
-        self.assertTrue(
-            RecordMaxCounter.objects.filter(instance_id=current_id.id).exists()
-        )
+        self.assertTrue(RecordMaxCounter.objects.filter(instance_id=current_id.id).exists())
 
     def test_dequeuing_delete_mc_buffer(self):
         self.assertTrue(Buffer.objects.filter(model_uuid=self.data["model2"]).exists())
@@ -839,14 +835,10 @@ class DequeueBufferIntoStoreTestCase(TestCase):
         )
 
     def test_dequeuing_insert_remaining_buffer(self):
-        self.assertNotEqual(
-            Store.objects.get(id=self.data["model3"]).serialized, "buffer"
-        )
+        self.assertNotEqual(Store.objects.get(id=self.data["model3"]).serialized, "buffer")
         self.assertFalse(Store.objects.filter(id=self.data["model4"]).exists())
         with connection.cursor() as cursor:
-            DBBackend._dequeuing_insert_remaining_buffer(
-                cursor, self.transfer_session.id
-            )
+            DBBackend._dequeuing_insert_remaining_buffer(cursor, self.transfer_session.id)
         self.assertEqual(Store.objects.get(id=self.data["model3"]).serialized, "buffer")
         self.assertTrue(Store.objects.filter(id=self.data["model4"]).exists())
 
@@ -858,9 +850,7 @@ class DequeueBufferIntoStoreTestCase(TestCase):
                 ).exists()
             )
         with connection.cursor() as cursor:
-            DBBackend._dequeuing_insert_remaining_buffer(
-                cursor, self.transfer_session.id
-            )
+            DBBackend._dequeuing_insert_remaining_buffer(cursor, self.transfer_session.id)
             DBBackend._dequeuing_insert_remaining_rmcb(cursor, self.transfer_session.id)
         for i in self.data["model4_rmcb_ids"]:
             self.assertTrue(
@@ -888,19 +878,17 @@ class DequeueBufferIntoStoreTestCase(TestCase):
             Buffer.objects.filter(transfer_session_id=self.transfer_session.id).exists()
         )
         with connection.cursor() as cursor:
-            DBBackend._dequeuing_delete_remaining_buffer(
-                cursor, self.transfer_session.id
-            )
+            DBBackend._dequeuing_delete_remaining_buffer(cursor, self.transfer_session.id)
         self.assertFalse(
             Buffer.objects.filter(transfer_session_id=self.transfer_session.id).exists()
         )
 
     def test_dequeue_into_store(self):
-        _dequeue_into_store(self.transfer_session, self.transfer_session.client_fsic, v2_format=False)
-        # ensure a record with different transfer session id is not affected
-        self.assertTrue(
-            Buffer.objects.filter(transfer_session_id=self.data["tfs_id"]).exists()
+        _dequeue_into_store(
+            self.transfer_session, self.transfer_session.client_fsic, v2_format=False
         )
+        # ensure a record with different transfer session id is not affected
+        self.assertTrue(Buffer.objects.filter(transfer_session_id=self.data["tfs_id"]).exists())
         self.assertFalse(Store.objects.filter(id=self.data["model6"]).exists())
         self.assertFalse(
             RecordMaxCounter.objects.filter(
@@ -910,13 +898,9 @@ class DequeueBufferIntoStoreTestCase(TestCase):
         )
 
         # ensure reverse fast forward records are not modified
-        self.assertNotEqual(
-            Store.objects.get(id=self.data["model1"]).serialized, "buffer"
-        )
+        self.assertNotEqual(Store.objects.get(id=self.data["model1"]).serialized, "buffer")
         self.assertFalse(
-            RecordMaxCounter.objects.filter(
-                instance_id=self.data["model1_rmcb_ids"][1]
-            ).exists()
+            RecordMaxCounter.objects.filter(instance_id=self.data["model1_rmcb_ids"][1]).exists()
         )
 
         # ensure records with merge conflicts are modified
@@ -929,14 +913,10 @@ class DequeueBufferIntoStoreTestCase(TestCase):
             "buffer\nstore",
         )
         self.assertTrue(
-            RecordMaxCounter.objects.filter(
-                instance_id=self.data["model2_rmcb_ids"][1]
-            ).exists()
+            RecordMaxCounter.objects.filter(instance_id=self.data["model2_rmcb_ids"][1]).exists()
         )
         self.assertTrue(
-            RecordMaxCounter.objects.filter(
-                instance_id=self.data["model5_rmcb_ids"][1]
-            ).exists()
+            RecordMaxCounter.objects.filter(instance_id=self.data["model5_rmcb_ids"][1]).exists()
         )
         self.assertEqual(
             Store.objects.get(id=self.data["model2"]).last_saved_instance,
@@ -952,9 +932,7 @@ class DequeueBufferIntoStoreTestCase(TestCase):
             Store.objects.get(id=self.data["model3"]).serialized, "buffer"
         )  # serialized field is overwritten
         self.assertTrue(
-            RecordMaxCounter.objects.filter(
-                instance_id=self.data["model3_rmcb_ids"][1]
-            ).exists()
+            RecordMaxCounter.objects.filter(instance_id=self.data["model3_rmcb_ids"][1]).exists()
         )
         self.assertEqual(
             Store.objects.get(id=self.data["model3"]).last_saved_instance,
@@ -1033,14 +1011,13 @@ class DequeueBufferIntoStoreTestCase(TestCase):
 
 
 class DeserializationTestCases(TestCase):
-
     def setUp(self):
         self.profile = "facilitydata"
 
         self.serialized_facility = {
             "id": uuid.uuid4().hex,
             "name": "test facility",
-            "now_date": timezone.now().isoformat()
+            "now_date": timezone.now().isoformat(),
         }
         self.serialized_user = {
             "id": uuid.uuid4().hex,
@@ -1064,12 +1041,10 @@ class DeserializationTestCases(TestCase):
             "content_id": uuid.uuid4().hex,
         }
 
-    def serialize_to_store(self, Model, data, post_serialization=None):
+    def serialize_to_store(self, Model, data):
         instance = Model(**data)
         instance.calculate_uuid()
         serialized = instance.serialize()
-        if post_serialization:
-            serialized.update(post_serialization)
         Store.objects.create(
             id=serialized["id"],
             serialized=json.dumps(serialized),
@@ -1082,12 +1057,11 @@ class DeserializationTestCases(TestCase):
             model_name=instance.morango_model_name,
         )
 
-    def serialize_all_to_store(self, post_serialization=None):
-        post_serialization = post_serialization or {}
+    def serialize_all_to_store(self):
         self.serialize_to_store(Facility, self.serialized_facility)
-        self.serialize_to_store(MyUser, self.serialized_user, post_serialization=post_serialization.get("user", {}))
-        self.serialize_to_store(SummaryLog, self.serialized_log1, post_serialization=post_serialization.get("log1", {}))
-        self.serialize_to_store(SummaryLog, self.serialized_log2, post_serialization=post_serialization.get("log2", {}))
+        self.serialize_to_store(MyUser, self.serialized_user)
+        self.serialize_to_store(SummaryLog, self.serialized_log1)
+        self.serialize_to_store(SummaryLog, self.serialized_log2)
         self.serialize_to_store(ConditionalLog, self.serialized_conditional)
 
     def assert_deserialization(
@@ -1101,52 +1075,66 @@ class DeserializationTestCases(TestCase):
         self.assertEqual(
             Facility.objects.filter(id=self.serialized_facility["id"]).exists(),
             facility_deserialized,
-            msg="Facility was not deserialized" if facility_deserialized else "Facility was deserialized"
+            msg="Facility was not deserialized"
+            if facility_deserialized
+            else "Facility was deserialized",
         )
         self.assertEqual(
             MyUser.objects.filter(id=self.serialized_user["id"]).exists(),
             user_deserialized,
-            msg="User was not deserialized" if user_deserialized else "User was deserialized"
+            msg="User was not deserialized" if user_deserialized else "User was deserialized",
         )
         self.assertEqual(
             SummaryLog.objects.filter(id=self.serialized_log1["id"]).exists(),
             log1_deserialized,
-            msg="Log1 was not deserialized" if log1_deserialized else "Log1 was deserialized"
+            msg="Log1 was not deserialized" if log1_deserialized else "Log1 was deserialized",
         )
         self.assertEqual(
             SummaryLog.objects.filter(id=self.serialized_log2["id"]).exists(),
             log2_deserialized,
-            msg="Log2 was not deserialized" if log2_deserialized else "Log2 was deserialized"
+            msg="Log2 was not deserialized" if log2_deserialized else "Log2 was deserialized",
         )
         self.assertEqual(
             ConditionalLog.objects.filter(id=self.serialized_conditional["id"]).exists(),
             conditional_deserialized,
-            msg="Conditional was not deserialized" if conditional_deserialized else "Conditional was deserialized"
+            msg="Conditional was not deserialized"
+            if conditional_deserialized
+            else "Conditional was deserialized",
         )
         self.assertEqual(
             Store.objects.get(id=self.serialized_facility["id"]).dirty_bit,
             (not facility_deserialized),
-            msg="Facility store does not reflect deserialization" if not facility_deserialized else "Facility store reflects deserialization"
+            msg="Facility store does not reflect deserialization"
+            if not facility_deserialized
+            else "Facility store reflects deserialization",
         )
         self.assertEqual(
             Store.objects.get(id=self.serialized_user["id"]).dirty_bit,
             (not user_deserialized),
-            msg="User store does not reflect deserialization" if not user_deserialized else "User store reflects deserialization"
+            msg="User store does not reflect deserialization"
+            if not user_deserialized
+            else "User store reflects deserialization",
         )
         self.assertEqual(
             Store.objects.get(id=self.serialized_log1["id"]).dirty_bit,
             (not log1_deserialized),
-            msg="Log1 store does not reflect deserialization" if not log1_deserialized else "Log1 store reflects deserialization"
+            msg="Log1 store does not reflect deserialization"
+            if not log1_deserialized
+            else "Log1 store reflects deserialization",
         )
         self.assertEqual(
             Store.objects.get(id=self.serialized_log2["id"]).dirty_bit,
             (not log2_deserialized),
-            msg="Log2 store does not reflect deserialization" if not log2_deserialized else "Log2 store reflects deserialization"
+            msg="Log2 store does not reflect deserialization"
+            if not log2_deserialized
+            else "Log2 store reflects deserialization",
         )
         self.assertEqual(
             Store.objects.get(id=self.serialized_conditional["id"]).dirty_bit,
             (not conditional_deserialized),
-            msg="Conditional store does not reflect deserialization" if not conditional_deserialized else "Conditional store reflects deserialization"
+            msg="Conditional store does not reflect deserialization"
+            if not conditional_deserialized
+            else "Conditional store reflects deserialization",
         )
 
     def test_successful_deserialization(self):
@@ -1169,7 +1157,7 @@ class DeserializationTestCases(TestCase):
             user_deserialized=False,
             log1_deserialized=False,
             log2_deserialized=False,
-            conditional_deserialized=False
+            conditional_deserialized=False,
         )
 
     def test_deserialization_with_excessively_long_username(self):
@@ -1184,18 +1172,20 @@ class DeserializationTestCases(TestCase):
             user_deserialized=False,
             log1_deserialized=False,
             log2_deserialized=False,
-            conditional_deserialized=False
+            conditional_deserialized=False,
         )
 
     def test_deserialization_with_invalid_content_id(self):
 
-        self.serialize_all_to_store({"log1": {"content_id": "invalid"}})
+        self.serialized_log1["content_id"] = "invalid"
+
+        self.serialize_all_to_store()
 
         _deserialize_from_store(self.profile)
 
         self.assert_deserialization(log1_deserialized=False)
 
-    def test_deserialization_with_log_non_existent_user_id(self):
+    def test_deserialization_with_invalid_log_user_id(self):
 
         self.serialized_log1["user_id"] = uuid.uuid4().hex
 

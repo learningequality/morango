@@ -3,6 +3,7 @@
 Each certificate has a ``private_key`` used for signing (child) certificates (thus giving certain permissions)
 and a ``public_key`` used for verifying that a certificate(s) was properly signed.
 """
+
 import json
 import logging
 import string
@@ -10,29 +11,27 @@ from contextlib import contextmanager
 
 import mptt.models
 from django.core.management import call_command
-from django.db import connection
-from django.db import models
-from django.db import transaction
+from django.db import connection, models, transaction
 from django.db.utils import OperationalError
 from django.utils import timezone
 
-from .fields.crypto import Key
-from .fields.crypto import PrivateKeyField
-from .fields.crypto import PublicKeyField
-from .fields.uuids import UUIDModelMixin
-from morango.errors import CertificateIDInvalid
-from morango.errors import CertificateProfileInvalid
-from morango.errors import CertificateRootScopeInvalid
-from morango.errors import CertificateScopeNotSubset
-from morango.errors import CertificateSignatureInvalid
-from morango.errors import NonceDoesNotExist
-from morango.errors import NonceExpired
+from morango.errors import (
+    CertificateIDInvalid,
+    CertificateProfileInvalid,
+    CertificateRootScopeInvalid,
+    CertificateScopeNotSubset,
+    CertificateSignatureInvalid,
+    NonceDoesNotExist,
+    NonceExpired,
+)
 from morango.sync.backends.utils import load_backend
 from morango.utils import _assert
 
+from .fields.crypto import Key, PrivateKeyField, PublicKeyField
+from .fields.uuids import UUIDModelMixin
+
 
 class Certificate(mptt.models.MPTTModel, UUIDModelMixin):
-
     uuid_input_fields = ("public_key", "profile", "salt")
 
     parent = models.ForeignKey("Certificate", blank=True, null=True, on_delete=models.CASCADE)
@@ -43,9 +42,7 @@ class Certificate(mptt.models.MPTTModel, UUIDModelMixin):
     # scope of this certificate, and version of the scope, along with associated params
     scope_definition = models.ForeignKey("ScopeDefinition", on_delete=models.CASCADE)
     scope_version = models.IntegerField()
-    scope_params = (
-        models.TextField()
-    )  # JSON dict of values to insert into scope definitions
+    scope_params = models.TextField()  # JSON dict of values to insert into scope definitions
 
     # track the certificate's public key so we can verify any certificates it signs
     public_key = PublicKeyField()
@@ -70,9 +67,7 @@ class Certificate(mptt.models.MPTTModel, UUIDModelMixin):
     def private_key(self, value):
         self._private_key = value
         if value and not self.public_key:
-            self.public_key = Key(
-                public_key_string=self._private_key.get_public_key_string()
-            )
+            self.public_key = Key(public_key_string=self._private_key.get_public_key_string())
 
     @classmethod
     def generate_root_certificate(cls, scope_def_id, **extra_scope_params):
@@ -95,9 +90,7 @@ class Certificate(mptt.models.MPTTModel, UUIDModelMixin):
 
         # generate a key and extract the public key component
         cert.private_key = Key()
-        cert.public_key = Key(
-            public_key_string=cert.private_key.get_public_key_string()
-        )
+        cert.public_key = Key(public_key_string=cert.private_key.get_public_key_string())
 
         # calculate the certificate's ID on the basis of the profile and public key
         cert.id = cert.calculate_uuid()
@@ -162,9 +155,7 @@ class Certificate(mptt.models.MPTTModel, UUIDModelMixin):
         # check that the certificate's ID is properly calculated
         if self.id != self.calculate_uuid():
             raise CertificateIDInvalid(
-                "Certificate ID is {} but should be {}".format(
-                    self.id, self.calculate_uuid()
-                )
+                "Certificate ID is {} but should be {}".format(self.id, self.calculate_uuid())
             )
 
         if not self.parent:  # self-signed root certificate
@@ -240,9 +231,7 @@ class Certificate(mptt.models.MPTTModel, UUIDModelMixin):
         return cert
 
     def sign(self, value):
-        _assert(
-            self.private_key, "Can only sign using certificates that have private keys"
-        )
+        _assert(self.private_key, "Can only sign using certificates that have private keys")
         return self.private_key.sign(value)
 
     def verify(self, value, signature):
@@ -272,7 +261,9 @@ class Certificate(mptt.models.MPTTModel, UUIDModelMixin):
                 yield
         except OperationalError as e:
             if "deadlock detected" in e.args[0]:
-                logging.error("Deadlock detected when attempting to lock MPTT partitions, retrying once more")
+                logging.error(
+                    "Deadlock detected when attempting to lock MPTT partitions, retrying once more"
+                )
                 with self._attempt_lock_mptt():
                     yield
             else:
@@ -319,7 +310,6 @@ class Nonce(UUIDModelMixin):
 
 
 class ScopeDefinition(models.Model):
-
     # the identifier used to specify this scope within a certificate
     id = models.CharField(primary_key=True, max_length=20)
 
@@ -369,7 +359,9 @@ class Filter(object):
         :type params: dict|str
         """
         if params is not None:
-            logging.warning("DEPRECATED: Constructing a filter with a template and params is deprecated. Use Filter.from_template() instead")
+            logging.warning(
+                "DEPRECATED: Constructing a filter with a template and params is deprecated. Use Filter.from_template() instead"
+            )
             filter_str = str(Filter.from_template(filter_str, params=params))
 
         self._filter_tuple = tuple(filter_str.split()) or ("",)
@@ -493,7 +485,9 @@ class Scope(object):
         # turn the scope definition filter templates into Filter objects
         rw_filter = Filter.from_template(definition.read_write_filter_template, params)
         self.read_filter = rw_filter + Filter.from_template(definition.read_filter_template, params)
-        self.write_filter = rw_filter + Filter.from_template(definition.write_filter_template, params)
+        self.write_filter = rw_filter + Filter.from_template(
+            definition.write_filter_template, params
+        )
 
     def is_subset_of(self, other):
         if not self.read_filter.is_subset_of(other.read_filter):
@@ -506,7 +500,4 @@ class Scope(object):
         return self.is_subset_of(other)
 
     def __eq__(self, other):
-        return (
-            self.read_filter == other.read_filter
-            and self.write_filter == other.write_filter
-        )
+        return self.read_filter == other.read_filter and self.write_filter == other.write_filter

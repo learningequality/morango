@@ -1,11 +1,8 @@
 import mock
 from django.test import TestCase
-from requests.exceptions import HTTPError
-from requests.exceptions import RequestException
+from requests.exceptions import HTTPError, RequestException
 
-
-from morango.sync.session import _length_of_headers
-from morango.sync.session import SessionWrapper
+from morango.sync.session import SessionWrapper, _length_of_headers
 
 
 class SessionWrapperTestCase(TestCase):
@@ -25,16 +22,21 @@ class SessionWrapperTestCase(TestCase):
         self.assertEqual(wrapper.bytes_received, 1024 + head_length)
 
     def test_request_user_agent(self):
-        from morango import __version__ as morango_version
         from requests import __version__ as requests_version
 
+        from morango import __version__ as morango_version
+
         wrapper = SessionWrapper()
-        expected_user_agent = "morango/{} python-requests/{}".format(morango_version, requests_version)
+        expected_user_agent = "morango/{} python-requests/{}".format(
+            morango_version, requests_version
+        )
         self.assertEqual(wrapper.headers["User-Agent"], expected_user_agent)
 
         with self.settings(CUSTOM_INSTANCE_INFO={"kolibri": "0.16.0"}):
             wrapper = SessionWrapper()
-            expected_user_agent = "morango/{} kolibri/0.16.0 python-requests/{}".format(morango_version, requests_version)
+            expected_user_agent = "morango/{} kolibri/0.16.0 python-requests/{}".format(
+                morango_version, requests_version
+            )
             self.assertEqual(wrapper.headers["User-Agent"], expected_user_agent)
 
     @mock.patch("morango.sync.session.logger")
@@ -55,9 +57,7 @@ class SessionWrapperTestCase(TestCase):
             wrapper.request("GET", "test_url", is_test=True)
 
         mocked_super_request.assert_called_once_with("GET", "test_url", is_test=True)
-        mocked_logger.error.assert_called_once_with(
-            "HTTPError Reason: Connection timeout"
-        )
+        mocked_logger.error.assert_called_once_with("HTTPError Reason: Connection timeout")
 
     @mock.patch("morango.sync.session.logger")
     @mock.patch("morango.sync.session.Session.request")
@@ -70,9 +70,7 @@ class SessionWrapperTestCase(TestCase):
             wrapper.request("GET", "test_url", is_test=True)
 
         mocked_super_request.assert_called_once_with("GET", "test_url", is_test=True)
-        mocked_logger.error.assert_called_once_with(
-            "RequestException Reason: (no response)"
-        )
+        mocked_logger.error.assert_called_once_with("RequestException Reason: (no response)")
 
     @mock.patch("morango.sync.session.Session.prepare_request")
     def test_prepare_request(self, mocked_super_prepare_request):
@@ -87,7 +85,5 @@ class SessionWrapperTestCase(TestCase):
         mocked_super_prepare_request.assert_called_once_with(request)
 
         self.assertEqual(expected, actual)
-        head_length = len("GET /path/to/resource HTTP/1.1") + _length_of_headers(
-            headers
-        )
+        head_length = len("GET /path/to/resource HTTP/1.1") + _length_of_headers(headers)
         self.assertEqual(wrapper.bytes_sent, 256 + head_length)

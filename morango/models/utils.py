@@ -40,9 +40,7 @@ def get_0_4_system_parameters(database_id):
     mac = uuid.getnode()
     if (mac >> 40) % 2 == 0:  # 8th bit (of 48 bits, from left) is 1 if MAC is fake
         hashable_identifier = "{}:{}".format(params["database_id"], mac)
-        params["node_id"] = hashlib.sha1(
-            hashable_identifier.encode("utf-8")
-        ).hexdigest()[:20]
+        params["node_id"] = hashlib.sha1(hashable_identifier.encode("utf-8")).hexdigest()[:20]
     else:
         params["node_id"] = ""
 
@@ -75,9 +73,7 @@ def _calculate_0_4_uuid(parameters):
 def _query_wmic(namespace, key):
     try:
         result = (
-            subprocess.check_output("wmic {} get {}".format(namespace, key))
-            .decode()
-            .split()[-1]
+            subprocess.check_output("wmic {} get {}".format(namespace, key)).decode().split()[-1]
         )
 
         if "-" in result:
@@ -132,7 +128,6 @@ def get_0_5_system_id():
 
     # Windows
     elif sys.platform == "win32":
-
         # try to get the system serial number, if available
         system_id = _query_wmic("csproduct", "UUID")
         # if UUID consists only of "F" digits, it's not usable

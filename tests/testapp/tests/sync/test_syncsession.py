@@ -6,31 +6,30 @@ from django.test.testcases import LiveServerTestCase
 from django.test.utils import override_settings
 from requests.exceptions import HTTPError
 
-from ..helpers import BaseClientTestCase
-from ..helpers import BaseTransferClientTestCase
 from morango.api.serializers import CertificateSerializer
-from morango.constants import transfer_stages
-from morango.constants import transfer_statuses
+from morango.constants import transfer_stages, transfer_statuses
 from morango.constants.capabilities import ALLOW_CERTIFICATE_PUSHING
-from morango.errors import CertificateSignatureInvalid
-from morango.errors import MorangoError
-from morango.errors import MorangoResumeSyncError
-from morango.errors import MorangoServerDoesNotAllowNewCertPush
-from morango.models.certificates import Certificate
-from morango.models.certificates import Filter
-from morango.models.certificates import Key
-from morango.models.certificates import ScopeDefinition
+from morango.errors import (
+    CertificateSignatureInvalid,
+    MorangoError,
+    MorangoResumeSyncError,
+    MorangoServerDoesNotAllowNewCertPush,
+)
+from morango.models.certificates import Certificate, Filter, Key, ScopeDefinition
 from morango.models.core import SyncSession
 from morango.models.fields.crypto import SharedKey
-from morango.sync.context import LocalSessionContext
-from morango.sync.context import NetworkSessionContext
+from morango.sync.context import LocalSessionContext, NetworkSessionContext
 from morango.sync.controller import MorangoProfileController
 from morango.sync.session import SessionWrapper
-from morango.sync.syncsession import NetworkSyncConnection
-from morango.sync.syncsession import PullClient
-from morango.sync.syncsession import PushClient
-from morango.sync.syncsession import SyncSessionClient
-from morango.sync.syncsession import TransferClient
+from morango.sync.syncsession import (
+    NetworkSyncConnection,
+    PullClient,
+    PushClient,
+    SyncSessionClient,
+    TransferClient,
+)
+
+from ..helpers import BaseClientTestCase, BaseTransferClientTestCase
 
 
 def mock_patch_decorator(func):
@@ -95,17 +94,13 @@ class NetworkSyncConnectionTestCase(LiveServerTestCase):
             profile=self.profile,
             scope_definition=self.subset_scope_def,
             scope_version=self.subset_scope_def.version,
-            scope_params=json.dumps(
-                {"mainpartition": self.root_cert.id, "subpartition": "other"}
-            ),
+            scope_params=json.dumps({"mainpartition": self.root_cert.id, "subpartition": "other"}),
             public_key=Key(),
         )
         self.root_cert.sign_certificate(self.unsaved_cert)
 
         self.controller = MorangoProfileController("facilitydata")
-        self.network_connection = self.controller.create_network_connection(
-            self.live_server_url
-        )
+        self.network_connection = self.controller.create_network_connection(self.live_server_url)
         self.key = SharedKey.get_or_create_shared_key()
 
     @override_settings(MORANGO_INSTANCE_INFO={"this_is_a_test": "yes"})
@@ -123,15 +118,11 @@ class NetworkSyncConnectionTestCase(LiveServerTestCase):
     def test_creating_sync_session_cert_fails_to_verify(self, mock_verify, mock_create):
         mock_create.return_value.json.return_value = {}
         with self.assertRaises(CertificateSignatureInvalid):
-            self.network_connection.create_sync_session(
-                self.subset_cert, self.root_cert
-            )
+            self.network_connection.create_sync_session(self.subset_cert, self.root_cert)
 
     def test_get_remote_certs(self):
         certs = self.subset_cert.get_ancestors(include_self=True)
-        remote_certs = self.network_connection.get_remote_certificates(
-            self.root_cert.id
-        )
+        remote_certs = self.network_connection.get_remote_certificates(self.root_cert.id)
         self.assertSetEqual(set(certs), set(remote_certs))
 
     @mock.patch.object(SessionWrapper, "request")
@@ -148,9 +139,7 @@ class NetworkSyncConnectionTestCase(LiveServerTestCase):
             return_value=self.subset_cert.private_key.get_private_key_string(),
         ):
             self.network_connection.certificate_signing_request(self.root_cert, "", "")
-        self.assertTrue(
-            Certificate.objects.filter(id=json.loads(cert_serialized)["id"]).exists()
-        )
+        self.assertTrue(Certificate.objects.filter(id=json.loads(cert_serialized)["id"]).exists())
 
     @override_settings(ALLOW_CERTIFICATE_PUSHING=True)
     def test_push_signed_client_certificate_chain(self):
@@ -228,9 +217,7 @@ class NetworkSyncConnectionTestCase(LiveServerTestCase):
 
         mock_create.side_effect = create
         self.assertEqual(SyncSession.objects.filter(active=True).count(), 0)
-        client = self.network_connection.create_sync_session(
-            self.subset_cert, self.root_cert
-        )
+        client = self.network_connection.create_sync_session(self.subset_cert, self.root_cert)
         self.assertEqual(SyncSession.objects.filter(active=True).count(), 1)
 
         self.network_connection.close_sync_session(client.sync_session)
@@ -323,9 +310,7 @@ class SyncSessionClientTestCase(BaseClientTestCase):
 
         filter = Filter("abc123")
         self.client.initiate_pull(filter)
-        MockPullClient.assert_called_with(
-            self.conn, self.session, self.client.controller
-        )
+        MockPullClient.assert_called_with(self.conn, self.session, self.client.controller)
 
         mock_pull_client.initialize.assert_called_once_with(filter)
         mock_pull_client.run.assert_called_once()
@@ -343,9 +328,7 @@ class SyncSessionClientTestCase(BaseClientTestCase):
 
         sync_filter = Filter("abc123")
         self.client.initiate_push(sync_filter)
-        MockPushClient.assert_called_with(
-            self.conn, self.session, self.client.controller
-        )
+        MockPushClient.assert_called_with(self.conn, self.session, self.client.controller)
 
         mock_pull_client.initialize.assert_called_once_with(sync_filter)
         mock_pull_client.run.assert_called_once()
@@ -365,8 +348,12 @@ class SyncSessionClientTestCase(BaseClientTestCase):
 
 class TransferClientTestCase(BaseTransferClientTestCase):
     def build_client(self, client_class=TransferClient, controller=None, update_context=False):
-        self.controller = controller or mock.Mock(spec="morango.sync.controller.SessionController")()
-        return super(TransferClientTestCase, self).build_client(client_class=client_class, controller=self.controller, update_context=update_context)
+        self.controller = (
+            controller or mock.Mock(spec="morango.sync.controller.SessionController")()
+        )
+        return super(TransferClientTestCase, self).build_client(
+            client_class=client_class, controller=self.controller, update_context=update_context
+        )
 
     def test_init(self):
         self.assertIsInstance(self.client, TransferClient)
@@ -407,9 +394,7 @@ class TransferClientTestCase(BaseTransferClientTestCase):
         sync_filter = self.transfer_session.get_filter()
         self.client.initialize(sync_filter)
         self.assertEqual(sync_filter, self.client.context.filter)
-        mock_proceed.assert_any_call(
-            transfer_stages.INITIALIZING, error_msg=mock.ANY
-        )
+        mock_proceed.assert_any_call(transfer_stages.INITIALIZING, error_msg=mock.ANY)
         self.client.context.transfer_session = None
         self.client.context.children[0].transfer_session = self.transfer_session
         self.client.context.join(self.client.context.children[0])
@@ -439,7 +424,8 @@ class TransferClientTestCase(BaseTransferClientTestCase):
         mock_end.assert_called_once()
 
         self.controller.proceed_to_and_wait_for.assert_any_call(
-            transfer_stages.TRANSFERRING, callback=mock.ANY,
+            transfer_stages.TRANSFERRING,
+            callback=mock.ANY,
         )
         mock_fire = self.controller.proceed_to_and_wait_for.call_args_list[0][1].get("callback")
         mock_fire()

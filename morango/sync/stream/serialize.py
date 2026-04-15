@@ -1,29 +1,22 @@
 import json
 import logging
-from typing import Generator
-from typing import Iterable
-from typing import Iterator
-from typing import List
-from typing import Optional
-from typing import Type
+from typing import Generator, Iterable, Iterator, List, Optional, Type
 
 from django.core.serializers.json import DjangoJSONEncoder
 from django.db.models import Q
 
 from morango.models.certificates import Filter
-from morango.models.core import DatabaseMaxCounter
-from morango.models.core import DeletedModels
-from morango.models.core import HardDeletedModels
-from morango.models.core import InstanceIDModel
-from morango.models.core import RecordMaxCounter
-from morango.models.core import Store
-from morango.models.core import SyncableModel
+from morango.models.core import (
+    DatabaseMaxCounter,
+    DeletedModels,
+    HardDeletedModels,
+    InstanceIDModel,
+    RecordMaxCounter,
+    Store,
+    SyncableModel,
+)
 from morango.registry import syncable_models
-from morango.sync.stream.core import Buffer
-from morango.sync.stream.core import Sink
-from morango.sync.stream.core import Source
-from morango.sync.stream.core import Transform
-from morango.sync.stream.core import Unbuffer
+from morango.sync.stream.core import Buffer, Sink, Source, Transform, Unbuffer
 from morango.utils import self_referential_fk
 
 logger = logging.getLogger(__name__)
@@ -276,9 +269,7 @@ class WriteSink(Sink[List[SerializeTask]]):
         )
 
         if stores_to_create:
-            created_stores = Store.objects.bulk_create(
-                stores_to_create, ignore_conflicts=True
-            )
+            created_stores = Store.objects.bulk_create(stores_to_create, ignore_conflicts=True)
             for created_store in created_stores:
                 # if bulk_create has not marked it as saving been added, then it must have been
                 # a conflict, so we'll add it to the update list
@@ -315,9 +306,7 @@ class WriteSink(Sink[List[SerializeTask]]):
 
         app_model_ids = [task.obj.id for task in tasks]
         app_model = tasks[0].model
-        app_model.syncing_objects.filter(id__in=app_model_ids).update(
-            update_dirty_bit_to=False
-        )
+        app_model.syncing_objects.filter(id__in=app_model_ids).update(update_dirty_bit_to=False)
 
     def finalize(self):
         self._handle_deleted()
@@ -361,9 +350,9 @@ class WriteSink(Sink[List[SerializeTask]]):
         DeletedModels.objects.filter(profile=self.profile).delete()
 
     def _handle_hard_deleted(self):
-        hard_deleted_ids = HardDeletedModels.objects.filter(
-            profile=self.profile
-        ).values_list("id", flat=True)
+        hard_deleted_ids = HardDeletedModels.objects.filter(profile=self.profile).values_list(
+            "id", flat=True
+        )
 
         hard_deleted_store_records = Store.objects.filter(id__in=hard_deleted_ids)
         hard_deleted_store_records.update(

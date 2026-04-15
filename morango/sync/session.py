@@ -1,14 +1,12 @@
 import logging
 
 from requests import exceptions
-from morango import __version__
+from requests.packages.urllib3.util.url import parse_url
 from requests.sessions import Session
 from requests.utils import super_len
-from requests.packages.urllib3.util.url import parse_url
 
-from morango.utils import serialize_capabilities_to_client_request
-from morango.utils import SETTINGS
-
+from morango import __version__
+from morango.utils import SETTINGS, serialize_capabilities_to_client_request
 
 logger = logging.getLogger(__name__)
 
@@ -24,9 +22,7 @@ def _headers_content_length(headers):
 
 
 def _length_of_headers(headers):
-    return super_len(
-        "\n".join(["{}: {}".format(key, value) for key, value in headers.items()])
-    )
+    return super_len("\n".join(["{}: {}".format(key, value) for key, value in headers.items()]))
 
 
 class SessionWrapper(Session):
@@ -43,7 +39,9 @@ class SessionWrapper(Session):
         if SETTINGS.CUSTOM_INSTANCE_INFO is not None:
             instances = list(SETTINGS.CUSTOM_INSTANCE_INFO)
             if instances:
-                user_agent_header += " " + "{}/{}".format(instances[0], SETTINGS.CUSTOM_INSTANCE_INFO.get(instances[0]))
+                user_agent_header += " " + "{}/{}".format(
+                    instances[0], SETTINGS.CUSTOM_INSTANCE_INFO.get(instances[0])
+                )
         self.headers["User-Agent"] = "{} {}".format(user_agent_header, self.headers["User-Agent"])
 
     def request(self, method, url, **kwargs):
@@ -71,9 +69,7 @@ class SessionWrapper(Session):
                 response = req_err.response
 
             response_content = response.content if response else "(no response)"
-            logger.error(
-                "{} Reason: {}".format(req_err.__class__.__name__, response_content)
-            )
+            logger.error("{} Reason: {}".format(req_err.__class__.__name__, response_content))
             raise req_err
 
     def prepare_request(self, request):

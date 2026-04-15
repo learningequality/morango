@@ -1,5 +1,5 @@
-from .settings import * # noqa
+from .settings import *  # noqa
 
 DATABASES = {
-    'default': DATABASES["default2"], # noqa
+    "default": DATABASES["default2"],  # noqa
 }

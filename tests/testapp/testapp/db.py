@@ -6,6 +6,7 @@ class TestingRouter(object):
     A router to control all database operations on models in the
     test application.
     """
+
     def db_for_read(self, *args, **kwargs):
         return os.environ.get("MORANGO_TEST_DATABASE", "default")
 

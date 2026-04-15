@@ -2,12 +2,10 @@
 import django.db.models.deletion
 import django.db.models.manager
 import django.utils.timezone
-from django.db import migrations
-from django.db import models
+from django.db import migrations, models
 
 import morango.models.fields.crypto
 import morango.models.fields.uuids
-
 
 # morango.migrations.0020_postgres_fix_nullable
 # is ignored in this squashed migration, as it is replaced by
@@ -18,7 +16,6 @@ import morango.models.fields.uuids
 
 
 class Migration(migrations.Migration):
-
     replaces = [
         ("morango", "0001_initial"),
         ("morango", "0002_auto_20170511_0400"),
@@ -97,9 +94,7 @@ class Migration(migrations.Migration):
             fields=[
                 (
                     "id",
-                    morango.models.fields.uuids.UUIDField(
-                        primary_key=True, serialize=False
-                    ),
+                    morango.models.fields.uuids.UUIDField(primary_key=True, serialize=False),
                 ),
                 ("profile", models.CharField(max_length=40)),
             ],
@@ -116,9 +111,7 @@ class Migration(migrations.Migration):
                 ("partition", models.TextField()),
                 (
                     "id",
-                    morango.models.fields.uuids.UUIDField(
-                        primary_key=True, serialize=False
-                    ),
+                    morango.models.fields.uuids.UUIDField(primary_key=True, serialize=False),
                 ),
                 ("conflicting_serialized_data", models.TextField(blank=True)),
                 ("_self_ref_fk", models.CharField(blank=True, max_length=32)),
@@ -147,9 +140,7 @@ class Migration(migrations.Migration):
             fields=[
                 (
                     "id",
-                    morango.models.fields.uuids.UUIDField(
-                        primary_key=True, serialize=False
-                    ),
+                    morango.models.fields.uuids.UUIDField(primary_key=True, serialize=False),
                 ),
                 (
                     "start_timestamp",
@@ -160,7 +151,7 @@ class Migration(migrations.Migration):
                 (
                     "connection_kind",
                     models.CharField(
-                        choices=[('network', 'Network'), ('disk', 'Disk')],
+                        choices=[("network", "Network"), ("disk", "Disk")],
                         max_length=10,
                     ),
                 ),
@@ -188,9 +179,7 @@ class Migration(migrations.Migration):
             fields=[
                 (
                     "id",
-                    morango.models.fields.uuids.UUIDField(
-                        primary_key=True, serialize=False
-                    ),
+                    morango.models.fields.uuids.UUIDField(primary_key=True, serialize=False),
                 ),
                 ("filter", models.TextField()),
                 ("push", models.BooleanField()),
@@ -308,9 +297,7 @@ class Migration(migrations.Migration):
             fields=[
                 (
                     "id",
-                    morango.models.fields.uuids.UUIDField(
-                        primary_key=True, serialize=False
-                    ),
+                    morango.models.fields.uuids.UUIDField(primary_key=True, serialize=False),
                 ),
                 ("profile", models.CharField(max_length=20)),
                 ("scope_version", models.IntegerField()),
@@ -495,9 +482,7 @@ class Migration(migrations.Migration):
             fields=[
                 (
                     "id",
-                    morango.models.fields.uuids.UUIDField(
-                        primary_key=True, serialize=False
-                    ),
+                    morango.models.fields.uuids.UUIDField(primary_key=True, serialize=False),
                 ),
                 ("profile", models.CharField(max_length=40)),
             ],
@@ -556,9 +541,7 @@ class Migration(migrations.Migration):
         ),
         migrations.AddIndex(
             model_name="store",
-            index=models.Index(
-                fields=["partition"], name="idx_morango_store_partition"
-            ),
+            index=models.Index(fields=["partition"], name="idx_morango_store_partition"),
         ),
         migrations.RenameField(
             model_name="syncsession",

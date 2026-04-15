@@ -3,32 +3,51 @@ import uuid
 
 import django.db.models.deletion
 from django.conf import settings
-from django.db import migrations
-from django.db import models
+from django.db import migrations, models
 
 import morango.models.fields.uuids
 
 
 class Migration(migrations.Migration):
-
     dependencies = [
-        ('facility_profile', '0004_testmodel'),
+        ("facility_profile", "0004_testmodel"),
     ]
 
     operations = [
         migrations.CreateModel(
-            name='ConditionalLog',
+            name="ConditionalLog",
             fields=[
-                ('id', morango.models.fields.uuids.UUIDField(editable=False, primary_key=True, serialize=False)),
-                ('_morango_dirty_bit', models.BooleanField(default=True, editable=False)),
-                ('_morango_source_id', models.CharField(editable=False, max_length=96)),
-                ('_morango_partition', models.CharField(editable=False, max_length=128)),
-                ('content_id', morango.models.fields.uuids.UUIDField(db_index=True, default=uuid.uuid4)),
-                ('facility', models.ForeignKey(on_delete=django.db.models.deletion.CASCADE, to='facility_profile.facility')),
-                ('user', models.ForeignKey(blank=True, null=True, on_delete=django.db.models.deletion.CASCADE, to=settings.AUTH_USER_MODEL)),
+                (
+                    "id",
+                    morango.models.fields.uuids.UUIDField(
+                        editable=False, primary_key=True, serialize=False
+                    ),
+                ),
+                ("_morango_dirty_bit", models.BooleanField(default=True, editable=False)),
+                ("_morango_source_id", models.CharField(editable=False, max_length=96)),
+                ("_morango_partition", models.CharField(editable=False, max_length=128)),
+                (
+                    "content_id",
+                    morango.models.fields.uuids.UUIDField(db_index=True, default=uuid.uuid4),
+                ),
+                (
+                    "facility",
+                    models.ForeignKey(
+                        on_delete=django.db.models.deletion.CASCADE, to="facility_profile.facility"
+                    ),
+                ),
+                (
+                    "user",
+                    models.ForeignKey(
+                        blank=True,
+                        null=True,
+                        on_delete=django.db.models.deletion.CASCADE,
+                        to=settings.AUTH_USER_MODEL,
+                    ),
+                ),
             ],
             options={
-                'abstract': False,
+                "abstract": False,
             },
         ),
     ]

@@ -5,25 +5,22 @@ from time import sleep
 import pytest
 from django.conf import settings
 from django.db import connection
-from django.test import override_settings
-from django.test import TransactionTestCase
+from django.test import TransactionTestCase, override_settings
 from django.utils import timezone
 
-from ..helpers import create_buffer_and_store_dummy_data
 from morango.models.certificates import Filter
-from morango.models.core import Store
-from morango.models.core import SyncSession
-from morango.models.core import TransferSession
+from morango.models.core import Store, SyncSession, TransferSession
 from morango.sync.backends.utils import load_backend
 from morango.sync.db import begin_transaction
 
+from ..helpers import create_buffer_and_store_dummy_data
 
 DBBackend = load_backend(connection)
 
 
 def _concurrent_store_write(thread_event, store_id):
     while not thread_event.is_set():
-        sleep(.1)
+        sleep(0.1)
     Store.objects.filter(id=store_id).delete()
     connection.close()
 
@@ -92,17 +89,23 @@ class TransactionIsolationTestCase(TransactionTestCase):
         # this test is only for postgres, but we don't want the code to know it's a test
         with override_settings(MORANGO_TEST_POSTGRESQL=False):
             try:
-                self.assertNotEqual(connection.connection.isolation_level, ISOLATION_LEVEL_REPEATABLE_READ)
+                self.assertNotEqual(
+                    connection.connection.isolation_level, ISOLATION_LEVEL_REPEATABLE_READ
+                )
                 with begin_transaction(Filter(store.partition), isolated=True):
-                    self.assertEqual(connection.connection.isolation_level, ISOLATION_LEVEL_REPEATABLE_READ)
+                    self.assertEqual(
+                        connection.connection.isolation_level, ISOLATION_LEVEL_REPEATABLE_READ
+                    )
                     s = Store.objects.get(id=store.id)
                     concurrent_event.set()
-                    sleep(.2)
+                    sleep(0.2)
                     s.last_saved_counter += 1
                     s.save()
                 raise AssertionError("Didn't raise transactional error")
             except Exception as e:
                 self.assertTrue(DBBackend._is_transaction_isolation_error(e))
-                self.assertNotEqual(connection.connection.isolation_level, ISOLATION_LEVEL_REPEATABLE_READ)
+                self.assertNotEqual(
+                    connection.connection.isolation_level, ISOLATION_LEVEL_REPEATABLE_READ
+                )
             finally:
                 concurrent_thread.join(5)

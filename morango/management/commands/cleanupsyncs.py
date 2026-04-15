@@ -6,9 +6,7 @@ from django.core.management.base import BaseCommand
 from django.db import transaction
 from django.utils import timezone
 
-from morango.models import SyncSession
-from morango.models import TransferSession
-
+from morango.models import SyncSession, TransferSession
 
 logger = logging.getLogger(__name__)
 
@@ -21,7 +19,7 @@ class Command(BaseCommand):
             "--ids",
             type=lambda ids: ids.split(","),
             default=None,
-            help="Comma separated list of SyncSession IDs to filter against"
+            help="Comma separated list of SyncSession IDs to filter against",
         )
         parser.add_argument(
             "--expiration",

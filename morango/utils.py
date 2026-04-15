@@ -4,10 +4,12 @@ from importlib import import_module
 from django.conf import settings
 
 from morango.constants import settings as default_settings
-from morango.constants.capabilities import ALLOW_CERTIFICATE_PUSHING
-from morango.constants.capabilities import ASYNC_OPERATIONS
-from morango.constants.capabilities import FSIC_V2_FORMAT
-from morango.constants.capabilities import GZIP_BUFFER_POST
+from morango.constants.capabilities import (
+    ALLOW_CERTIFICATE_PUSHING,
+    ASYNC_OPERATIONS,
+    FSIC_V2_FORMAT,
+    GZIP_BUFFER_POST,
+)
 
 
 def do_import(import_string):
@@ -64,9 +66,7 @@ def get_capabilities():
 
 CAPABILITIES = get_capabilities()
 CAPABILITIES_CLIENT_HEADER = "X-Morango-Capabilities"
-CAPABILITIES_SERVER_HEADER = "HTTP_{}".format(
-    CAPABILITIES_CLIENT_HEADER.upper().replace("-", "_")
-)
+CAPABILITIES_SERVER_HEADER = "HTTP_{}".format(CAPABILITIES_CLIENT_HEADER.upper().replace("-", "_"))
 
 
 def serialize_capabilities_to_client_request(request):

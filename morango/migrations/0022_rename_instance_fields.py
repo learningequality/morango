@@ -4,20 +4,19 @@ from django.db import migrations
 
 
 class Migration(migrations.Migration):
-
     dependencies = [
-        ('morango', '0021_store_partition_index_create'),
+        ("morango", "0021_store_partition_index_create"),
     ]
 
     operations = [
         migrations.RenameField(
-            model_name='syncsession',
-            old_name='client_instance',
-            new_name='client_instance_json',
+            model_name="syncsession",
+            old_name="client_instance",
+            new_name="client_instance_json",
         ),
         migrations.RenameField(
-            model_name='syncsession',
-            old_name='server_instance',
-            new_name='server_instance_json',
+            model_name="syncsession",
+            old_name="server_instance",
+            new_name="server_instance_json",
         ),
     ]

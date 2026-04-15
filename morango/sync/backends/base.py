@@ -1,9 +1,6 @@
 from contextlib import contextmanager
 
-from morango.models.core import Buffer
-from morango.models.core import RecordMaxCounter
-from morango.models.core import RecordMaxCounterBuffer
-from morango.models.core import Store
+from morango.models.core import Buffer, RecordMaxCounter, RecordMaxCounterBuffer, Store
 
 
 class BaseSQLWrapper(object):
@@ -37,16 +34,14 @@ class BaseSQLWrapper(object):
         raise NotImplementedError("Subclass must implement this method.")
 
     def _bulk_insert(self, cursor, table_name, fields, db_values):
-        placeholder_str = ", ".join(
-            self._create_placeholder_list(fields, db_values)
-        ).replace("'", "")
+        placeholder_str = ", ".join(self._create_placeholder_list(fields, db_values)).replace(
+            "'", ""
+        )
         fields_str = str(tuple(str(f.attname) for f in fields)).replace("'", "")
         insert = """
             INSERT INTO {table_name} {fields}
             VALUES {placeholder_str}
-        """.format(
-            table_name=table_name, fields=fields_str, placeholder_str=placeholder_str
-        )
+        """.format(table_name=table_name, fields=fields_str, placeholder_str=placeholder_str)
         cursor.execute(insert, db_values)
 
     def _bulk_update(self, cursor, table_name, fields, db_values):
@@ -102,9 +97,7 @@ class BaseSQLWrapper(object):
     def _dequeuing_merge_conflict_buffer(self, cursor, current_id, transfersession_id):
         raise NotImplementedError("Subclass must implement this method.")
 
-    def _dequeuing_update_rmcs_last_saved_by(
-        self, cursor, current_id, transfersession_id
-    ):
+    def _dequeuing_update_rmcs_last_saved_by(self, cursor, current_id, transfersession_id):
         raise NotImplementedError("Subclass must implement this method.")
 
     def _dequeuing_delete_mc_buffer(self, cursor, transfersession_id):
@@ -187,9 +180,7 @@ class BaseSQLWrapper(object):
         :param field_sqls: A list of SQL strings representing the fields
         :param fields_params: A list of SQL parameters if necessary for the fields SQL
         """
-        sql = self.create_temporary_table_template.format(
-            name=name, fields=", ".join(field_sqls)
-        )
+        sql = self.create_temporary_table_template.format(name=name, fields=", ".join(field_sqls))
         cursor.execute(sql, fields_params)
 
     def _lock_all_partitions(self, shared=False):

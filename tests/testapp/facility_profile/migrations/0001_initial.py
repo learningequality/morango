@@ -4,120 +4,161 @@ import uuid
 
 import django.db.models.deletion
 import django.utils.timezone
-import facility_profile.models
 import mptt.fields
 from django.conf import settings
-from django.db import migrations
-from django.db import models
+from django.db import migrations, models
 
+import facility_profile.models
 import morango.models.fields.uuids
 
 
 class Migration(migrations.Migration):
-
     initial = True
 
-    dependencies = [
-    ]
+    dependencies = []
 
     operations = [
         migrations.CreateModel(
-            name='MyUser',
+            name="MyUser",
             fields=[
-                ('password', models.CharField(max_length=128, verbose_name='password')),
-                ('last_login', models.DateTimeField(blank=True, null=True, verbose_name='last login')),
-                ('id', morango.models.fields.uuids.UUIDField(editable=False, primary_key=True, serialize=False)),
-                ('_morango_dirty_bit', models.BooleanField(default=True, editable=False)),
-                ('_morango_source_id', models.CharField(editable=False, max_length=96)),
-                ('_morango_partition', models.CharField(editable=False, max_length=128)),
-                ('is_staff', models.BooleanField(default=False)),
-                ('is_superuser', models.BooleanField(default=False)),
-                ('username', models.CharField(max_length=20, unique=True)),
+                ("password", models.CharField(max_length=128, verbose_name="password")),
+                (
+                    "last_login",
+                    models.DateTimeField(blank=True, null=True, verbose_name="last login"),
+                ),
+                (
+                    "id",
+                    morango.models.fields.uuids.UUIDField(
+                        editable=False, primary_key=True, serialize=False
+                    ),
+                ),
+                ("_morango_dirty_bit", models.BooleanField(default=True, editable=False)),
+                ("_morango_source_id", models.CharField(editable=False, max_length=96)),
+                ("_morango_partition", models.CharField(editable=False, max_length=128)),
+                ("is_staff", models.BooleanField(default=False)),
+                ("is_superuser", models.BooleanField(default=False)),
+                ("username", models.CharField(max_length=20, unique=True)),
             ],
             options={
-                'abstract': False,
+                "abstract": False,
             },
             managers=[
-                ('objects', facility_profile.models.SyncableUserModelManager()),
+                ("objects", facility_profile.models.SyncableUserModelManager()),
             ],
         ),
         migrations.CreateModel(
-            name='Facility',
+            name="Facility",
             fields=[
-                ('id', morango.models.fields.uuids.UUIDField(editable=False, primary_key=True, serialize=False)),
-                ('_morango_dirty_bit', models.BooleanField(default=True, editable=False)),
-                ('_morango_source_id', models.CharField(editable=False, max_length=96)),
-                ('_morango_partition', models.CharField(editable=False, max_length=128)),
-                ('name', models.CharField(max_length=100)),
-                ('now_date', models.DateTimeField(default=django.utils.timezone.now)),
-                ('lft', models.PositiveIntegerField(db_index=True, editable=False)),
-                ('rght', models.PositiveIntegerField(db_index=True, editable=False)),
-                ('tree_id', models.PositiveIntegerField(db_index=True, editable=False)),
-                ('level', models.PositiveIntegerField(db_index=True, editable=False)),
                 (
-                    'parent', mptt.fields.TreeForeignKey(
+                    "id",
+                    morango.models.fields.uuids.UUIDField(
+                        editable=False, primary_key=True, serialize=False
+                    ),
+                ),
+                ("_morango_dirty_bit", models.BooleanField(default=True, editable=False)),
+                ("_morango_source_id", models.CharField(editable=False, max_length=96)),
+                ("_morango_partition", models.CharField(editable=False, max_length=128)),
+                ("name", models.CharField(max_length=100)),
+                ("now_date", models.DateTimeField(default=django.utils.timezone.now)),
+                ("lft", models.PositiveIntegerField(db_index=True, editable=False)),
+                ("rght", models.PositiveIntegerField(db_index=True, editable=False)),
+                ("tree_id", models.PositiveIntegerField(db_index=True, editable=False)),
+                ("level", models.PositiveIntegerField(db_index=True, editable=False)),
+                (
+                    "parent",
+                    mptt.fields.TreeForeignKey(
                         blank=True,
                         null=True,
                         on_delete=django.db.models.deletion.CASCADE,
-                        related_name='children',
-                        to='facility_profile.Facility'
-                    )
+                        related_name="children",
+                        to="facility_profile.Facility",
+                    ),
                 ),
             ],
             options={
-                'abstract': False,
+                "abstract": False,
             },
         ),
         migrations.CreateModel(
-            name='InteractionLog',
+            name="InteractionLog",
             fields=[
-                ('id', morango.models.fields.uuids.UUIDField(editable=False, primary_key=True, serialize=False)),
-                ('_morango_dirty_bit', models.BooleanField(default=True, editable=False)),
-                ('_morango_source_id', models.CharField(editable=False, max_length=96)),
-                ('_morango_partition', models.CharField(editable=False, max_length=128)),
-                ('content_id', morango.models.fields.uuids.UUIDField(db_index=True, default=uuid.uuid4)),
-                ('user', models.ForeignKey(on_delete=django.db.models.deletion.CASCADE, to=settings.AUTH_USER_MODEL)),
+                (
+                    "id",
+                    morango.models.fields.uuids.UUIDField(
+                        editable=False, primary_key=True, serialize=False
+                    ),
+                ),
+                ("_morango_dirty_bit", models.BooleanField(default=True, editable=False)),
+                ("_morango_source_id", models.CharField(editable=False, max_length=96)),
+                ("_morango_partition", models.CharField(editable=False, max_length=128)),
+                (
+                    "content_id",
+                    morango.models.fields.uuids.UUIDField(db_index=True, default=uuid.uuid4),
+                ),
+                (
+                    "user",
+                    models.ForeignKey(
+                        on_delete=django.db.models.deletion.CASCADE, to=settings.AUTH_USER_MODEL
+                    ),
+                ),
             ],
             options={
-                'abstract': False,
+                "abstract": False,
             },
         ),
         migrations.CreateModel(
-            name='ProxyParent',
+            name="ProxyParent",
             fields=[
-                ('id', models.AutoField(auto_created=True, primary_key=True, serialize=False, verbose_name='ID')),
-                ('kind', models.CharField(max_length=20)),
-                ('lft', models.PositiveIntegerField(db_index=True, editable=False)),
-                ('rght', models.PositiveIntegerField(db_index=True, editable=False)),
-                ('tree_id', models.PositiveIntegerField(db_index=True, editable=False)),
-                ('level', models.PositiveIntegerField(db_index=True, editable=False)),
+                (
+                    "id",
+                    models.AutoField(
+                        auto_created=True, primary_key=True, serialize=False, verbose_name="ID"
+                    ),
+                ),
+                ("kind", models.CharField(max_length=20)),
+                ("lft", models.PositiveIntegerField(db_index=True, editable=False)),
+                ("rght", models.PositiveIntegerField(db_index=True, editable=False)),
+                ("tree_id", models.PositiveIntegerField(db_index=True, editable=False)),
+                ("level", models.PositiveIntegerField(db_index=True, editable=False)),
             ],
             options={
-                'abstract': False,
+                "abstract": False,
             },
         ),
         migrations.CreateModel(
-            name='SummaryLog',
+            name="SummaryLog",
             fields=[
-                ('id', morango.models.fields.uuids.UUIDField(editable=False, primary_key=True, serialize=False)),
-                ('_morango_dirty_bit', models.BooleanField(default=True, editable=False)),
-                ('_morango_source_id', models.CharField(editable=False, max_length=96)),
-                ('_morango_partition', models.CharField(editable=False, max_length=128)),
-                ('content_id', morango.models.fields.uuids.UUIDField(db_index=True, default=uuid.uuid4)),
-                ('user', models.ForeignKey(on_delete=django.db.models.deletion.CASCADE, to=settings.AUTH_USER_MODEL)),
+                (
+                    "id",
+                    morango.models.fields.uuids.UUIDField(
+                        editable=False, primary_key=True, serialize=False
+                    ),
+                ),
+                ("_morango_dirty_bit", models.BooleanField(default=True, editable=False)),
+                ("_morango_source_id", models.CharField(editable=False, max_length=96)),
+                ("_morango_partition", models.CharField(editable=False, max_length=128)),
+                (
+                    "content_id",
+                    morango.models.fields.uuids.UUIDField(db_index=True, default=uuid.uuid4),
+                ),
+                (
+                    "user",
+                    models.ForeignKey(
+                        on_delete=django.db.models.deletion.CASCADE, to=settings.AUTH_USER_MODEL
+                    ),
+                ),
             ],
             options={
-                'abstract': False,
+                "abstract": False,
             },
         ),
         migrations.CreateModel(
-            name='ProxyModel',
-            fields=[
-            ],
+            name="ProxyModel",
+            fields=[],
             options={
-                'proxy': True,
-                'indexes': [],
+                "proxy": True,
+                "indexes": [],
             },
-            bases=('facility_profile.proxyparent',),
+            bases=("facility_profile.proxyparent",),
         ),
     ]

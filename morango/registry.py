@@ -2,6 +2,7 @@
 `SyncableModelRegistry` holds all syncable models for a project, on a per profile basis.
 This class is registered at app load time for morango in `apps.py`.
 """
+
 import inspect
 import sys
 from collections import OrderedDict
@@ -11,17 +12,16 @@ from django.db.models import QuerySet
 from django.db.models.fields.related import ForeignKey
 
 from morango.constants import transfer_stages
-from morango.errors import InvalidMorangoModelConfiguration
-from morango.errors import ModelRegistryNotReady
-from morango.errors import UnsupportedFieldType
-from morango.utils import do_import
-from morango.utils import SETTINGS
+from morango.errors import (
+    InvalidMorangoModelConfiguration,
+    ModelRegistryNotReady,
+    UnsupportedFieldType,
+)
+from morango.utils import SETTINGS, do_import
 
 
 def _get_foreign_key_classes(m):
-    return set(
-        [field.related_model for field in m._meta.fields if isinstance(field, ForeignKey)]
-    )
+    return set([field.related_model for field in m._meta.fields if isinstance(field, ForeignKey)])
 
 
 def _multiple_self_ref_fk_check(class_model):
@@ -40,18 +40,15 @@ def _multiple_self_ref_fk_check(class_model):
 def _check_manager(name, objects):
     from morango.models.manager import SyncableModelManager
     from morango.models.query import SyncableModelQuerySet
+
     # syncable model checks
     if not isinstance(objects, SyncableModelManager):
         raise InvalidMorangoModelConfiguration(
-            "Manager for {} must inherit from SyncableModelManager.".format(
-                name
-            )
+            "Manager for {} must inherit from SyncableModelManager.".format(name)
         )
     if not isinstance(objects.none(), SyncableModelQuerySet):
         raise InvalidMorangoModelConfiguration(
-            "Queryset for {} model must inherit from SyncableModelQuerySet.".format(
-                name
-            )
+            "Queryset for {} model must inherit from SyncableModelQuerySet.".format(name)
         )
 
 
@@ -66,9 +63,7 @@ class SyncableModelRegistry(object):
     def check_models_ready(self, profile):
         """Raise an exception if all models haven't been imported yet."""
         if not self.models_ready.get(profile):
-            raise ModelRegistryNotReady(
-                "Models for profile {} aren't loaded yet.".format(profile)
-            )
+            raise ModelRegistryNotReady("Models for profile {} aren't loaded yet.".format(profile))
 
     def get_model(self, profile, model_name):
         """
@@ -102,9 +97,7 @@ class SyncableModelRegistry(object):
 
         # add any more specified dependencies
         if hasattr(model, "morango_model_dependencies"):
-            foreign_key_classes = foreign_key_classes | set(
-                model.morango_model_dependencies
-            )
+            foreign_key_classes = foreign_key_classes | set(model.morango_model_dependencies)
 
         # Find all the existing models that this new model refers to.
         class_indices = [
@@ -125,6 +118,7 @@ class SyncableModelRegistry(object):
             return
 
         import django.apps
+
         from morango.models.core import SyncableModel
 
         model_list = []
@@ -146,9 +140,7 @@ class SyncableModelRegistry(object):
                     )
                 if not hasattr(model, "morango_model_name"):
                     raise InvalidMorangoModelConfiguration(
-                        "{} model must define a morango_model_name attribute".format(
-                            name
-                        )
+                        "{} model must define a morango_model_name attribute".format(name)
                     )
                 if not hasattr(model, "morango_profile"):
                     raise InvalidMorangoModelConfiguration(

@@ -11,24 +11,16 @@ import pytest
 import requests
 from django.conf import settings
 from django.test.testcases import TransactionTestCase
-from facility_profile.models import InteractionLog
-from facility_profile.models import MyUser
-from facility_profile.models import SummaryLog
-from requests.exceptions import RequestException
-from requests.exceptions import Timeout
+from facility_profile.models import InteractionLog, MyUser, SummaryLog
+from requests.exceptions import RequestException, Timeout
 from testapp.settings import BASE_DIR
 
-from ..compat import EnvironmentVarGuard
 from morango.errors import MorangoError
-from morango.models.certificates import Certificate
-from morango.models.certificates import Filter
-from morango.models.certificates import Key
-from morango.models.certificates import ScopeDefinition
-from morango.models.core import Buffer
-from morango.models.core import InstanceIDModel
-from morango.models.core import TransferSession
+from morango.models.certificates import Certificate, Filter, Key, ScopeDefinition
+from morango.models.core import Buffer, InstanceIDModel, TransferSession
 from morango.sync.controller import MorangoProfileController
 
+from ..compat import EnvironmentVarGuard
 
 SECOND_TEST_DATABASE = "default2"
 SECOND_SYSTEM_ID = "default2"
@@ -68,7 +60,16 @@ class LiveServer:
     def start(self):
         manage_py_path = os.path.join(BASE_DIR, "manage.py")
         self._instance = subprocess.Popen(
-            [sys.executable, manage_py_path, "runserver", "--nothreading", "--noreload", "--settings", "testapp.server2_settings", f"{self.host}:{self.port}"],
+            [
+                sys.executable,
+                manage_py_path,
+                "runserver",
+                "--nothreading",
+                "--noreload",
+                "--settings",
+                "testapp.server2_settings",
+                f"{self.host}:{self.port}",
+            ],
             env=self.env,
         )
         self._wait_for_server_start()
@@ -92,9 +93,7 @@ class LiveServer:
             pass
 
 
-@pytest.mark.skipif(
-    getattr(settings, "MORANGO_TEST_POSTGRESQL", False), reason="Not supported"
-)
+@pytest.mark.skipif(getattr(settings, "MORANGO_TEST_POSTGRESQL", False), reason="Not supported")
 class PushPullClientTestCase(TransactionTestCase):
     profile = "facilitydata"
     databases = ["default", SECOND_TEST_DATABASE]
@@ -108,7 +107,7 @@ class PushPullClientTestCase(TransactionTestCase):
     def tearDownClass(cls):
         # There may not be a 'server' attribute if setUpClass() for some
         # reasons has raised an exception.
-        if hasattr(cls, 'server'):
+        if hasattr(cls, "server"):
             # Terminate the live server's thread
             cls.server.kill()
             super(TransactionTestCase, cls).tearDownClass()
@@ -116,9 +115,7 @@ class PushPullClientTestCase(TransactionTestCase):
     def setUp(self):
         super(PushPullClientTestCase, self).setUp()
         self.profile_controller = MorangoProfileController(self.profile)
-        self.conn = self.profile_controller.create_network_connection(
-            self.server.baseurl
-        )
+        self.conn = self.profile_controller.create_network_connection(self.server.baseurl)
         self.conn.chunk_size = 3
 
         self.remote_user, self.root_cert_id = self._setUpServer()
@@ -210,9 +207,7 @@ class PushPullClientTestCase(TransactionTestCase):
                 transfer_session.sync_session.last_activity_timestamp,
             )
         self.last_transfer_activity = transfer_session.last_activity_timestamp
-        self.last_session_activity = (
-            transfer_session.sync_session.last_activity_timestamp
-        )
+        self.last_session_activity = transfer_session.sync_session.last_activity_timestamp
 
     def test_push(self):
         for _ in range(5):
@@ -220,12 +215,8 @@ class PushPullClientTestCase(TransactionTestCase):
             InteractionLog.objects.create(user=self.local_user)
 
         with second_environment():
-            self.assertEqual(
-                0, SummaryLog.objects.filter(user=self.remote_user).count()
-            )
-            self.assertEqual(
-                0, InteractionLog.objects.filter(user=self.remote_user).count()
-            )
+            self.assertEqual(0, SummaryLog.objects.filter(user=self.remote_user).count())
+            self.assertEqual(0, InteractionLog.objects.filter(user=self.remote_user).count())
 
         client = self.client.get_push_client()
         client.signals.queuing.completed.connect(self.assertLastActivityUpdate)
@@ -238,24 +229,16 @@ class PushPullClientTestCase(TransactionTestCase):
         transfer_session = client.context.transfer_session
         self.assertNotEqual(0, transfer_session.records_total)
         self.assertEqual(0, transfer_session.records_transferred)
-        self.assertLessEqual(
-            1, Buffer.objects.filter(transfer_session=transfer_session).count()
-        )
+        self.assertLessEqual(1, Buffer.objects.filter(transfer_session=transfer_session).count())
         client.run()
         self.assertNotEqual(0, transfer_session.records_transferred)
         client.finalize()
-        self.assertEqual(
-            0, Buffer.objects.filter(transfer_session=transfer_session).count()
-        )
+        self.assertEqual(0, Buffer.objects.filter(transfer_session=transfer_session).count())
         self.assertEqual(0, TransferSession.objects.filter(active=True).count())
 
         with second_environment():
-            self.assertEqual(
-                5, SummaryLog.objects.filter(user=self.remote_user).count()
-            )
-            self.assertEqual(
-                5, InteractionLog.objects.filter(user=self.remote_user).count()
-            )
+            self.assertEqual(5, SummaryLog.objects.filter(user=self.remote_user).count())
+            self.assertEqual(5, InteractionLog.objects.filter(user=self.remote_user).count())
 
     def test_pull(self):
         with second_environment():
@@ -279,13 +262,9 @@ class PushPullClientTestCase(TransactionTestCase):
         self.assertEqual(0, transfer_session.records_transferred)
         client.run()
         self.assertNotEqual(0, transfer_session.records_transferred)
-        self.assertLessEqual(
-            1, Buffer.objects.filter(transfer_session=transfer_session).count()
-        )
+        self.assertLessEqual(1, Buffer.objects.filter(transfer_session=transfer_session).count())
         client.finalize()
-        self.assertEqual(
-            0, Buffer.objects.filter(transfer_session=transfer_session).count()
-        )
+        self.assertEqual(0, Buffer.objects.filter(transfer_session=transfer_session).count())
         self.assertEqual(0, TransferSession.objects.filter(active=True).count())
 
         self.assertEqual(5, SummaryLog.objects.filter(user=self.local_user).count())

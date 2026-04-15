@@ -4,14 +4,9 @@ Foundational classes for streaming ETL-like pipelines.
 Provides a modular source > transform > sink pattern where models are streamed one-by-one through
 a pipeline of connected modules, reducing memory overhead.
 """
+
 import abc
-from typing import Any
-from typing import Generic
-from typing import Iterable
-from typing import Iterator
-from typing import List
-from typing import Optional
-from typing import TypeVar
+from typing import Any, Generic, Iterable, Iterator, List, Optional, TypeVar
 
 T = TypeVar("T")
 
@@ -93,9 +88,7 @@ class Pipeline(PipelineModule):
     each module feeds into the next.
     """
 
-    def __init__(
-        self, source: Source, modules: Optional[List[OperatorModule]] = None
-    ) -> None:
+    def __init__(self, source: Source, modules: Optional[List[OperatorModule]] = None) -> None:
         self._source = source
         self._modules = list(modules) if modules else []
 

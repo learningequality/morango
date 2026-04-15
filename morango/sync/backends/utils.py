@@ -31,15 +31,13 @@ def calculate_max_sqlite_variables():
     MAX_VARIABLE_NUMBER = 999
 
     # check that target compilation option is specified, before we start looping through
-    is_defined = list(
-        conn.execute("SELECT sqlite_compileoption_used('MAX_VARIABLE_NUMBER');")
-    )[0][0]
+    is_defined = list(conn.execute("SELECT sqlite_compileoption_used('MAX_VARIABLE_NUMBER');"))[0][
+        0
+    ]
 
     if is_defined:
         for i in range(500):
-            option_str = list(conn.execute("SELECT sqlite_compileoption_get(?);", [i]))[
-                0
-            ][0]
+            option_str = list(conn.execute("SELECT sqlite_compileoption_get(?);", [i]))[0][0]
             if option_str is None:
                 # we've hit the end of the compilation options, so we can stop
                 break
@@ -112,9 +110,7 @@ class TemporaryTable(object):
         schema_editor = self.connection.schema_editor()
         for field in self.fields:
             # generates the SQL expression for the table column
-            field_sql, field_params = schema_editor.column_sql(
-                self, field, include_default=True
-            )
+            field_sql, field_params = schema_editor.column_sql(self, field, include_default=True)
             field_sql_name = self.connection.ops.quote_name(field.column)
             fields.append("{name} {sql}".format(name=field_sql_name, sql=field_sql))
             params.extend(field_params)

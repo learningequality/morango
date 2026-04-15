@@ -6,7 +6,6 @@ import morango.models.fields.crypto
 
 
 class Migration(migrations.Migration):
-
     dependencies = [("morango", "0004_auto_20170520_2112")]
 
     operations = [

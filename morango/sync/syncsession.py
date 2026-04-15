@@ -1,48 +1,39 @@
 """
 The main module to be used for initiating the synchronization of data between morango instances.
 """
+
 import json
 import logging
 import os
 import socket
 import uuid
 from io import BytesIO
-from urllib.parse import urljoin
-from urllib.parse import urlparse
+from urllib.parse import urljoin, urlparse
 
+from django.db import connection, transaction
 from django.utils import timezone
 from requests.adapters import HTTPAdapter
 from requests.exceptions import HTTPError
 from requests.packages.urllib3.util.retry import Retry
-from django.db import transaction, connection
+
+from morango.api.serializers import CertificateSerializer, InstanceIDSerializer
+from morango.constants import api_urls, transfer_stages, transfer_statuses
+from morango.constants.capabilities import ALLOW_CERTIFICATE_PUSHING, GZIP_BUFFER_POST
+from morango.errors import (
+    CertificateSignatureInvalid,
+    MorangoError,
+    MorangoResumeSyncError,
+    MorangoServerDoesNotAllowNewCertPush,
+)
+from morango.models.certificates import Certificate, Filter, Key
+from morango.models.core import InstanceIDModel, SyncSession
+from morango.sync.backends.utils import load_backend
+from morango.sync.context import CompositeSessionContext, LocalSessionContext, NetworkSessionContext
+from morango.sync.controller import SessionController
+from morango.sync.utils import SyncSignal, SyncSignalGroup, lock_partitions
+from morango.utils import CAPABILITIES, pid_exists
 
 from .session import SessionWrapper
-from morango.api.serializers import CertificateSerializer
-from morango.api.serializers import InstanceIDSerializer
-from morango.constants import api_urls
-from morango.constants import transfer_stages
-from morango.constants import transfer_statuses
-from morango.constants.capabilities import ALLOW_CERTIFICATE_PUSHING
-from morango.constants.capabilities import GZIP_BUFFER_POST
-from morango.errors import CertificateSignatureInvalid
-from morango.errors import MorangoError
-from morango.errors import MorangoResumeSyncError
-from morango.errors import MorangoServerDoesNotAllowNewCertPush
-from morango.models.certificates import Certificate
-from morango.models.certificates import Filter
-from morango.models.certificates import Key
-from morango.models.core import InstanceIDModel
-from morango.models.core import SyncSession
-from morango.sync.backends.utils import load_backend
-from morango.sync.context import CompositeSessionContext
-from morango.sync.context import LocalSessionContext
-from morango.sync.context import NetworkSessionContext
-from morango.sync.controller import SessionController
-from morango.sync.utils import SyncSignal
-from morango.sync.utils import SyncSignalGroup
-from morango.utils import CAPABILITIES
-from morango.utils import pid_exists
-from morango.sync.utils import lock_partitions
 
 if GZIP_BUFFER_POST in CAPABILITIES:
     from gzip import GzipFile
@@ -51,6 +42,7 @@ if GZIP_BUFFER_POST in CAPABILITIES:
 logger = logging.getLogger(__name__)
 
 DBBackend = load_backend(connection)
+
 
 def _join_with_logical_operator(lst, operator):
     op = ") {operator} (".format(operator=operator)
@@ -79,9 +71,7 @@ def _get_client_ip_for_server(server_host, server_port):
 # borrowed from https://github.com/django/django/blob/1.11.20/django/utils/text.py#L295
 def compress_string(s, compresslevel=9):
     zbuf = BytesIO()
-    with GzipFile(
-        mode="wb", compresslevel=compresslevel, fileobj=zbuf, mtime=0
-    ) as zfile:
+    with GzipFile(mode="wb", compresslevel=compresslevel, fileobj=zbuf, mtime=0) as zfile:
         zfile.write(s)
     return zbuf.getvalue()
 
@@ -138,9 +128,7 @@ class NetworkSyncConnection(Connection):
         self.session.mount("http://", adapter)
         self.session.mount("https://", adapter)
         # get morango information about server
-        self.server_info = self.session.get(
-            urljoin(self.base_url, api_urls.INFO)
-        ).json()
+        self.server_info = self.session.get(urljoin(self.base_url, api_urls.INFO)).json()
         self.capabilities = self.server_info.get("capabilities", [])
         self.chunk_size = chunk_size
 
@@ -202,15 +190,11 @@ class NetworkSyncConnection(Connection):
             "client_certificate_id": client_cert.id,
             "profile": client_cert.profile,
             "certificate_chain": json.dumps(
-                CertificateSerializer(
-                    client_cert.get_ancestors(include_self=True), many=True
-                ).data
+                CertificateSerializer(client_cert.get_ancestors(include_self=True), many=True).data
             ),
             "connection_path": self.base_url,
             "instance": json.dumps(
-                InstanceIDSerializer(
-                    InstanceIDModel.get_or_create_current_instance()[0]
-                ).data
+                InstanceIDSerializer(InstanceIDModel.get_or_create_current_instance()[0]).data
             ),
             "nonce": nonce,
             "client_ip": _get_client_ip_for_server(hostname, port),
@@ -251,11 +235,7 @@ class NetworkSyncConnection(Connection):
             "client_ip": data["client_ip"],
             "server_ip": data["server_ip"],
             "client_instance_id": client_instance.id,
-            "client_instance_json": json.dumps(
-                InstanceIDSerializer(
-                    client_instance
-                ).data
-            ),
+            "client_instance_json": json.dumps(InstanceIDSerializer(client_instance).data),
             "server_instance_id": server_instance_id,
             "server_instance_json": session_resp.json().get("server_instance") or "{}",
             "process_id": os.getpid(),
@@ -282,9 +262,7 @@ class NetworkSyncConnection(Connection):
         try:
             sync_session = SyncSession.objects.get(pk=sync_session_id, active=True)
         except SyncSession.DoesNotExist:
-            raise MorangoResumeSyncError(
-                "Session for ID '{}' not found".format(sync_session_id)
-            )
+            raise MorangoResumeSyncError("Session for ID '{}' not found".format(sync_session_id))
 
         # check that process of existing session isn't still running
         if (
@@ -329,16 +307,12 @@ class NetworkSyncConnection(Connection):
 
         # inflate remote certs into a list of unsaved models
         for cert in remote_certs_resp.json():
-            remote_certs.append(
-                Certificate.deserialize(cert["serialized"], cert["signature"])
-            )
+            remote_certs.append(Certificate.deserialize(cert["serialized"], cert["signature"]))
 
         # filter certs by scope definition id, if provided
         if scope_def_id:
             remote_certs = [
-                cert
-                for cert in remote_certs
-                if cert.scope_definition_id == scope_def_id
+                cert for cert in remote_certs if cert.scope_definition_id == scope_def_id
             ]
 
         return remote_certs
@@ -362,9 +336,7 @@ class NetworkSyncConnection(Connection):
                 # check again, now that we have a lock
                 if not Certificate.objects.filter(id=parent_cert.id).exists():
                     # upon receiving cert chain from server, we attempt to save the chain into our records
-                    Certificate.save_certificate_chain(
-                        cert_chain, expected_last_id=parent_cert.id
-                    )
+                    Certificate.save_certificate_chain(cert_chain, expected_last_id=parent_cert.id)
 
         csr_key = Key()
         # build up data for csr
@@ -380,9 +352,7 @@ class NetworkSyncConnection(Connection):
         csr_data = csr_resp.json()
 
         # verify cert returned from server, and proceed to save into our records
-        csr_cert = Certificate.deserialize(
-            csr_data["serialized"], csr_data["signature"]
-        )
+        csr_cert = Certificate.deserialize(csr_data["serialized"], csr_data["signature"])
         csr_cert.private_key = csr_key
         csr_cert.check_certificate()
         csr_cert.save()
@@ -392,9 +362,7 @@ class NetworkSyncConnection(Connection):
         self, local_parent_cert, scope_definition_id, scope_params
     ):
         if ALLOW_CERTIFICATE_PUSHING not in self.capabilities:
-            raise MorangoServerDoesNotAllowNewCertPush(
-                "Server does not allow certificate pushing"
-            )
+            raise MorangoServerDoesNotAllowNewCertPush("Server does not allow certificate pushing")
 
         # grab shared public key of server
         publickey_response = self._get_public_key()
@@ -409,12 +377,8 @@ class NetworkSyncConnection(Connection):
             scope_definition_id=scope_definition_id,
             scope_version=local_parent_cert.scope_version,
             scope_params=json.dumps(scope_params),
-            public_key=Key(
-                public_key_string=publickey_response.json()[0]["public_key"]
-            ),
-            salt=nonce_response.json()[
-                "id"
-            ],  # for pushing signed certs, we use nonce as salt
+            public_key=Key(public_key_string=publickey_response.json()[0]["public_key"]),
+            salt=nonce_response.json()["id"],  # for pushing signed certs, we use nonce as salt
         )
 
         # add ID and signature to the certificate
@@ -422,9 +386,7 @@ class NetworkSyncConnection(Connection):
         certificate.parent.sign_certificate(certificate)
 
         # serialize the chain for sending to server
-        certificate_chain = list(local_parent_cert.get_ancestors(include_self=True)) + [
-            certificate
-        ]
+        certificate_chain = list(local_parent_cert.get_ancestors(include_self=True)) + [certificate]
         data = json.dumps(CertificateSerializer(certificate_chain, many=True).data)
 
         # client sends signed certificate chain to server
@@ -446,9 +408,7 @@ class NetworkSyncConnection(Connection):
     def _certificate_signing(self, data, userargs, password):
         # convert user arguments into query str for passing to auth layer
         if isinstance(userargs, dict):
-            userargs = "&".join(
-                ["{}={}".format(key, val) for (key, val) in userargs.items()]
-            )
+            userargs = "&".join(["{}={}".format(key, val) for (key, val) in userargs.items()])
         return self.session.post(
             self.urlresolve(api_urls.CERTIFICATE), json=data, auth=(userargs, password)
         )
@@ -460,9 +420,7 @@ class NetworkSyncConnection(Connection):
         return self.session.post(self.urlresolve(api_urls.SYNCSESSION), json=data)
 
     def _get_sync_session(self, sync_session):
-        return self.session.get(
-            self.urlresolve(api_urls.SYNCSESSION, lookup=sync_session.id)
-        )
+        return self.session.get(self.urlresolve(api_urls.SYNCSESSION, lookup=sync_session.id))
 
     def _create_transfer_session(self, data):
         return self.session.post(self.urlresolve(api_urls.TRANSFERSESSION), json=data)
@@ -484,9 +442,7 @@ class NetworkSyncConnection(Connection):
         )
 
     def _close_sync_session(self, sync_session):
-        return self.session.delete(
-            self.urlresolve(api_urls.SYNCSESSION, lookup=sync_session.id)
-        )
+        return self.session.delete(self.urlresolve(api_urls.SYNCSESSION, lookup=sync_session.id))
 
     def _push_record_chunk(self, data):
         # gzip the data if both client and server have gzipping capabilities
@@ -651,9 +607,7 @@ class TransferClient(object):
             error_msg="Failed to initialize transfer session",
         )
 
-        self.signals.session.started.fire(
-            transfer_session=self.current_transfer_session
-        )
+        self.signals.session.started.fire(transfer_session=self.current_transfer_session)
 
         # backwards compatibility for the queuing signal as it included both serialization
         # and queuing originally
@@ -673,15 +627,11 @@ class TransferClient(object):
             )
 
     def finalize(self):
-        with self.signals.dequeuing.send(
-            transfer_session=self.current_transfer_session
-        ):
+        with self.signals.dequeuing.send(transfer_session=self.current_transfer_session):
             self.proceed_to_and_wait_for(transfer_stages.DESERIALIZING)
 
         self.proceed_to_and_wait_for(transfer_stages.CLEANUP)
-        self.signals.session.completed.fire(
-            transfer_session=self.current_transfer_session
-        )
+        self.signals.session.completed.fire(transfer_session=self.current_transfer_session)
 
 
 class PushClient(TransferClient):

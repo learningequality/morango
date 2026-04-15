@@ -97,26 +97,36 @@ morango = ["*.*"]
 version_file = "morango/_version.py"
 git_describe_command = "git describe --dirty --tags --long --match 'v*' --first-parent"
 
-[tool.flake8]
-max-line-length = 160
-max-complexity = 10
+[tool.ruff]
+line-length = 100
 exclude = [
     "morango/*/migrations/*",
     "docs",
     "morango/sync/operations.py",
     "morango/sync/backends/postgres.py",
     "morango/sync/backends/sqlite.py",
-    "tests/testapp/tests/test_crypto.py"
+    "tests/testapp/tests/test_crypto.py",
 ]
-ignore = "E203,W503"
 
-[tool.isort]
-atomic = true
-multi_line_output = 5
-line_length = 160
-indent = "    "
-combine_as_imports = true
-skip = ["wsgi.py", "docs", "env", "cli.py", "test", ".eggs", "build"]
+[tool.ruff.lint]
+select = [
+    "E",    # pycodestyle errors
+    "W",    # pycodestyle warnings
+    "F",    # pyflakes
+    "I",    # isort
+    "T10",  # debugger statements (replaces debug-statements hook)
+    "T20",  # print statements (replaces flake8-print plugin)
+    "C90",  # mccabe complexity
+]
+ignore = [
+    "E501",  # line too long - formatter handles wrapping where possible
+]
+
+[tool.ruff.lint.isort]
+combine-as-imports = true
+
+[tool.ruff.lint.mccabe]
+max-complexity = 10
 
 [tool.coverage.run]
 branch = true
@@ -145,3 +155,6 @@ norecursedirs = ["dist", "tmp*", ".svn", ".*"]
 markers = [
     "windows: mark a test as a windows test"
 ]
+
+[tool.uv]
+exclude-newer = "7 days"

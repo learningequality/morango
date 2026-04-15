@@ -4,8 +4,7 @@ import pytest
 from django.conf import settings
 from django.db import connection
 from django.db.utils import IntegrityError
-from django.test import TestCase
-from django.test import TransactionTestCase
+from django.test import TestCase, TransactionTestCase
 from django.utils import timezone
 
 from .helpers import TestMigrationsMixin
@@ -27,8 +26,12 @@ class MorangoNullableMigrationTest(TestMigrationsMixin, TestCase):
         SyncSession = apps.get_model("morango", "SyncSession")
 
         with connection.cursor() as cursor:
-            cursor.execute("ALTER TABLE morango_transfersession ALTER COLUMN transfer_stage SET NOT NULL")
-            cursor.execute("ALTER TABLE morango_transfersession ALTER COLUMN transfer_stage_status SET NOT NULL")
+            cursor.execute(
+                "ALTER TABLE morango_transfersession ALTER COLUMN transfer_stage SET NOT NULL"
+            )
+            cursor.execute(
+                "ALTER TABLE morango_transfersession ALTER COLUMN transfer_stage_status SET NOT NULL"
+            )
 
         self.sync_session = SyncSession.objects.create(
             id=uuid.uuid4().hex,
@@ -68,7 +71,9 @@ class SkipIfExistsMigrationTest(TestMigrationsMixin, TransactionTestCase):
     def setUpBeforeMigration(self, apps):
         # simulate as if we already created an index on the partition field of the Store model
         with connection.cursor() as cursor:
-            cursor.execute('CREATE INDEX "idx_morango_store_partition" ON "morango_store" ("partition" text_pattern_ops);')
+            cursor.execute(
+                'CREATE INDEX "idx_morango_store_partition" ON "morango_store" ("partition" text_pattern_ops);'
+            )
 
     def test_runs(self):
         """

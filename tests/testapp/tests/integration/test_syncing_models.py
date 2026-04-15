@@ -1,8 +1,7 @@
 import json
 
 from django.test import TestCase
-from facility_profile.models import MyUser
-from facility_profile.models import TestModel
+from facility_profile.models import MyUser, TestModel
 
 from morango.models.core import Store
 from morango.models.manager import SyncableModelManager
@@ -11,9 +10,8 @@ from morango.sync.controller import MorangoProfileController
 
 
 class SyncingModelsTestCase(TestCase):
-
     def setUp(self):
-        MyUser.objects.create(username='beans')
+        MyUser.objects.create(username="beans")
 
     def test_syncable_manager_inheritance(self):
         self.assertTrue(isinstance(MyUser.objects, SyncableModelManager))
@@ -81,7 +79,7 @@ class SyncingModelsTestCase(TestCase):
 
         # Verify that syncing_objects manager includes all objects for syncing
         self.assertEqual(TestModel.syncing_objects.count(), 2)
-        syncing_names = set(TestModel.syncing_objects.values_list('name', flat=True))
+        syncing_names = set(TestModel.syncing_objects.values_list("name", flat=True))
         self.assertEqual(syncing_names, {"visible", "hidden"})
 
     def test_hidden_models_serialization_into_store(self):
@@ -105,12 +103,12 @@ class SyncingModelsTestCase(TestCase):
         serialized_names = set()
         for store_record in store_records:
             serialized_data = json.loads(store_record.serialized)
-            serialized_names.add(serialized_data['name'])
+            serialized_names.add(serialized_data["name"])
 
         self.assertEqual(serialized_names, {"visible", "hidden"})
 
         # Verify the store records have the correct IDs
-        store_ids = set(store_records.values_list('id', flat=True))
+        store_ids = set(store_records.values_list("id", flat=True))
         expected_ids = {str(visible_obj.id), str(hidden_obj.id)}
         self.assertEqual(store_ids, expected_ids)
 
