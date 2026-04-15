@@ -89,14 +89,20 @@ class AppModelSourceTestCase(SimpleTestCase):
         qs.filter.return_value = qs
         qs.iterator.return_value = [obj, obj]
 
-        source = AppModelSource(profile="test")
+        source = AppModelSource(profile="test", sync_filter=Filter("a"))
         tasks = list(source.stream())
 
         self.assertEqual(len(tasks), 1)
         self.assertEqual(tasks[0].model, model)
         self.assertEqual(tasks[0].obj, obj)
         mock_get_model_querysets.assert_called_once_with("test")
-        qs.filter.assert_called_once_with(_morango_dirty_bit=True)
+        self.assertEqual(
+            qs.filter.mock_calls,
+            [
+                mock.call(_morango_partition__startswith="a"),
+                mock.call(_morango_dirty_bit=True),
+            ],
+        )
 
     @mock.patch("morango.sync.stream.serialize.syncable_models.get_model_querysets")
     def test_stream__partition(self, mock_get_model_querysets):
