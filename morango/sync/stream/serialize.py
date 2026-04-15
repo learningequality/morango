@@ -6,7 +6,6 @@ from typing import Optional
 from typing import Type
 
 from django.core.serializers.json import DjangoJSONEncoder
-from django.db.models import Q
 
 from morango.models.certificates import Filter
 from morango.models.core import DatabaseMaxCounter
@@ -19,14 +18,15 @@ from morango.models.core import SyncableModel
 from morango.registry import syncable_models
 from morango.sync.stream.core import Buffer
 from morango.sync.stream.core import Sink
-from morango.sync.stream.core import Source
 from morango.sync.stream.core import Transform
 from morango.sync.stream.core import Unbuffer
+from morango.sync.stream.source import MorangoSource
+from morango.sync.stream.source import SourceTask
 
 logger = logging.getLogger(__name__)
 
 
-class SerializeTask(object):
+class SerializeTask(SourceTask):
     """Carrier class for providing context through the pipeline"""
 
     __slots__ = (
@@ -34,7 +34,6 @@ class SerializeTask(object):
         "obj",
         "store",
         "counter",
-        "_self_ref_fk_value",
         "_self_ref_fk_value",
         "_self_ref_order",
     )
@@ -46,6 +45,10 @@ class SerializeTask(object):
         self.counter: Optional[RecordMaxCounter] = None
         self._self_ref_fk_value: Optional[str] = None
         self._self_ref_order: Optional[int] = None
+
+    @property
+    def id(self) -> str:
+        return self.obj.id
 
     @property
     def is_store_update(self):
@@ -80,59 +83,22 @@ class SerializeTask(object):
         self._self_ref_order = value
 
 
-class AppModelSource(Source[SerializeTask]):
+class AppModelSource(MorangoSource[SerializeTask]):
     """
     Yields ``SerializeTask`` objects for every syncable-model record that matches the
     optional *sync_filter*.
     """
 
-    def __init__(
-        self,
-        profile: str,
-        sync_filter: Optional[Filter] = None,
-        dirty_only: bool = True,
-        partition_order: str = "asc",
-    ):
-        """
-        :param profile: The Morango model profile
-        :param sync_filter: The Filter object for this sync
-        :param dirty_only: Whether to filter on dirty records only
-        :param partition_order: Controls how the filter specificity is applied, "asc" or "desc"
-        """
-        self.profile = profile
-        self.sync_filter = sync_filter
-        self.dirty_only = dirty_only
-        self.partition_order = partition_order
-        self._seen = set()
-
-    def prefix_conditions(self) -> Generator[Optional[Q], None, None]:
-        if self.sync_filter is None:
-            # yield None once, so we do one query without a partition filter (everything)
-            yield None
-        else:
-            partitions_prefixes = [str(prefix) for prefix in self.sync_filter]
-            partition_iterator = sorted(
-                partitions_prefixes,
-                reverse=self.partition_order == "desc",
-            )
-
-            for prefix in partition_iterator:
-                yield Q(_morango_partition__startswith=prefix)
-
-    def stream(self) -> Generator[SerializeTask, None, None]:
-        for partition_condition in self.prefix_conditions():
-            for qs in syncable_models.get_model_querysets(self.profile):
-                if partition_condition is not None:
-                    qs = qs.filter(partition_condition)
-                if self.dirty_only:
-                    qs = qs.filter(_morango_dirty_bit=True)
-                for obj in qs.iterator():
-                    # partition filtering could result in overlaps, and since we're walking
-                    # through the partitions one by one, we should avoid duplicates. Morango
-                    # syncable models have unique IDs across the entire profile
-                    if obj.id not in self._seen:
-                        self._seen.add(obj.id)
-                        yield SerializeTask(qs.model, obj)
+    def stream_for_filter(
+        self, partition_condition: Optional[str]
+    ) -> Generator[SerializeTask, None, None]:
+        for qs in syncable_models.get_model_querysets(self.profile):
+            if partition_condition is not None:
+                qs = qs.filter(_morango_partition__startswith=partition_condition)
+            if self.dirty_only:
+                qs = qs.filter(_morango_dirty_bit=True)
+            for obj in qs.iterator():
+                yield SerializeTask(qs.model, obj)
 
 
 class StoreLookup(Transform[List[SerializeTask]]):
