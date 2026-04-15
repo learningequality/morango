@@ -2,7 +2,6 @@ import json
 import uuid
 
 import mock
-from django.db.models import Q
 from django.test import SimpleTestCase
 from django.test import TestCase
 
@@ -60,7 +59,7 @@ class AppModelSourceTestCase(SimpleTestCase):
         source = AppModelSource(profile="test", sync_filter=sync_filter)
         conditions = list(source.prefix_conditions())
         self.assertEqual(len(conditions), 2)
-        self.assertEqual(str(conditions[0]), "(AND: ('_morango_partition__startswith', 'a'))")
+        self.assertEqual(str(conditions[0]), "a")
 
     @mock.patch("morango.sync.stream.serialize.syncable_models.get_model_querysets")
     def test_stream__no_partition(self, mock_get_model_querysets):
@@ -72,6 +71,7 @@ class AppModelSourceTestCase(SimpleTestCase):
         qs.iterator.return_value = [obj]
 
         source = AppModelSource(profile="test")
+        source.begin()
         tasks = list(source.stream())
 
         self.assertEqual(len(tasks), 1)
@@ -90,6 +90,7 @@ class AppModelSourceTestCase(SimpleTestCase):
         qs.iterator.return_value = [obj, obj]
 
         source = AppModelSource(profile="test", sync_filter=Filter("a"))
+        source.begin()
         tasks = list(source.stream())
 
         self.assertEqual(len(tasks), 1)
@@ -114,13 +115,14 @@ class AppModelSourceTestCase(SimpleTestCase):
         qs.iterator.return_value = [obj, obj]
 
         source = AppModelSource(profile="test", sync_filter=Filter("a"), dirty_only=False)
+        source.begin()
         tasks = list(source.stream())
 
         self.assertEqual(len(tasks), 1)
         self.assertEqual(tasks[0].model, model)
         self.assertEqual(tasks[0].obj, obj)
         mock_get_model_querysets.assert_called_once_with("test")
-        qs.filter.assert_called_once_with(Q(_morango_partition__startswith="a"))
+        qs.filter.assert_called_once_with(_morango_partition__startswith="a")
 
 
 class StoreLookupTestCase(SimpleTestCase):
