@@ -8,7 +8,7 @@ import sys
 from collections import OrderedDict
 from typing import Generator
 
-from django.db.models import QuerySet
+from django.db.models import F, QuerySet
 from django.db.models.fields.related import ForeignKey
 
 from morango.constants import transfer_stages
@@ -85,7 +85,26 @@ class SyncableModelRegistry(object):
         (particularly, an order) that is aware of FK dependencies.
         """
         for model in self.get_models(profile):
-            yield model.syncing_objects.all()
+            queryset = model.syncing_objects.all()
+            ordering = getattr(model, "morango_ordering", ())
+            if ordering:
+                queryset = queryset.order_by(*self._get_nulls_last_ordering(ordering))
+            yield queryset
+
+    @staticmethod
+    def _get_nulls_last_ordering(ordering):
+        normalized = []
+        for order_expr in ordering:
+            if isinstance(order_expr, str):
+                descending = order_expr.startswith("-")
+                field_name = order_expr[1:] if descending else order_expr
+                if descending:
+                    normalized.append(F(field_name).desc(nulls_last=True))
+                else:
+                    normalized.append(F(field_name).asc(nulls_last=True))
+            else:
+                normalized.append(order_expr)
+        return normalized
 
     def _insert_model_in_dependency_order(self, model, profile):
         # When we add models to be synced, we need to make sure

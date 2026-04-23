@@ -790,6 +790,7 @@ class SyncableModel(UUIDModelMixin):
 
     _morango_internal_fields_not_to_serialize = ("_morango_dirty_bit",)
     morango_model_dependencies = ()
+    morango_ordering = ()
     morango_fields_not_to_serialize = ()
     morango_profile = None
 

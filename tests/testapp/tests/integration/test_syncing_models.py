@@ -1,11 +1,12 @@
 import json
 
 from django.test import TestCase
-from facility_profile.models import MyUser, TestModel
+from facility_profile.models import Facility, MyUser, TestModel
 
 from morango.models.core import Store
 from morango.models.manager import SyncableModelManager
 from morango.models.query import SyncableModelQuerySet
+from morango.registry import syncable_models
 from morango.sync.controller import MorangoProfileController
 
 
@@ -140,3 +141,40 @@ class SyncingModelsTestCase(TestCase):
 
         # The store record should still exist but marked as deleted
         self.assertTrue(Store.objects.filter(id=hidden_obj.id, deleted=True).exists())
+
+    def test_get_model_querysets_applies_morango_ordering(self):
+        old_ordering = Facility.morango_ordering
+        Facility.morango_ordering = ("-name",)
+        try:
+            Facility.objects.create(name="a-facility")
+            Facility.objects.create(name="z-facility")
+            queryset = next(
+                qs
+                for qs in syncable_models.get_model_querysets(Facility.morango_profile)
+                if qs.model is Facility
+            )
+            self.assertEqual(
+                list(queryset.values_list("name", flat=True)),
+                ["z-facility", "a-facility"],
+            )
+        finally:
+            Facility.morango_ordering = old_ordering
+
+    def test_get_model_querysets_uses_nulls_last_for_string_ordering(self):
+        old_ordering = Facility.morango_ordering
+        Facility.morango_ordering = ("parent_id", "name")
+        try:
+            root_b = Facility.objects.create(name="root-b", parent=None)
+            root_a = Facility.objects.create(name="root-a", parent=None)
+            child = Facility.objects.create(name="child", parent=root_a)
+            queryset = next(
+                qs
+                for qs in syncable_models.get_model_querysets(Facility.morango_profile)
+                if qs.model is Facility
+            )
+            self.assertEqual(
+                list(queryset.values_list("id", flat=True)),
+                [child.id, root_a.id, root_b.id],
+            )
+        finally:
+            Facility.morango_ordering = old_ordering
