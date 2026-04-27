@@ -1,8 +1,9 @@
 import json
+import uuid
 
 import mock
 from django.db.models import Q
-from django.test import SimpleTestCase
+from django.test import SimpleTestCase, TestCase
 
 from morango.models.certificates import Filter
 from morango.models.core import InstanceIDModel, RecordMaxCounter, Store, SyncableModel
@@ -143,6 +144,18 @@ class StoreLookupTestCase(SimpleTestCase):
 
 
 class StoreUpdateTestCase(SimpleTestCase):
+    def _build_sync_obj(self, **overrides):
+        obj = mock.Mock()
+        obj.id = uuid.uuid4().hex
+        obj.serialize.return_value = {}
+        obj.morango_model_name = "mymodel"
+        obj.morango_profile = "profile"
+        obj._morango_partition = "partition"
+        obj._morango_source_id = "src"
+        for key, value in overrides.items():
+            setattr(obj, key, value)
+        return obj
+
     @mock.patch("morango.sync.stream.serialize.StoreUpdate._handle_store_create")
     def test_transform__creates(self, mock_handle_store_create):
         current_id = mock.Mock(id="inst_1", counter=10)
@@ -176,7 +189,8 @@ class StoreUpdateTestCase(SimpleTestCase):
         mock_handle_store_update.assert_called_once_with(task)
         self.assertEqual(task.counter.counter, 10)
 
-    def test_handle_store_update(self):
+    @mock.patch("morango.sync.stream.serialize.self_referential_fk", return_value=None)
+    def test_handle_store_update(self, _mock_srf):
         current_id = mock.Mock(id="inst_1", counter=10)
         update = StoreUpdate(current_id)
 
@@ -192,6 +206,126 @@ class StoreUpdateTestCase(SimpleTestCase):
         ser_data = json.loads(task.store.serialized)
         self.assertEqual(ser_data["old"], 1)
         self.assertEqual(ser_data["new"], 2)
+
+    @mock.patch("morango.sync.stream.serialize.self_referential_fk", return_value=None)
+    def test_handle_store_create__non_self_ref(self, _mock_srf):
+        current_id = mock.Mock(id="inst_1", counter=1)
+        update = StoreUpdate(current_id)
+
+        obj = self._build_sync_obj()
+
+        task = SerializeTask(mock.Mock(), obj)
+        update._handle_store_create(task)
+
+        self.assertIsNone(task.store._self_ref_order)
+
+    @mock.patch("morango.sync.stream.serialize.self_referential_fk", return_value="parent_id")
+    def test_handle_store_create__self_ref_no_parent(self, _mock_srf):
+        current_id = mock.Mock(id="inst_1", counter=1)
+        update = StoreUpdate(current_id)
+
+        obj = self._build_sync_obj(parent_id=None)  # no parent
+
+        task = SerializeTask(mock.Mock(), obj)
+        update._handle_store_create(task)
+
+        self.assertEqual(task.store._self_ref_fk, "")
+        self.assertEqual(task.store._self_ref_order, 0)
+
+    @mock.patch("morango.sync.stream.serialize.self_referential_fk", return_value="parent_id")
+    def test_handle_store_update__self_ref_fk_unchanged(self, _mock_srf):
+        current_id = mock.Mock(id="inst_1", counter=2)
+        update = StoreUpdate(current_id)
+
+        parent_id = uuid.uuid4().hex
+        store = Store(
+            serialized=json.dumps({}),
+            dirty_bit=False,
+            _self_ref_fk=parent_id,
+            _self_ref_order=5,
+        )
+        obj = self._build_sync_obj(parent_id=parent_id)  # same FK — no change
+
+        task = SerializeTask(mock.Mock(), obj)
+        task.set_store(store)
+        update._handle_store_update(task)
+
+        self.assertEqual(task.store._self_ref_fk, parent_id)
+        self.assertEqual(task.store._self_ref_order, 5)
+
+
+def _make_store(**kwargs):
+    defaults = dict(
+        id=uuid.uuid4().hex,
+        profile="facilitydata",
+        serialized="{}",
+        last_saved_instance=uuid.uuid4().hex,
+        last_saved_counter=1,
+        partition="partition",
+        source_id=uuid.uuid4().hex,
+        model_name="facility",
+    )
+    defaults.update(kwargs)
+    return Store.objects.create(**defaults)
+
+
+class StoreUpdateSelfRefOrderDbTestCase(TestCase):
+    def setUp(self):
+        self.current_id = mock.Mock(id="inst_1", counter=1)
+        self.update = StoreUpdate(self.current_id)
+
+    def _task(self, self_ref_fk_field, fk_value):
+        obj = mock.Mock()
+        obj.id = uuid.uuid4().hex
+        obj.serialize.return_value = {}
+        obj.morango_model_name = "facility"
+        obj.morango_profile = "facilitydata"
+        obj._morango_partition = "partition"
+        obj._morango_source_id = "src"
+        setattr(obj, self_ref_fk_field, fk_value)
+        return SerializeTask(mock.Mock(), obj)
+
+    @mock.patch("morango.sync.stream.serialize.self_referential_fk", return_value="parent_id")
+    def test_handle_store_create__self_ref_with_parent(self, _mock_srf):
+        parent_store = _make_store(_self_ref_order=3)
+
+        task = self._task("parent_id", parent_store.id)
+        self.update._handle_store_create(task)
+
+        self.assertEqual(task.store._self_ref_fk, parent_store.id)
+        self.assertEqual(task.store._self_ref_order, 3)
+
+    @mock.patch("morango.sync.stream.serialize.self_referential_fk", return_value="parent_id")
+    def test_handle_store_create__self_ref_parent_not_in_store(self, _mock_srf):
+        missing_parent_id = uuid.uuid4().hex
+
+        task = self._task("parent_id", missing_parent_id)
+        self.update._handle_store_create(task)
+
+        self.assertEqual(task.store._self_ref_fk, missing_parent_id)
+        self.assertIsNone(task.store._self_ref_order)
+
+    @mock.patch("morango.sync.stream.serialize.self_referential_fk", return_value="parent_id")
+    def test_handle_store_update__self_ref_fk_changed(self, _mock_srf):
+        old_parent_store = _make_store(_self_ref_order=0)
+        new_parent_store = _make_store(_self_ref_order=7)
+
+        store = Store(
+            serialized=json.dumps({}),
+            dirty_bit=False,
+            _self_ref_fk=old_parent_store.id,
+            _self_ref_order=0,
+        )
+        obj = mock.Mock()
+        obj.serialize.return_value = {}
+        obj.parent_id = new_parent_store.id  # FK changed
+
+        task = SerializeTask(mock.Mock(), obj)
+        task.set_store(store)
+        self.update._handle_store_update(task)
+
+        self.assertEqual(task.store._self_ref_fk, new_parent_store.id)
+        self.assertEqual(task.store._self_ref_order, 7)
 
 
 class ModelPartitionBufferTestCase(SimpleTestCase):

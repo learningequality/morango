@@ -186,6 +186,13 @@ class StoreUpdate(Transform[SerializeTask]):
         # clear last_transfer_session_id
         task.store.last_transfer_session_id = None
 
+        self_ref_fk = task.self_referential_fk()
+        if self_ref_fk:
+            new_fk_value = getattr(task.obj, self_ref_fk) or ""
+            if new_fk_value != task.store._self_ref_fk:
+                task.store._self_ref_fk = new_fk_value
+                task.store._self_ref_order = self._compute_self_ref_order(new_fk_value)
+
     def _handle_store_create(self, task: SerializeTask):
         kwargs = {
             "id": task.obj.id,
@@ -200,10 +207,27 @@ class StoreUpdate(Transform[SerializeTask]):
 
         self_ref_fk = task.self_referential_fk()
         if self_ref_fk:
-            self_ref_fk_value = getattr(task.obj, self_ref_fk)
-            kwargs["_self_ref_fk"] = self_ref_fk_value or ""
+            self_ref_fk_value = getattr(task.obj, self_ref_fk) or ""
+            kwargs["_self_ref_fk"] = self_ref_fk_value
+            kwargs["_self_ref_order"] = self._compute_self_ref_order(self_ref_fk_value)
 
         task.set_store(Store(**kwargs))
+
+    @staticmethod
+    def _compute_self_ref_order(self_ref_fk_value):
+        """
+        Compute ``_self_ref_order`` for a self-referential store record.
+
+        Returns ``0`` when the record has no parent (root), otherwise queries
+        the parent ``Store`` row and returns its ``_self_ref_order`` value.
+        """
+        if not self_ref_fk_value:
+            return 0
+        return (
+            Store.objects.filter(id=self_ref_fk_value)
+            .values_list("_self_ref_order", flat=True)
+            .first()
+        )
 
 
 class ModelPartitionBuffer(Buffer[List[SerializeTask]]):
