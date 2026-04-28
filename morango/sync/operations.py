@@ -11,8 +11,12 @@ from django.core.serializers.json import DjangoJSONEncoder
 from django.db import connection
 from django.db import transaction
 from django.db.models import CharField
+from django.db.models import F
 from django.db.models import Q
 from django.db.models import signals
+from django.db.models import Value
+from django.db.models.fields import BooleanField
+from django.db.models.functions import NullIf
 from django.db.utils import IntegrityError
 from django.db.utils import OperationalError
 from django.utils import timezone
@@ -23,9 +27,10 @@ from morango.constants import transfer_stages
 from morango.constants import transfer_statuses
 from morango.constants.capabilities import ASYNC_OPERATIONS
 from morango.constants.capabilities import FSIC_V2_FORMAT
-from morango.errors import MorangoDatabaseError
+from morango.errors import MorangoDirtyParent
 from morango.errors import MorangoInvalidFSICPartition
 from morango.errors import MorangoLimitExceeded
+from morango.errors import MorangoMissingParent
 from morango.errors import MorangoResumeSyncError
 from morango.errors import MorangoSkipOperation
 from morango.models.certificates import Filter
@@ -52,6 +57,7 @@ from morango.sync.utils import lock_partitions
 from morango.sync.utils import mute_signals
 from morango.sync.utils import validate_and_create_buffer_data
 from morango.utils import _assert
+from morango.utils import exception_path
 from morango.utils import SETTINGS
 
 
@@ -310,10 +316,10 @@ def _validate_missing_store_foreign_keys(from_model_name, to_model_name, temp_ta
         pk_field=Store._meta.pk.column,
     )
 
-    store_deserialization_error = next(
-        f for f in Store._meta.fields if f.name == "deserialization_error"
-    )
-    store_update_fields = [Store._meta.pk, store_deserialization_error]
+    store_deserialization_error_fields = [
+        f for f in Store._meta.fields if f.name in ("deserialization_error", "deserialization_exception")
+    ]
+    store_update_fields = [Store._meta.pk, *store_deserialization_error_fields]
 
     from_pk_field = temp_table.get_field("from_pk")
     to_pk_field = temp_table.get_field("to_pk")
@@ -321,22 +327,21 @@ def _validate_missing_store_foreign_keys(from_model_name, to_model_name, temp_ta
     with connection.cursor() as c:
         c.execute(select_sql)
         for from_field, from_pk, to_pk in c.fetchall():
-            err = dict(
-                {
-                    from_field: "{to_model_name} instance with id '{to_pk}' does not exist".format(
-                        to_model_name=to_model_name,
-                        to_pk=to_pk_field.to_python(to_pk),
-                    )
-                }
+            err = IntegrityError(
+                "{from_model_name}.{from_field} references non-existent {to_model_name} instance with id '{to_pk}'".format(
+                    from_model_name=from_model_name,
+                    from_field=from_field,
+                    to_model_name=to_model_name,
+                    to_pk=to_pk_field.to_python(to_pk),
+                )
             )
             logger.warning(
-                "Error deserializing instance of {from_model} with id {from_pk}: {err}".format(
-                    from_model=from_model_name,
+                "Error deserializing instance with id {from_pk}: {err}".format(
                     from_pk=from_pk,
                     err=str(err),
                 )
             )
-            update_values.extend([from_pk, str(err)])
+            update_values.extend([from_pk, str(err), exception_path(err)])
             invalid_pks.append(from_pk_field.to_python(from_pk))
         if update_values:
             # update Store with errors
@@ -448,9 +453,9 @@ def _save_deserialized_record(store_model, app_model, model_name, excluded_list=
             with mute_signals(signals.pre_save, signals.post_save):
                 app_model.save(update_dirty_bit_to=False)
         store_model.dirty_bit = False
-        store_model.deserialization_error = ""
+        store_model.unset_deserialization_error()
         store_model.save(
-            update_fields=["dirty_bit", "deserialization_error"]
+            update_fields=["dirty_bit", "deserialization_error", "deserialization_exception"]
         )
         return True
     except (
@@ -461,8 +466,8 @@ def _save_deserialized_record(store_model, app_model, model_name, excluded_list=
     ) as e:
         if excluded_list is not None:
             excluded_list.append(store_model.id)
-        store_model.deserialization_error = str(e)
-        store_model.save(update_fields=["deserialization_error"])
+        store_model.set_deserialization_error(e)
+        store_model.save(update_fields=["deserialization_error", "deserialization_exception"])
         logger.warning(
             "Failed to deserialize Store record %s for %s: %s",
             store_model.id,
@@ -512,7 +517,20 @@ def _deserialize_from_store(profile, skip_erroring=False, filter=None):
 
             # if requested, skip any records that previously errored, to be faster
             if skip_erroring:
-                store_models = store_models.filter(deserialization_error="")
+                # previously, deserialization_error was not nullable, and set to empty string if
+                # there wasn't an error, so this nullifies empty strings to ensure the filter
+                # applies either way
+                store_models = (
+                    store_models
+                    .annotate(
+                        n_deserialization_error=NullIf(
+                            F("deserialization_error"),
+                            Value(""),
+                            output_field=BooleanField()
+                        )
+                    )
+                    .filter(n_deserialization_error__isnull=True)
+                )
 
             # handle cases where a class has a single FK reference to itself
             if _self_referential_fk(model):
@@ -536,8 +554,8 @@ def _deserialize_from_store(profile, skip_erroring=False, filter=None):
                             ValueError,
                         ) as e:
                             excluded_list.append(store_model.id)
-                            store_model.deserialization_error = str(e)
-                            store_model.save(update_fields=["deserialization_error"])
+                            store_model.set_deserialization_error(e)
+                            store_model.save(update_fields=["deserialization_error", "deserialization_exception"])
                             continue
                         if app_model:
                             _save_deserialized_record(
@@ -545,9 +563,9 @@ def _deserialize_from_store(profile, skip_erroring=False, filter=None):
                             )
                         else:
                             store_model.dirty_bit = False
-                            store_model.deserialization_error = ""
+                            store_model.unset_deserialization_error()
                             store_model.save(
-                                update_fields=["dirty_bit", "deserialization_error"]
+                                update_fields=["dirty_bit", "deserialization_error", "deserialization_exception"]
                             )
 
                     # update lists with new clean parents and dirty children
@@ -562,14 +580,16 @@ def _deserialize_from_store(profile, skip_erroring=False, filter=None):
                 store_models.filter(
                     dirty_bit=True, _self_ref_fk__in=dirty_parents
                 ).exclude(id__in=excluded_list).update(
-                    deserialization_error="Parent is dirty; could not deserialize."
+                    deserialization_error="Parent is dirty; could not deserialize.",
+                    deserialization_exception=MorangoDirtyParent.path(),
                 )
                 # A(ii). The ones that don't even have Store entries for parent at all
                 all_parents = store_models.char_ids_list()
                 store_models.filter(dirty_bit=True).exclude(
                     _self_ref_fk__in=all_parents
                 ).exclude(id__in=excluded_list).update(
-                    deserialization_error="Parent does not exist in Store; could not deserialize."
+                    deserialization_error="Parent does not exist in Store; could not deserialize.",
+                    deserialization_exception=MorangoMissingParent.path(),
                 )
 
             else:
@@ -604,8 +624,8 @@ def _deserialize_from_store(profile, skip_erroring=False, filter=None):
                     ) as e:
                         # if the app model did not validate, we leave the store dirty bit set
                         excluded_list.append(store_model.id)
-                        store_model.deserialization_error = str(e)
-                        store_model.save(update_fields=["deserialization_error"])
+                        store_model.set_deserialization_error(e)
+                        store_model.save(update_fields=["deserialization_error", "deserialization_exception"])
 
                 # validate app model FKs
                 model_excluded_pks, model_deleted_pks = _validate_store_foreign_keys(

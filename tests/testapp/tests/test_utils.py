@@ -1,23 +1,26 @@
 import os
-from requests import Request
-from django.http.request import HttpRequest
-from django.test.testcases import SimpleTestCase
+
 import mock
 import pytest
+from django.db.utils import IntegrityError
+from django.http.request import HttpRequest
+from django.test.testcases import SimpleTestCase
+from requests import Request
 
+from morango.constants import transfer_stages
 from morango.constants.capabilities import ALLOW_CERTIFICATE_PUSHING
 from morango.constants.capabilities import ASYNC_OPERATIONS
 from morango.constants.capabilities import FSIC_V2_FORMAT
-from morango.constants import transfer_stages
-from morango.utils import SETTINGS
-from morango.utils import CAPABILITIES_CLIENT_HEADER
-from morango.utils import CAPABILITIES_SERVER_HEADER
-from morango.utils import get_capabilities
-from morango.utils import serialize_capabilities_to_client_request
-from morango.utils import parse_capabilities_from_server_request
-from morango.utils import pid_exists
+from morango.errors import MorangoDatabaseError
 from morango.utils import _posix_pid_exists
 from morango.utils import _windows_pid_exists
+from morango.utils import CAPABILITIES_CLIENT_HEADER
+from morango.utils import exception_path
+from morango.utils import get_capabilities
+from morango.utils import parse_capabilities_from_server_request
+from morango.utils import pid_exists
+from morango.utils import serialize_capabilities_to_client_request
+from morango.utils import SETTINGS
 
 
 class SettingsTestCase(SimpleTestCase):
@@ -110,3 +113,24 @@ class ProcessIDExistsTestCase(SimpleTestCase):
         pid = os.getpid()
         self.assertTrue(pid_exists(pid))
         self.assertFalse(pid_exists(123456789))
+
+
+class ExceptionPathTestCase(SimpleTestCase):
+    def test_with_instance(self):
+        exc = ValueError("test")
+        self.assertEqual(exception_path(exc), "builtins.ValueError")
+        exc = IntegrityError("test")
+        self.assertEqual(exception_path(exc), "django.db.utils.IntegrityError")
+
+    def test_with_class(self):
+        self.assertEqual(exception_path(TypeError), "builtins.TypeError")
+        self.assertEqual(exception_path(IntegrityError), "django.db.utils.IntegrityError")
+
+    def test_with_custom_exception(self):
+        self.assertEqual(
+            exception_path(MorangoDatabaseError), "morango.errors.MorangoDatabaseError"
+        )
+        self.assertEqual(
+            exception_path(MorangoDatabaseError("test")),
+            MorangoDatabaseError.path(),
+        )
