@@ -151,6 +151,7 @@ class SQLWrapper(BaseSQLWrapper):
                 conflicting_serialized_data,
                 dirty_bit,
                 _self_ref_fk,
+                _self_ref_order,
                 deserialization_error,
                 deserialization_exception,
                 last_transfer_session_id
@@ -175,6 +176,7 @@ class SQLWrapper(BaseSQLWrapper):
                 ),
                 1,
                 store._self_ref_fk,
+                store._self_ref_order,
                 NULL,
                 NULL,
                 '{transfer_session_id}'
@@ -244,6 +246,7 @@ class SQLWrapper(BaseSQLWrapper):
                 conflicting_serialized_data,
                 dirty_bit,
                 _self_ref_fk,
+                _self_ref_order,
                 deserialization_error,
                 deserialization_exception,
                 last_transfer_session_id
@@ -262,6 +265,7 @@ class SQLWrapper(BaseSQLWrapper):
                 buffer.conflicting_serialized_data,
                 1,
                 buffer._self_ref_fk,
+                buffer._self_ref_order,
                 NULL,
                 NULL,
                 '{transfer_session_id}'

@@ -178,5 +178,6 @@ class BufferSerializer(serializers.ModelSerializer):
             "profile",
             "rmcb_list",
             "_self_ref_fk",
+            "_self_ref_order",
         )
         read_only_fields = fields

@@ -986,6 +986,12 @@ class BufferEndpointTestCase(CertificateTestCaseMixin, APITestCase):
             for q in ctx.captured_queries:
                 self.assertFalse("morango_transfersession" in q["sql"])
 
+    def test_buffer_serializer_includes_self_ref_order(self):
+        transfer_session_id = self.create_records_for_pulling()
+        Buffer.objects.filter(transfer_session_id=transfer_session_id).update(_self_ref_order=4)
+        buffer = Buffer.objects.filter(transfer_session_id=transfer_session_id).first()
+        self.assertEqual(BufferSerializer(instance=buffer).data["_self_ref_order"], 4)
+
     def test_pull_valid_buffer_list(self):
 
         transfer_session_id = self.create_records_for_pulling()

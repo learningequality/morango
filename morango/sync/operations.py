@@ -525,7 +525,7 @@ def _queue_into_buffer_v1(transfersession):
                 """SELECT
                        id, serialized, deleted, last_saved_instance, last_saved_counter, hard_deleted, model_name, profile,
                        partition, source_id, conflicting_serialized_data,
-                       CAST ('{transfer_session_id}' AS {transfer_session_id_type}), _self_ref_fk
+                       CAST ('{transfer_session_id}' AS {transfer_session_id_type}), _self_ref_fk, _self_ref_order
                    FROM {store} WHERE {condition}
                 """.format(
                     transfer_session_id=transfersession.id,
@@ -556,7 +556,7 @@ def _queue_into_buffer_v1(transfersession):
                 """INSERT INTO {outgoing_buffer}
                    (model_uuid, serialized, deleted, last_saved_instance, last_saved_counter,
                    hard_deleted, model_name, profile, partition, source_id, conflicting_serialized_data,
-                   transfer_session_id, _self_ref_fk)
+                   transfer_session_id, _self_ref_fk, _self_ref_order)
                    {select}
                 """.format(
                     outgoing_buffer=Buffer._meta.db_table,
@@ -674,7 +674,7 @@ def _queue_into_buffer_v2(transfersession, chunk_size=200):
                 """SELECT
                         id, serialized, deleted, last_saved_instance, last_saved_counter, hard_deleted, model_name, profile,
                         partition, source_id, conflicting_serialized_data,
-                        CAST ('{transfer_session_id}' AS {transfer_session_id_type}), _self_ref_fk
+                        CAST ('{transfer_session_id}' AS {transfer_session_id_type}), _self_ref_fk, _self_ref_order
                     FROM {store} WHERE {condition}
                 """.format(
                     transfer_session_id=transfersession.id,
@@ -703,7 +703,7 @@ def _queue_into_buffer_v2(transfersession, chunk_size=200):
                 """INSERT INTO {outgoing_buffer}
                    (model_uuid, serialized, deleted, last_saved_instance, last_saved_counter,
                    hard_deleted, model_name, profile, partition, source_id, conflicting_serialized_data,
-                   transfer_session_id, _self_ref_fk)
+                   transfer_session_id, _self_ref_fk, _self_ref_order)
                    {select}
                 """.format(
                     outgoing_buffer=Buffer._meta.db_table,

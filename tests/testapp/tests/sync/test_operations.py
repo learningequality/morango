@@ -88,6 +88,14 @@ class QueueStoreIntoBufferV1TestCase(TestCase):
         assertRecordsBuffered(self.data["group1_c2"])
         assertRecordsBuffered(self.data["group2_c1"])
 
+    def test_self_ref_order_propagates_to_buffer(self):
+        Store.objects.update(_self_ref_order=42)
+        fsics = {self.data["group1_id"].id: 1, self.data["group2_id"].id: 1}
+        self.transfer_session.client_fsic = json.dumps(fsics)
+        _queue_into_buffer_v1(self.transfer_session)
+        self.assertTrue(Buffer.objects.exists())
+        self.assertFalse(Buffer.objects.exclude(_self_ref_order=42).exists())
+
     def test_very_many_fsics(self):
         """
         Regression test against 'Expression tree is too large (maximum depth 1000)' error with many fsics
@@ -277,6 +285,18 @@ class QueueStoreIntoBufferV2TestCase(TestCase):
             is_server=False,
             capabilities=[FSIC_V2_FORMAT],
         )
+
+    def test_self_ref_order_propagates_to_buffer(self):
+        Store.objects.update(_self_ref_order=42)
+        fsics = {
+            "super": {},
+            "sub": {"": {self.data["group1_id"].id: 1, self.data["group2_id"].id: 1}},
+        }
+        self.transfer_session.client_fsic = json.dumps(fsics)
+        self.transfer_session.server_fsic = json.dumps({"super": {}, "sub": {}})
+        _queue_into_buffer_v2(self.transfer_session)
+        self.assertTrue(Buffer.objects.exists())
+        self.assertFalse(Buffer.objects.exclude(_self_ref_order=42).exists())
 
     # @pytest.mark.skip("Takes 30+ seconds, manual run only")
     def test_very_many_instances_in_fsic(self):
@@ -788,6 +808,14 @@ class DequeueBufferIntoStoreTestCase(TestCase):
         self.assertEqual(store.serialized, "")
         self.assertEqual(store.conflicting_serialized_data, "")
 
+    def test_dequeuing_merge_conflict_buffer__self_ref_order_preserved(self):
+        Store.objects.filter(id=self.data["model2"]).update(_self_ref_order=11)
+        Buffer.objects.filter(model_uuid=self.data["model2"]).update(_self_ref_order=99)
+        with connection.cursor() as cursor:
+            current_id = InstanceIDModel.get_current_instance_and_increment_counter()
+            DBBackend._dequeuing_merge_conflict_buffer(cursor, current_id, self.transfer_session.id)
+        self.assertEqual(Store.objects.get(id=self.data["model2"])._self_ref_order, 11)
+
     def test_dequeuing_update_rmcs_last_saved_by(self):
         self.assertFalse(RecordMaxCounter.objects.filter(instance_id=self.current_id.id).exists())
         with connection.cursor() as cursor:
@@ -841,6 +869,13 @@ class DequeueBufferIntoStoreTestCase(TestCase):
             DBBackend._dequeuing_insert_remaining_buffer(cursor, self.transfer_session.id)
         self.assertEqual(Store.objects.get(id=self.data["model3"]).serialized, "buffer")
         self.assertTrue(Store.objects.filter(id=self.data["model4"]).exists())
+
+    def test_dequeuing_insert_remaining_buffer__self_ref_order_propagates(self):
+        Buffer.objects.filter(model_uuid=self.data["model4"]).update(_self_ref_order=7)
+        self.assertFalse(Store.objects.filter(id=self.data["model4"]).exists())
+        with connection.cursor() as cursor:
+            DBBackend._dequeuing_insert_remaining_buffer(cursor, self.transfer_session.id)
+        self.assertEqual(Store.objects.get(id=self.data["model4"])._self_ref_order, 7)
 
     def test_dequeuing_insert_remaining_rmcb(self):
         for i in self.data["model4_rmcb_ids"]:

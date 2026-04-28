@@ -217,6 +217,7 @@ class SQLWrapper(BaseSQLWrapper):
                 conflicting_serialized_data,
                 dirty_bit,
                 _self_ref_fk,
+                _self_ref_order,
                 deserialization_error,
                 deserialization_exception,
                 last_transfer_session_id
@@ -233,6 +234,7 @@ class SQLWrapper(BaseSQLWrapper):
                 CASE buffer.hard_deleted WHEN TRUE THEN '' ELSE buffer.serialized || '\n' || store.conflicting_serialized_data END,
                 TRUE,
                 store._self_ref_fk,
+                store._self_ref_order,
                 NULL,
                 NULL,
                 '{transfer_session_id}'
@@ -320,7 +322,8 @@ class SQLWrapper(BaseSQLWrapper):
                     buffer.partition,
                     buffer.source_id,
                     buffer.conflicting_serialized_data,
-                    buffer._self_ref_fk
+                    buffer._self_ref_fk,
+                    buffer._self_ref_order
                 FROM {buffer} as buffer
                 WHERE buffer.transfer_session_id = '{transfer_session_id}'
             ),
@@ -339,6 +342,7 @@ class SQLWrapper(BaseSQLWrapper):
                     conflicting_serialized_data,
                     dirty_bit,
                     _self_ref_fk,
+                    _self_ref_order,
                     deserialization_error,
                     deserialization_exception,
                     last_transfer_session_id
@@ -355,6 +359,7 @@ class SQLWrapper(BaseSQLWrapper):
                     nv.conflicting_serialized_data,
                     TRUE,
                     nv._self_ref_fk,
+                    nv._self_ref_order,
                     NULL,
                     NULL,
                     '{transfer_session_id}'
@@ -377,6 +382,7 @@ class SQLWrapper(BaseSQLWrapper):
                 conflicting_serialized_data,
                 dirty_bit,
                 _self_ref_fk,
+                _self_ref_order,
                 deserialization_error,
                 deserialization_exception,
                 last_transfer_session_id
@@ -395,6 +401,7 @@ class SQLWrapper(BaseSQLWrapper):
                 ut.conflicting_serialized_data,
                 TRUE,
                 ut._self_ref_fk,
+                ut._self_ref_order,
                 NULL,
                 NULL,
                 '{transfer_session_id}'
