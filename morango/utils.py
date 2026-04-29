@@ -140,3 +140,17 @@ def self_referential_fk(klass_model):
             if issubclass(klass_model, f.related_model):
                 return f.attname
     return None
+
+
+def exception_path(exc):
+    """
+    Produces a string of the fully qualified class name of the exception
+
+    :param exc: An exception instance
+    :type exc: Exception|Type[Exception]
+    :return: A string of the fully qualified class name of the exception
+    """
+    exc_cls = exc
+    if isinstance(exc, Exception):
+        exc_cls = exc.__class__
+    return f"{exc_cls.__module__}.{exc_cls.__name__}"

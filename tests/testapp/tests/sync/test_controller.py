@@ -519,6 +519,152 @@ class DeserializationFromStoreIntoAppTestCase(TestCase):
         self.assertFalse(MyUser.objects.filter(username="changed2").exists())
 
 
+class UniqueConstraintDeserializationTestCase(TestCase):
+    """
+    Regression tests for silent deserialization failure when two Store records
+    have different Morango IDs but violate a unique constraint on the app model table.
+
+    On SQLite, ``REPLACE INTO`` silently deletes the conflicting row and inserts the
+    new one, so no IntegrityError is raised. On PostgreSQL, the ``INSERT`` without an
+    ``ON CONFLICT`` clause for non-PK constraints would raise IntegrityError.
+
+    In both cases, the expected behavior is:
+    - The conflicting Store record should have ``deserialization_error`` populated
+    - Its ``dirty_bit`` should remain True
+    - A warning should be logged
+    """
+
+    def setUp(self):
+        InstanceIDModel.get_or_create_current_instance()
+        self.mc = MorangoProfileController("facilitydata")
+
+    def _create_conflicting_user_store_records(self):
+        """Create two Store records for MyUser with different IDs but the same unique username."""
+        self.user1_id = uuid.uuid4().hex
+        self.user2_id = uuid.uuid4().hex
+
+        user1 = MyUser(id=self.user1_id, username="duplicate", password="password")
+        user2 = MyUser(id=self.user2_id, username="duplicate", password="password")
+
+        self.store1 = StoreModelFacilityFactory(
+            id=self.user1_id,
+            serialized=json.dumps(user1.serialize()),
+            model_name="user",
+        )
+        self.store2 = StoreModelFacilityFactory(
+            id=self.user2_id,
+            serialized=json.dumps(user2.serialize()),
+            model_name="user",
+        )
+
+    def test_unique_violation_sets_deserialization_error(self):
+        """At least one conflicting record should have deserialization_error set."""
+        self._create_conflicting_user_store_records()
+
+        self.mc.deserialize_from_store()
+
+        # At most one app model should exist due to the unique constraint
+        self.assertLessEqual(MyUser.objects.filter(username="duplicate").count(), 1)
+
+        # Both Store records should still exist
+        self.assertEqual(Store.objects.filter(id__in=[self.user1_id, self.user2_id]).count(), 2)
+
+        # At least one Store record should have deserialization_error set
+        errored_stores = Store.objects.filter(
+            id__in=[self.user1_id, self.user2_id],
+            deserialization_error__isnull=False,
+        )
+        self.assertGreater(
+            errored_stores.count(),
+            0,
+            "Expected at least one Store record to have deserialization_error "
+            "set for unique constraint violation, but none did.",
+        )
+
+    def test_unique_violation_leaves_dirty_bit(self):
+        """The conflicting record's dirty_bit should remain True."""
+        self._create_conflicting_user_store_records()
+
+        self.mc.deserialize_from_store()
+
+        # At least one Store record should still have dirty_bit=True
+        dirty_stores = Store.objects.filter(
+            id__in=[self.user1_id, self.user2_id],
+            dirty_bit=True,
+        )
+        self.assertGreater(
+            dirty_stores.count(),
+            0,
+            "Expected at least one Store record to still have dirty_bit=True "
+            "for a unique constraint violation, but all were cleared.",
+        )
+
+    def test_unique_violation_logs_warning(self):
+        """A warning should be logged when deserialization fails due to a unique constraint."""
+        self._create_conflicting_user_store_records()
+
+        with self.assertLogs("morango.sync.operations", level="WARNING") as cm:
+            self.mc.deserialize_from_store()
+
+        unique_warnings = [
+            msg for msg in cm.output if "unique" in msg.lower() or "integrity" in msg.lower()
+        ]
+        self.assertGreater(
+            len(unique_warnings),
+            0,
+            "Expected a warning log about unique constraint violation during "
+            "deserialization, but none was found. Logs: {}".format(cm.output),
+        )
+
+    def test_unique_violation_sets_deserialization_exception(self):
+        """At least one conflicting record should have deserialization_exception set."""
+        self._create_conflicting_user_store_records()
+
+        self.mc.deserialize_from_store()
+
+        # At least one Store record should have deserialization_exception set
+        errored_stores = Store.objects.filter(
+            id__in=[self.user1_id, self.user2_id],
+            deserialization_exception__isnull=False,
+        )
+        self.assertGreater(
+            errored_stores.count(),
+            0,
+            "Expected at least one Store record to have deserialization_exception "
+            "set for unique constraint violation, but none did.",
+        )
+
+        # Verify the exception is a fully-qualified class path
+        for store in errored_stores:
+            self.assertEqual(
+                "django.db.utils.IntegrityError",
+                store.deserialization_exception,
+                "Expected deserialization_exception to be a fully-qualified class path like 'module.ClassName', got: {}".format(
+                    store.deserialization_exception
+                ),
+            )
+
+    def test_non_conflicting_records_still_deserialize(self):
+        """Records that don't conflict should still be deserialized even when others conflict."""
+        self._create_conflicting_user_store_records()
+
+        ok_user_id = uuid.uuid4().hex
+        ok_user = MyUser(id=ok_user_id, username="noconflict", password="password")
+        StoreModelFacilityFactory(
+            id=ok_user_id,
+            serialized=json.dumps(ok_user.serialize()),
+            model_name="user",
+        )
+
+        self.mc.deserialize_from_store()
+
+        self.assertTrue(MyUser.objects.filter(id=ok_user_id, username="noconflict").exists())
+
+        ok_store = Store.objects.get(id=ok_user_id)
+        self.assertFalse(ok_store.dirty_bit)
+        self.assertIsNone(ok_store.deserialization_error)
+
+
 class SelfReferentialFKDeserializationTestCase(TestCase):
     def setUp(self):
         self.current_id, _ = InstanceIDModel.get_or_create_current_instance()
@@ -657,7 +803,7 @@ class ForeignKeyDeserializationTestCase(TestCase):
 
         new_log.refresh_from_db()
         self.assertFalse(new_log.dirty_bit)
-        self.assertTrue(new_log.deserialization_error == "")
+        self.assertIsNone(new_log.deserialization_error)
         self.assertTrue(InteractionLog.objects.filter(id=new_log.id).exists())
 
     def test_deserialization_of_model_with_valid_foreignkey_referent(self):
@@ -677,7 +823,7 @@ class ForeignKeyDeserializationTestCase(TestCase):
 
         new_log.refresh_from_db()
         self.assertFalse(new_log.dirty_bit)
-        self.assertTrue(new_log.deserialization_error == "")
+        self.assertIsNone(new_log.deserialization_error)
         self.assertTrue(SummaryLog.objects.filter(id=new_log.id).exists())
 
 

@@ -2,6 +2,7 @@ import os
 
 import mock
 import pytest
+from django.db import IntegrityError
 from django.http.request import HttpRequest
 from django.test.testcases import SimpleTestCase
 from facility_profile.models import Facility, MyUser
@@ -13,11 +14,15 @@ from morango.constants.capabilities import (
     ASYNC_OPERATIONS,
     FSIC_V2_FORMAT,
 )
+from morango.errors import (
+    MorangoDatabaseError,
+)
 from morango.utils import (
     CAPABILITIES_CLIENT_HEADER,
     SETTINGS,
     _posix_pid_exists,
     _windows_pid_exists,
+    exception_path,
     get_capabilities,
     parse_capabilities_from_server_request,
     pid_exists,
@@ -121,3 +126,24 @@ class SelfReferentialFKTestCase(SimpleTestCase):
     def test_self_ref_fk(self):
         self.assertEqual(self_referential_fk(Facility), "parent_id")
         self.assertEqual(self_referential_fk(MyUser), None)
+
+
+class ExceptionPathTestCase(SimpleTestCase):
+    def test_with_instance(self):
+        exc = ValueError("test")
+        self.assertEqual(exception_path(exc), "builtins.ValueError")
+        exc = IntegrityError("test")
+        self.assertEqual(exception_path(exc), "django.db.utils.IntegrityError")
+
+    def test_with_class(self):
+        self.assertEqual(exception_path(TypeError), "builtins.TypeError")
+        self.assertEqual(exception_path(IntegrityError), "django.db.utils.IntegrityError")
+
+    def test_with_custom_exception(self):
+        self.assertEqual(
+            exception_path(MorangoDatabaseError), "morango.errors.MorangoDatabaseError"
+        )
+        self.assertEqual(
+            exception_path(MorangoDatabaseError("test")),
+            MorangoDatabaseError.path(),
+        )

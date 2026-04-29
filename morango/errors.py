@@ -1,5 +1,10 @@
+from morango.utils import exception_path
+
+
 class MorangoError(Exception):
-    pass
+    @classmethod
+    def path(cls):
+        return exception_path(cls)
 
 
 class ModelRegistryNotReady(MorangoError):
@@ -79,4 +84,12 @@ class MorangoSkipOperation(MorangoError):
 
 
 class MorangoDatabaseError(MorangoError):
+    pass
+
+
+class MorangoDirtyParent(MorangoError):
+    pass
+
+
+class MorangoMissingParent(MorangoError):
     pass
