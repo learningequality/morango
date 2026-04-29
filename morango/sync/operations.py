@@ -10,11 +10,14 @@ from django.db import connection
 from django.db import transaction
 from django.db.models import CharField
 from django.db.models import F
+from django.db.models import Exists
+from django.db.models import OuterRef
 from django.db.models import Q
+from django.db.models import Subquery
 from django.db.models import signals
 from django.db.models import Value
 from django.db.models.fields import BooleanField
-from django.db.models.functions import NullIf
+from django.db.models.functions import NullIf, Cast
 from django.db.utils import IntegrityError
 from django.db.utils import OperationalError
 from django.utils import timezone
@@ -722,49 +725,38 @@ def _queue_into_buffer_v2(transfersession, chunk_size=200):
             )
 
 
-def _update_legacy_self_ref_order(transfer_session):
-    transferred_store_records = Store.objects.filter(
-        last_transfer_session_id=transfer_session.id
+def _update_legacy_self_ref_order_for_model(queryset):
+    # root nodes set the _self_ref_order to 0
+    queryset.filter(_self_ref_fk="").exclude(_self_ref_order=0).update(_self_ref_order=0)
+    # reset the _self_ref_order to None for all records that have a parent
+    queryset.exclude(_self_ref_fk="").exclude(_self_ref_order=None).update(
+        _self_ref_order=None
     )
-    records_by_id = {record.id: record for record in transferred_store_records}
-    records_by_model = defaultdict(list)
 
-    for record in records_by_id.values():
-        try:
-            Model = syncable_models.get_model(record.profile, record.model_name)
-        except KeyError:
-            continue
+    parent = Store.objects.filter(
+        id=Cast(OuterRef("_self_ref_fk"), UUIDField()),
+        _self_ref_order__isnull=False,
+    )
+    parent_order = parent.values("_self_ref_order")[:1]
+    pending = queryset.exclude(_self_ref_fk="").filter(_self_ref_order=None)
 
+    while pending.filter(Exists(parent)).update(_self_ref_order=Subquery(parent_order)):
+        pass
+
+
+def _update_legacy_self_ref_order(transfer_session):
+    profile = transfer_session.sync_session.profile
+    transferred_store_records = Store.objects.filter(
+        last_transfer_session_id=transfer_session.id,
+        profile=profile,
+    )
+
+    for Model in syncable_models.get_models(profile):
+        queryset = transferred_store_records.filter(model_name=Model.morango_model_name)
         if self_referential_fk(Model):
-            records_by_model[(record.profile, record.model_name)].append(record)
-        elif record._self_ref_order is not None:
-            record._self_ref_order = None
-            record.save(update_fields=["_self_ref_order"])
-
-    for records in records_by_model.values():
-        pending_record_ids = set(record.id for record in records)
-        while pending_record_ids:
-            updated = False
-            for record_id in list(pending_record_ids):
-                record = records_by_id[record_id]
-                if not record._self_ref_fk:
-                    order = 0
-                else:
-                    parent = records_by_id.get(record._self_ref_fk)
-                    if parent is not None and parent.id in pending_record_ids:
-                        continue
-                    order = Store.objects.filter(id=record._self_ref_fk).values_list(
-                        "_self_ref_order", flat=True
-                    ).first()
-
-                if record._self_ref_order != order:
-                    record._self_ref_order = order
-                    record.save(update_fields=["_self_ref_order"])
-                pending_record_ids.remove(record_id)
-                updated = True
-
-            if not updated:
-                break
+            _update_legacy_self_ref_order_for_model(queryset)
+        else:
+            queryset.exclude(_self_ref_order=None).update(_self_ref_order=None)
 
 
 def _dequeue_into_store(transfer_session, fsic, v2_format=False, self_ref_order=True):

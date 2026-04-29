@@ -37,6 +37,7 @@ from morango.sync.operations import (
     _deserialize_from_store,
     _queue_into_buffer_v1,
     _queue_into_buffer_v2,
+    _update_legacy_self_ref_order,
 )
 from morango.sync.syncsession import TransferClient
 
@@ -654,7 +655,7 @@ class DequeueBufferIntoStoreTestCase(TestCase):
         conn.server_info = dict(capabilities=[])
         self.data["mc"] = MorangoProfileController("facilitydata")
         session = SyncSession.objects.create(
-            id=uuid.uuid4().hex, profile="", last_activity_timestamp=timezone.now()
+            id=uuid.uuid4().hex, profile="facilitydata", last_activity_timestamp=timezone.now()
         )
         self.transfer_session = TransferSession.objects.create(
             id=uuid.uuid4().hex,
@@ -683,6 +684,21 @@ class DequeueBufferIntoStoreTestCase(TestCase):
                 assert Store.objects.get(id=store_id).last_transfer_session_id != session_id
             except Store.DoesNotExist:
                 pass
+
+    def _make_transferred_store(self, **kwargs):
+        defaults = {
+            "id": uuid.uuid4().hex,
+            "serialized": "{}",
+            "last_saved_instance": self.current_id.id,
+            "last_saved_counter": 1,
+            "model_name": "facility",
+            "profile": "facilitydata",
+            "partition": uuid.uuid4().hex,
+            "source_id": uuid.uuid4().hex,
+            "last_transfer_session_id": self.transfer_session.id,
+        }
+        defaults.update(kwargs)
+        return Store.objects.create(**defaults)
 
     def test_dequeuing_sets_last_session(self):
         store_ids = [self.data[key] for key in ["model2", "model3", "model4", "model5", "model7"]]
@@ -1008,6 +1024,37 @@ class DequeueBufferIntoStoreTestCase(TestCase):
 
         self.assertEqual(Store.objects.get(id=self.data["model3"])._self_ref_order, 0)
         self.assertEqual(Store.objects.get(id=self.data["model4"])._self_ref_order, 0)
+
+    def test_update_legacy_self_ref_order_nulls_non_self_ref_models(self):
+        store = self._make_transferred_store(
+            model_name=SummaryLog.morango_model_name,
+            _self_ref_order=3,
+        )
+
+        _update_legacy_self_ref_order(self.transfer_session)
+
+        store.refresh_from_db()
+        self.assertIsNone(store._self_ref_order)
+
+    def test_update_legacy_self_ref_order_handles_deeper_self_ref_chains(self):
+        root = self._make_transferred_store(_self_ref_fk="", _self_ref_order=None)
+        child = self._make_transferred_store(
+            _self_ref_fk=root.id,
+            _self_ref_order=None,
+        )
+        grandchild = self._make_transferred_store(
+            _self_ref_fk=child.id,
+            _self_ref_order=None,
+        )
+
+        _update_legacy_self_ref_order(self.transfer_session)
+
+        root.refresh_from_db()
+        child.refresh_from_db()
+        grandchild.refresh_from_db()
+        self.assertEqual(root._self_ref_order, 0)
+        self.assertEqual(child._self_ref_order, 0)
+        self.assertEqual(grandchild._self_ref_order, 0)
 
     def test_local_dequeue_operation(self):
         self.transfer_session.records_transferred = 1
