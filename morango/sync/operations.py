@@ -740,7 +740,7 @@ def _update_legacy_self_ref_order_for_model(queryset):
     parent_order = parent.values("_self_ref_order")[:1]
     pending = queryset.exclude(_self_ref_fk="").filter(_self_ref_order=None)
 
-    while pending.filter(Exists(parent)).update(_self_ref_order=Subquery(parent_order)):
+    while pending.filter(Exists(parent)).update(_self_ref_order=Subquery(parent_order) + 1):
         pass
 
 

@@ -1023,7 +1023,7 @@ class DequeueBufferIntoStoreTestCase(TestCase):
         )
 
         self.assertEqual(Store.objects.get(id=self.data["model3"])._self_ref_order, 0)
-        self.assertEqual(Store.objects.get(id=self.data["model4"])._self_ref_order, 0)
+        self.assertEqual(Store.objects.get(id=self.data["model4"])._self_ref_order, 1)
 
     def test_update_legacy_self_ref_order_nulls_non_self_ref_models(self):
         store = self._make_transferred_store(
@@ -1053,8 +1053,8 @@ class DequeueBufferIntoStoreTestCase(TestCase):
         child.refresh_from_db()
         grandchild.refresh_from_db()
         self.assertEqual(root._self_ref_order, 0)
-        self.assertEqual(child._self_ref_order, 0)
-        self.assertEqual(grandchild._self_ref_order, 0)
+        self.assertEqual(child._self_ref_order, 1)
+        self.assertEqual(grandchild._self_ref_order, 2)
 
     def test_local_dequeue_operation(self):
         self.transfer_session.records_transferred = 1

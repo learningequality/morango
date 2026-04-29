@@ -293,7 +293,7 @@ class StoreUpdateSelfRefOrderDbTestCase(TestCase):
         self.update._handle_store_create(task)
 
         self.assertEqual(task.store._self_ref_fk, parent_store.id)
-        self.assertEqual(task.store._self_ref_order, 3)
+        self.assertEqual(task.store._self_ref_order, 4)
 
     @mock.patch("morango.sync.stream.serialize.self_referential_fk", return_value="parent_id")
     def test_handle_store_create__self_ref_parent_not_in_store(self, _mock_srf):
@@ -325,7 +325,7 @@ class StoreUpdateSelfRefOrderDbTestCase(TestCase):
         self.update._handle_store_update(task)
 
         self.assertEqual(task.store._self_ref_fk, new_parent_store.id)
-        self.assertEqual(task.store._self_ref_order, 7)
+        self.assertEqual(task.store._self_ref_order, 8)
 
 
 class ModelPartitionBufferTestCase(SimpleTestCase):

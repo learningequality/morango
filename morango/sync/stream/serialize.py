@@ -219,15 +219,16 @@ class StoreUpdate(Transform[SerializeTask]):
         Compute ``_self_ref_order`` for a self-referential store record.
 
         Returns ``0`` when the record has no parent (root), otherwise queries
-        the parent ``Store`` row and returns its ``_self_ref_order`` value.
+        the parent ``Store`` row and returns the next order value.
         """
         if not self_ref_fk_value:
             return 0
-        return (
+        parent_order = (
             Store.objects.filter(id=self_ref_fk_value)
             .values_list("_self_ref_order", flat=True)
             .first()
         )
+        return parent_order + 1 if parent_order is not None else None
 
 
 class ModelPartitionBuffer(Buffer[List[SerializeTask]]):
