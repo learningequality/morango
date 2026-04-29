@@ -13,6 +13,7 @@ from morango.constants.capabilities import (
     ALLOW_CERTIFICATE_PUSHING,
     ASYNC_OPERATIONS,
     FSIC_V2_FORMAT,
+    SELF_REF_ORDER,
 )
 from morango.errors import (
     MorangoDatabaseError,
@@ -77,6 +78,9 @@ class CapabilitiesTestCase(SimpleTestCase):
 
         with self.settings(MORANGO_DISABLE_FSIC_V2_FORMAT=True):
             self.assertNotIn(FSIC_V2_FORMAT, get_capabilities())
+
+    def test_get_capabilities__self_ref_order(self):
+        self.assertIn(SELF_REF_ORDER, get_capabilities())
 
     @mock.patch("morango.utils.CAPABILITIES", ("TEST", "SERIALIZE"))
     def test_serialize(self):

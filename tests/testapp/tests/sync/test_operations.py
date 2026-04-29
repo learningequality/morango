@@ -8,7 +8,7 @@ from django.utils import timezone
 from facility_profile.models import ConditionalLog, Facility, MyUser, SummaryLog
 
 from morango.constants import transfer_statuses
-from morango.constants.capabilities import FSIC_V2_FORMAT
+from morango.constants.capabilities import FSIC_V2_FORMAT, SELF_REF_ORDER
 from morango.errors import MorangoLimitExceeded
 from morango.models.certificates import Filter
 from morango.models.core import (
@@ -991,6 +991,24 @@ class DequeueBufferIntoStoreTestCase(TestCase):
             ).exists()
         )
 
+    def test_dequeue_into_store__self_ref_order_fallback_for_missing_capability(self):
+        Buffer.objects.filter(model_uuid=self.data["model3"]).update(
+            _self_ref_fk="", _self_ref_order=None
+        )
+        Buffer.objects.filter(model_uuid=self.data["model4"]).update(
+            _self_ref_fk=self.data["model3"], _self_ref_order=None
+        )
+
+        _dequeue_into_store(
+            self.transfer_session,
+            self.transfer_session.client_fsic,
+            v2_format=False,
+            self_ref_order=False,
+        )
+
+        self.assertEqual(Store.objects.get(id=self.data["model3"])._self_ref_order, 0)
+        self.assertEqual(Store.objects.get(id=self.data["model4"])._self_ref_order, 0)
+
     def test_local_dequeue_operation(self):
         self.transfer_session.records_transferred = 1
         self.context.filter = [self.transfer_session.filter]
@@ -998,6 +1016,19 @@ class DequeueBufferIntoStoreTestCase(TestCase):
         self.assertEqual(transfer_statuses.COMPLETED, operation.handle(self.context))
         self.assertFalse(
             Buffer.objects.filter(transfer_session_id=self.transfer_session.id).exists()
+        )
+
+    @mock.patch("morango.sync.operations._dequeue_into_store")
+    def test_local_dequeue_operation__passes_self_ref_order_capability(self, mock_dequeue):
+        self.transfer_session.records_transferred = 1
+        self.context.capabilities = {SELF_REF_ORDER}
+        operation = ReceiverDequeueOperation()
+        self.assertEqual(transfer_statuses.COMPLETED, operation.handle(self.context))
+        mock_dequeue.assert_called_once_with(
+            self.transfer_session,
+            self.transfer_session.client_fsic,
+            v2_format=False,
+            self_ref_order=True,
         )
 
     @mock.patch("morango.sync.operations._dequeue_into_store")

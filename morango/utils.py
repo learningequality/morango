@@ -9,6 +9,7 @@ from morango.constants.capabilities import (
     ASYNC_OPERATIONS,
     FSIC_V2_FORMAT,
     GZIP_BUFFER_POST,
+    SELF_REF_ORDER,
 )
 
 
@@ -60,6 +61,8 @@ def get_capabilities():
     # Middleware async operation capabilities are standard in 0.6.0 and above
     if not SETTINGS.MORANGO_DISALLOW_ASYNC_OPERATIONS:
         capabilities.add(ASYNC_OPERATIONS)
+
+    capabilities.add(SELF_REF_ORDER)
 
     return capabilities
 

@@ -25,6 +25,7 @@ from morango.constants import transfer_stages
 from morango.constants import transfer_statuses
 from morango.constants.capabilities import ASYNC_OPERATIONS
 from morango.constants.capabilities import FSIC_V2_FORMAT
+from morango.constants.capabilities import SELF_REF_ORDER
 from morango.errors import MorangoDirtyParent
 from morango.errors import MorangoInvalidFSICPartition
 from morango.errors import MorangoLimitExceeded
@@ -721,7 +722,52 @@ def _queue_into_buffer_v2(transfersession, chunk_size=200):
             )
 
 
-def _dequeue_into_store(transfer_session, fsic, v2_format=False):
+def _update_legacy_self_ref_order(transfer_session):
+    transferred_store_records = Store.objects.filter(
+        last_transfer_session_id=transfer_session.id
+    )
+    records_by_id = {record.id: record for record in transferred_store_records}
+    records_by_model = defaultdict(list)
+
+    for record in records_by_id.values():
+        try:
+            Model = syncable_models.get_model(record.profile, record.model_name)
+        except KeyError:
+            continue
+
+        if self_referential_fk(Model):
+            records_by_model[(record.profile, record.model_name)].append(record)
+        elif record._self_ref_order is not None:
+            record._self_ref_order = None
+            record.save(update_fields=["_self_ref_order"])
+
+    for records in records_by_model.values():
+        pending_record_ids = set(record.id for record in records)
+        while pending_record_ids:
+            updated = False
+            for record_id in list(pending_record_ids):
+                record = records_by_id[record_id]
+                if not record._self_ref_fk:
+                    order = 0
+                else:
+                    parent = records_by_id.get(record._self_ref_fk)
+                    if parent is not None and parent.id in pending_record_ids:
+                        continue
+                    order = Store.objects.filter(id=record._self_ref_fk).values_list(
+                        "_self_ref_order", flat=True
+                    ).first()
+
+                if record._self_ref_order != order:
+                    record._self_ref_order = order
+                    record.save(update_fields=["_self_ref_order"])
+                pending_record_ids.remove(record_id)
+                updated = True
+
+            if not updated:
+                break
+
+
+def _dequeue_into_store(transfer_session, fsic, v2_format=False, self_ref_order=True):
     """
     Takes data from the buffers and merges into the store and record max counters.
 
@@ -745,6 +791,8 @@ def _dequeue_into_store(transfer_session, fsic, v2_format=False):
             DBBackend._dequeuing_delete_mc_buffer(cursor, transfer_session.id)
             DBBackend._dequeuing_insert_remaining_buffer(cursor, transfer_session.id)
             DBBackend._dequeuing_insert_remaining_rmcb(cursor, transfer_session.id)
+            if not self_ref_order:
+                _update_legacy_self_ref_order(transfer_session)
             DBBackend._dequeuing_delete_remaining_rmcb(cursor, transfer_session.id)
             DBBackend._dequeuing_delete_remaining_buffer(cursor, transfer_session.id)
 
@@ -1083,6 +1131,7 @@ class ReceiverDequeueOperation(LocalOperation):
                 context.transfer_session,
                 fsic,
                 v2_format=FSIC_V2_FORMAT in context.capabilities,
+                self_ref_order=SELF_REF_ORDER in context.capabilities,
             )
 
         return transfer_statuses.COMPLETED
