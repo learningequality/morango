@@ -203,22 +203,53 @@ class SQLWrapper(BaseSQLWrapper):
 
     def _dequeuing_merge_conflict_buffer(self, cursor, current_id, transfersession_id):
         # transfer buffer serialized into conflicting store
-        merge_conflict_store = """UPDATE {store} as store SET (serialized, deleted, last_saved_instance, last_saved_counter, hard_deleted, model_name,
-                                                        profile, partition, source_id, conflicting_serialized_data, dirty_bit, _self_ref_fk, deserialization_error, last_transfer_session_id)
-                                            = (CASE buffer.hard_deleted WHEN TRUE THEN '' ELSE store.serialized END, store.deleted OR buffer.deleted, '{current_instance_id}',
-                                                   {current_instance_counter}, store.hard_deleted, store.model_name, store.profile, store.partition, store.source_id,
-                                                   CASE buffer.hard_deleted WHEN TRUE THEN '' ELSE buffer.serialized || '\n' || store.conflicting_serialized_data END, TRUE, store._self_ref_fk,
-                                                   '', '{transfer_session_id}')
-                                            /*Scope to a single record.*/
-                                            FROM {buffer} AS buffer
-                                            WHERE store.id = buffer.model_uuid
-                                            AND buffer.transfer_session_id = '{transfer_session_id}'
-                                            /*Exclude fast-forwards*/
-                                            AND NOT EXISTS (SELECT 1 FROM {rmcb} AS rmcb2 WHERE store.id = rmcb2.model_uuid
-                                                                                          AND store.last_saved_instance = rmcb2.instance_id
-                                                                                          AND store.last_saved_counter <= rmcb2.counter
-                                                                                          AND rmcb2.transfer_session_id = '{transfer_session_id}')
-                                      """.format(
+        merge_conflict_store = """
+            UPDATE {store} as store SET (
+                serialized,
+                deleted,
+                last_saved_instance,
+                last_saved_counter,
+                hard_deleted,
+                model_name,
+                profile,
+                partition,
+                source_id,
+                conflicting_serialized_data,
+                dirty_bit,
+                _self_ref_fk,
+                deserialization_error,
+                deserialization_exception,
+                last_transfer_session_id
+            ) = (
+                CASE buffer.hard_deleted WHEN TRUE THEN '' ELSE store.serialized END,
+                store.deleted OR buffer.deleted,
+                '{current_instance_id}',
+                {current_instance_counter},
+                store.hard_deleted,
+                store.model_name,
+                store.profile,
+                store.partition,
+                store.source_id,
+                CASE buffer.hard_deleted WHEN TRUE THEN '' ELSE buffer.serialized || '\n' || store.conflicting_serialized_data END,
+                TRUE,
+                store._self_ref_fk,
+                NULL,
+                NULL,
+                '{transfer_session_id}'
+            )
+            /*Scope to a single record.*/
+            FROM {buffer} AS buffer
+            WHERE store.id = buffer.model_uuid
+                AND buffer.transfer_session_id = '{transfer_session_id}'
+                /*Exclude fast-forwards*/
+                AND NOT EXISTS (
+                    SELECT 1 FROM {rmcb} AS rmcb2
+                    WHERE store.id = rmcb2.model_uuid
+                        AND store.last_saved_instance = rmcb2.instance_id
+                        AND store.last_saved_counter <= rmcb2.counter
+                        AND rmcb2.transfer_session_id = '{transfer_session_id}'
+                )
+        """.format(
             buffer=Buffer._meta.db_table,
             rmcb=RecordMaxCounterBuffer._meta.db_table,
             store=Store._meta.db_table,
@@ -277,27 +308,96 @@ class SQLWrapper(BaseSQLWrapper):
         insert_remaining_buffer = """
             WITH new_values as
             (
-                SELECT buffer.model_uuid, buffer.serialized, buffer.deleted, buffer.last_saved_instance, buffer.last_saved_counter, buffer.hard_deleted,
-                       buffer.model_name, buffer.profile, buffer.partition, buffer.source_id, buffer.conflicting_serialized_data, buffer._self_ref_fk
+                SELECT
+                    buffer.model_uuid,
+                    buffer.serialized,
+                    buffer.deleted,
+                    buffer.last_saved_instance,
+                    buffer.last_saved_counter,
+                    buffer.hard_deleted,
+                    buffer.model_name,
+                    buffer.profile,
+                    buffer.partition,
+                    buffer.source_id,
+                    buffer.conflicting_serialized_data,
+                    buffer._self_ref_fk
                 FROM {buffer} as buffer
                 WHERE buffer.transfer_session_id = '{transfer_session_id}'
             ),
             updated as
             (
-                UPDATE {store} store SET (serialized, deleted, last_saved_instance, last_saved_counter, hard_deleted, model_name, profile,
-                                     partition, source_id, conflicting_serialized_data, dirty_bit, _self_ref_fk, deserialization_error, last_transfer_session_id)
-                                    = (nv.serialized, nv.deleted, nv.last_saved_instance, nv.last_saved_counter, nv.hard_deleted,
-                                       nv.model_name, nv.profile, nv.partition, nv.source_id, nv.conflicting_serialized_data, TRUE,
-                                       nv._self_ref_fk, '', '{transfer_session_id}')
+                UPDATE {store} store SET (
+                    serialized,
+                    deleted,
+                    last_saved_instance,
+                    last_saved_counter,
+                    hard_deleted,
+                    model_name,
+                    profile,
+                    partition,
+                    source_id,
+                    conflicting_serialized_data,
+                    dirty_bit,
+                    _self_ref_fk,
+                    deserialization_error,
+                    deserialization_exception,
+                    last_transfer_session_id
+                ) = (
+                    nv.serialized,
+                    nv.deleted,
+                    nv.last_saved_instance,
+                    nv.last_saved_counter,
+                    nv.hard_deleted,
+                    nv.model_name,
+                    nv.profile,
+                    nv.partition,
+                    nv.source_id,
+                    nv.conflicting_serialized_data,
+                    TRUE,
+                    nv._self_ref_fk,
+                    NULL,
+                    NULL,
+                    '{transfer_session_id}'
+                )
                 FROM new_values nv
                 WHERE nv.model_uuid = store.id
                 returning store.*
             )
-            INSERT INTO {store}(id, serialized, deleted, last_saved_instance, last_saved_counter, hard_deleted, model_name, profile,
-                                partition, source_id, conflicting_serialized_data, dirty_bit, _self_ref_fk, deserialization_error, last_transfer_session_id)
-            SELECT ut.model_uuid, ut.serialized, ut.deleted, ut.last_saved_instance, ut.last_saved_counter, ut.hard_deleted,
-                       ut.model_name, ut.profile, ut.partition, ut.source_id, ut.conflicting_serialized_data, TRUE,
-                       ut._self_ref_fk, '', '{transfer_session_id}'
+            INSERT INTO {store}(
+                id,
+                serialized,
+                deleted,
+                last_saved_instance,
+                last_saved_counter,
+                hard_deleted,
+                model_name,
+                profile,
+                partition,
+                source_id,
+                conflicting_serialized_data,
+                dirty_bit,
+                _self_ref_fk,
+                deserialization_error,
+                deserialization_exception,
+                last_transfer_session_id
+            )
+            SELECT
+                ut.model_uuid,
+                ut.serialized,
+                ut.deleted,
+                ut.last_saved_instance,
+                ut.last_saved_counter,
+                ut.hard_deleted,
+                ut.model_name,
+                ut.profile,
+                ut.partition,
+                ut.source_id,
+                ut.conflicting_serialized_data,
+                TRUE,
+                ut._self_ref_fk,
+                NULL,
+                NULL,
+                '{transfer_session_id}'
             FROM new_values ut
             WHERE ut.model_uuid not in (SELECT id FROM updated)
         """.format(

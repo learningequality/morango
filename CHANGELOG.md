@@ -2,6 +2,12 @@
 
 List of the most important changes for each release.
 
+## 0.8.11
+- Adds additional `deserialization_exception` field to `Store` model to track the fully qualified exception path
+
+## 0.8.10
+- Fixes silent failure during deserialization of records that fail unique constraints
+
 ## 0.8.9
 - Removes debugging print statements
 - Adds flake8 linting

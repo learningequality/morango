@@ -1216,3 +1216,27 @@ class DeserializationTestCases(TestCase):
         )
         conditional_log = ConditionalLog.objects.get(pk=self.serialized_conditional["id"])
         self.assertIsNone(conditional_log.user_id)
+
+    def test_deserialization__skip_erroring(self):
+        self.serialize_all_to_store()
+        conditional_log_store = Store.objects.get(pk=self.serialized_conditional["id"])
+        conditional_log_store.deserialization_error = (
+            "AssertionError: this should not be deserialized!"
+        )
+        conditional_log_store.save()
+
+        _deserialize_from_store(self.profile, skip_erroring=True)
+
+        self.assert_deserialization(
+            conditional_deserialized=False,
+        )
+
+    def test_deserialization__skip_erroring__empty_string(self):
+        self.serialize_all_to_store()
+        conditional_log_store = Store.objects.get(pk=self.serialized_conditional["id"])
+        conditional_log_store.deserialization_error = ""
+        conditional_log_store.save()
+
+        _deserialize_from_store(self.profile, skip_erroring=True)
+
+        self.assert_deserialization()

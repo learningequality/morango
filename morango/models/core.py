@@ -24,7 +24,7 @@ from morango.models.fsic_utils import remove_redundant_instance_counters
 from morango.models.manager import SyncableModelManager
 from morango.models.utils import get_0_4_system_parameters, get_0_5_mac_address, get_0_5_system_id
 from morango.registry import syncable_models
-from morango.utils import SETTINGS, _assert
+from morango.utils import SETTINGS, _assert, exception_path
 
 logger = logging.getLogger(__name__)
 
@@ -429,7 +429,8 @@ class Store(AbstractStore):
     id = UUIDField(primary_key=True)
     # used to know which store records need to be deserialized into the app layer models
     dirty_bit = models.BooleanField(default=False)
-    deserialization_error = models.TextField(blank=True)
+    deserialization_error = models.TextField(blank=True, null=True)
+    deserialization_exception = models.CharField(max_length=255, blank=True, null=True)
 
     last_transfer_session_id = UUIDField(blank=True, null=True, default=None, db_index=True)
 
@@ -444,6 +445,14 @@ class Store(AbstractStore):
                 name="idx_morango_deserialize",
             ),
         ]
+
+    def set_deserialization_error(self, exc):
+        self.deserialization_error = str(exc)
+        self.deserialization_exception = exception_path(exc)
+
+    def unset_deserialization_error(self):
+        self.deserialization_error = None
+        self.deserialization_exception = None
 
     def _deserialize_store_model(self, fk_cache, defer_fks=False, sync_filter=None):  # noqa: C901
         """
