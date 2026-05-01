@@ -76,6 +76,15 @@ class SyncingModelsTestCase(TestCase):
         user.save(update_fields=["username"])
         self.assertTrue(MyUser.objects.first()._morango_dirty_bit)
 
+    def test_syncable_save_with_update_fields_when_to_ignore_dirty_bit(self):
+        user = MyUser.objects.first()
+        user.save(update_dirty_bit_to=False)
+        self.assertFalse(MyUser.objects.first()._morango_dirty_bit)
+
+        user.username = "updated-name"
+        user.save(update_dirty_bit_to=None, update_fields=["username"])
+        self.assertFalse(MyUser.objects.first()._morango_dirty_bit)
+
     def test_syncing_objects_manager_with_custom_default_manager(self):
         """Test that syncing_objects manager includes all objects even when default manager filters them out"""
         # Create some test objects
