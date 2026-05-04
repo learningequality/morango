@@ -1,5 +1,6 @@
 import json
 import logging
+from collections import defaultdict, deque
 from typing import Generator, Iterable, Iterator, List, Optional, Type
 
 from django.core.serializers.json import DjangoJSONEncoder
@@ -25,13 +26,22 @@ logger = logging.getLogger(__name__)
 class SerializeTask(object):
     """Carrier class for providing context through the pipeline"""
 
-    __slots__ = ("model", "obj", "store", "counter")
+    __slots__ = (
+        "model",
+        "obj",
+        "store",
+        "counter",
+        "_self_ref_fk_value",
+        "_self_ref_order",
+    )
 
     def __init__(self, model: Type[SyncableModel], obj: SyncableModel):
         self.model = model
         self.obj = obj
         self.store: Optional[Store] = None
         self.counter: Optional[RecordMaxCounter] = None
+        self._self_ref_fk_value: Optional[str] = None
+        self._self_ref_order: Optional[int] = None
 
     @property
     def is_store_update(self):
@@ -50,6 +60,20 @@ class SerializeTask(object):
     def self_referential_fk(self) -> Optional[str]:
         """Return the attname of the self-referential FK on *model*, or ``None``."""
         return self_referential_fk(self.model)
+
+    @property
+    def self_ref_fk_value(self) -> Optional[str]:
+        return self._self_ref_fk_value
+
+    @property
+    def self_ref_order(self) -> Optional[int]:
+        return self._self_ref_order
+
+    def set_self_ref_fk_value(self, value: Optional[str]):
+        self._self_ref_fk_value = value
+
+    def set_self_ref_order(self, value: Optional[int]):
+        self._self_ref_order = value
 
 
 class AppModelSource(Source[SerializeTask]):
@@ -138,6 +162,84 @@ class StoreLookup(Transform[List[SerializeTask]]):
         return tasks
 
 
+class SelfRefOrderLookup(Transform[List[SerializeTask]]):
+    """
+    Computes self-referential metadata for a buffered batch of tasks.
+
+    Resolution order is cache-first, then DB fallback:
+    - roots (`_self_ref_fk == ""`) get order 0 immediately
+    - child order is `parent_order + 1` when parent order is known
+    - unresolved/missing parents keep order as ``None``
+    """
+
+    def __init__(self):
+        # Carries resolved parent orders across buffered chunks in the same pipeline run.
+        self.known_order_by_id = {}
+
+    def transform(self, tasks: List[SerializeTask]) -> List[SerializeTask]:
+        # Cache of resolved order values keyed by record id.
+        known_order_by_id = self.known_order_by_id
+        # Self-ref tasks present in the current buffered batch.
+        tasks_by_id = {}
+        # Adjacency list for the in-batch self-ref graph: parent_id -> [child tasks].
+        children_by_parent = defaultdict(list)
+
+        # First pass:
+        # - identify roots (order = 0)
+        # - build lookup maps:
+        #     tasks_by_id → tasks present in this batch
+        #     children_by_parent → {parent_id → list of child tasks}
+        for task in tasks:
+            self_ref_fk = task.self_referential_fk()
+            if not self_ref_fk:
+                task.set_self_ref_fk_value(None)
+                task.set_self_ref_order(None)
+                continue
+
+            self_ref_fk_value = getattr(task.obj, self_ref_fk) or ""
+            task.set_self_ref_fk_value(self_ref_fk_value)
+            tasks_by_id[task.obj.id] = task
+
+            if not self_ref_fk_value:
+                task.set_self_ref_order(0)
+                known_order_by_id[task.obj.id] = 0
+                continue
+
+
+            task.set_self_ref_order(None)
+            children_by_parent[self_ref_fk_value].append(task)
+
+        # Parent IDs that are referenced by this batch but not present in this batch.
+        # These must be looked up from existing Store rows.
+        external_parent_ids = set(children_by_parent.keys()) - set(tasks_by_id.keys())
+        if external_parent_ids:
+            for parent_id, parent_order in Store.objects.filter(
+                id__in=external_parent_ids
+            ).values_list("id", "_self_ref_order"):
+                if parent_order is not None:
+                    known_order_by_id[parent_id] = parent_order
+
+        # Breadth-first propagation from all known parents (roots + DB-resolved parents).
+        # Each resolved parent unlocks its children as `parent + 1`.
+        queue = deque(known_order_by_id.keys())
+        while queue:
+            parent_id = queue.popleft()
+            parent_order = known_order_by_id.get(parent_id)
+            if parent_order is None:
+                continue
+
+            for task in children_by_parent.get(parent_id, []):
+                if task.self_ref_order is not None:
+                    continue
+                child_order = parent_order + 1
+                task.set_self_ref_order(child_order)
+                child_id = task.obj.id
+                known_order_by_id[child_id] = child_order
+                queue.append(child_id)
+
+        return tasks
+
+
 class StoreUpdate(Transform[SerializeTask]):
     """Processes the updates to the Morango store and record counters."""
 
@@ -188,10 +290,12 @@ class StoreUpdate(Transform[SerializeTask]):
 
         self_ref_fk = task.self_referential_fk()
         if self_ref_fk:
-            new_fk_value = getattr(task.obj, self_ref_fk) or ""
+            new_fk_value = task.self_ref_fk_value
+            if new_fk_value is None:
+                new_fk_value = getattr(task.obj, self_ref_fk) or ""
             if new_fk_value != task.store._self_ref_fk:
                 task.store._self_ref_fk = new_fk_value
-                task.store._self_ref_order = self._compute_self_ref_order(new_fk_value)
+                task.store._self_ref_order = task.self_ref_order
 
     def _handle_store_create(self, task: SerializeTask):
         kwargs = {
@@ -207,28 +311,10 @@ class StoreUpdate(Transform[SerializeTask]):
 
         self_ref_fk = task.self_referential_fk()
         if self_ref_fk:
-            self_ref_fk_value = getattr(task.obj, self_ref_fk) or ""
-            kwargs["_self_ref_fk"] = self_ref_fk_value
-            kwargs["_self_ref_order"] = self._compute_self_ref_order(self_ref_fk_value)
+            kwargs["_self_ref_fk"] = task.self_ref_fk_value
+            kwargs["_self_ref_order"] = task.self_ref_order
 
         task.set_store(Store(**kwargs))
-
-    @staticmethod
-    def _compute_self_ref_order(self_ref_fk_value):
-        """
-        Compute ``_self_ref_order`` for a self-referential store record.
-
-        Returns ``0`` when the record has no parent (root), otherwise queries
-        the parent ``Store`` row and returns the next order value.
-        """
-        if not self_ref_fk_value:
-            return 0
-        parent_order = (
-            Store.objects.filter(id=self_ref_fk_value)
-            .values_list("_self_ref_order", flat=True)
-            .first()
-        )
-        return parent_order + 1 if parent_order is not None else None
 
 
 class ModelPartitionBuffer(Buffer[List[SerializeTask]]):
@@ -419,6 +505,7 @@ def serialize_into_store(
             AppModelSource(profile, sync_filter=sync_filter, dirty_only=dirty_only)
             .pipe(Buffer(size=500))
             .pipe(StoreLookup(current_id))
+            .pipe(SelfRefOrderLookup())
             .pipe(Unbuffer())
             .pipe(StoreUpdate(current_id))
             .pipe(ModelPartitionBuffer(size=500))
