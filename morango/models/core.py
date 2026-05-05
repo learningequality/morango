@@ -849,6 +849,13 @@ class SyncableModel(UUIDModelMixin):
             self._morango_dirty_bit = True
         elif not update_dirty_bit_to:
             self._morango_dirty_bit = False
+
+        # ensure the dirty bit field is in the fields to update if present, to keep it in sync
+        if update_dirty_bit_to is not None and kwargs.get("update_fields") is not None:
+            kwargs["update_fields"] = set(kwargs["update_fields"]) | {
+                "_morango_dirty_bit"
+            }
+
         super(SyncableModel, self).save(*args, **kwargs)
 
     def delete(

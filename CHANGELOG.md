@@ -2,6 +2,9 @@
 
 List of the most important changes for each release.
 
+## 0.8.12
+- Fixes issue where dirty-bit isn't updated when calling save on a syncable model with `update_fields`
+
 ## 0.8.11
 - Adds additional `deserialization_exception` field to `Store` model to track the fully qualified exception path
 
