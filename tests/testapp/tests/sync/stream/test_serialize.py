@@ -145,11 +145,14 @@ class StoreLookupTestCase(SimpleTestCase):
 
 
 class SelfRefOrderLookupTestCase(TestCase):
+    def setUp(self):
+        self.model = mock.Mock()
+
     def _task(self, obj_id=None, parent_id=None):
         obj = mock.Mock()
         obj.id = obj_id or uuid.uuid4().hex
         obj.parent_id = parent_id
-        return SerializeTask(mock.Mock(), obj)
+        return SerializeTask(self.model, obj)
 
     @mock.patch("morango.sync.stream.serialize.self_referential_fk", return_value="parent_id")
     def test_transform__same_batch_parent_child(self, _mock_srf):

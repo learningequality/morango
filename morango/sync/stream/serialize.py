@@ -1,6 +1,5 @@
 import json
 import logging
-from collections import defaultdict, deque
 from typing import Generator, Iterable, Iterator, List, Optional, Type
 
 from django.core.serializers.json import DjangoJSONEncoder
@@ -175,20 +174,21 @@ class SelfRefOrderLookup(Transform[List[SerializeTask]]):
     def __init__(self):
         # Carries resolved parent orders across buffered chunks in the same pipeline run.
         self.known_order_by_id = {}
+        self.current_model = None
 
     def transform(self, tasks: List[SerializeTask]) -> List[SerializeTask]:
         # Cache of resolved order values keyed by record id.
         known_order_by_id = self.known_order_by_id
-        # Self-ref tasks present in the current buffered batch.
-        tasks_by_id = {}
-        # Adjacency list for the in-batch self-ref graph: parent_id -> [child tasks].
-        children_by_parent = defaultdict(list)
+        unresolved_tasks = []
+
+        if tasks and self.current_model != tasks[0].model:
+            known_order_by_id.clear()
+            self.current_model = tasks[0].model
 
         # First pass:
         # - identify roots (order = 0)
-        # - build lookup maps:
-        #     tasks_by_id → tasks present in this batch
-        #     children_by_parent → {parent_id → list of child tasks}
+        # - resolve children immediately if parent is already in cache
+        # - queue remaining children for DB fallback and secondary pass
         for task in tasks:
             self_ref_fk = task.self_referential_fk()
             if not self_ref_fk:
@@ -198,44 +198,51 @@ class SelfRefOrderLookup(Transform[List[SerializeTask]]):
 
             self_ref_fk_value = getattr(task.obj, self_ref_fk) or ""
             task.set_self_ref_fk_value(self_ref_fk_value)
-            tasks_by_id[task.obj.id] = task
 
             if not self_ref_fk_value:
                 task.set_self_ref_order(0)
                 known_order_by_id[task.obj.id] = 0
                 continue
 
+            parent_order = known_order_by_id.get(self_ref_fk_value)
+            if parent_order is not None:
+                child_order = parent_order + 1
+                task.set_self_ref_order(child_order)
+                known_order_by_id[task.obj.id] = child_order
+            else:
+                task.set_self_ref_order(None)
+                unresolved_tasks.append(task)
 
-            task.set_self_ref_order(None)
-            children_by_parent[self_ref_fk_value].append(task)
-
-        # Parent IDs that are referenced by this batch but not present in this batch.
-        # These must be looked up from existing Store rows.
-        external_parent_ids = set(children_by_parent.keys()) - set(tasks_by_id.keys())
-        if external_parent_ids:
+        # DB fallback for parents that were not available in cache during the first pass.
+        unresolved_parent_ids = set(
+            task.self_ref_fk_value for task in unresolved_tasks if task.self_ref_fk_value
+        )
+        if unresolved_parent_ids:
             for parent_id, parent_order in Store.objects.filter(
-                id__in=external_parent_ids
+                id__in=unresolved_parent_ids
             ).values_list("id", "_self_ref_order"):
                 if parent_order is not None:
                     known_order_by_id[parent_id] = parent_order
 
-        # Breadth-first propagation from all known parents (roots + DB-resolved parents).
-        # Each resolved parent unlocks its children as `parent + 1`.
-        queue = deque(known_order_by_id.keys())
-        while queue:
-            parent_id = queue.popleft()
-            parent_order = known_order_by_id.get(parent_id)
-            if parent_order is None:
-                continue
-
-            for task in children_by_parent.get(parent_id, []):
-                if task.self_ref_order is not None:
+        # Resolve remaining children by repeatedly scanning only unresolved tasks.
+        pending = unresolved_tasks
+        while pending:
+            next_pending = []
+            progressed = False
+            for task in pending:
+                parent_order = known_order_by_id.get(task.self_ref_fk_value)
+                if parent_order is None:
+                    next_pending.append(task)
                     continue
+
                 child_order = parent_order + 1
                 task.set_self_ref_order(child_order)
-                child_id = task.obj.id
-                known_order_by_id[child_id] = child_order
-                queue.append(child_id)
+                known_order_by_id[task.obj.id] = child_order
+                progressed = True
+
+            if not progressed:
+                break
+            pending = next_pending
 
         return tasks
 
