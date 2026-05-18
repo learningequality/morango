@@ -1737,7 +1737,7 @@ requires-dist = [
     { name = "pytest-django", marker = "extra == 'test'", specifier = "==4.5.2" },
     { name = "requests" },
     { name = "rsa", specifier = "<4.10" },
-    { name = "rsa", marker = "extra == 'docs'", specifier = "==3.4.2" },
+    { name = "rsa", marker = "extra == 'docs'", specifier = "==4.9.1" },
     { name = "sphinx", marker = "extra == 'docs'" },
     { name = "sphinx-autobuild", marker = "extra == 'docs'" },
     { name = "sphinx-intl", marker = "extra == 'docs'" },
@@ -2489,15 +2489,15 @@ wheels = [
 
 [[package]]
 name = "rsa"
-version = "3.4.2"
+version = "4.9.1"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "pyasn1", version = "0.5.1", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.8'" },
     { name = "pyasn1", version = "0.6.3", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.8'" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/14/89/adf8b72371e37f3ca69c6cb8ab6319d009c4a24b04a31399e5bd77d9bb57/rsa-3.4.2.tar.gz", hash = "sha256:25df4e10c263fb88b5ace923dd84bf9aa7f5019687b5e55382ffcdb8bede9db5", size = 40956, upload-time = "2016-03-29T13:16:48.113Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/da/8a/22b7beea3ee0d44b1916c0c1cb0ee3af23b700b6da9f04991899d0c555d4/rsa-4.9.1.tar.gz", hash = "sha256:e7bdbfdb5497da4c07dfd35530e1a902659db6ff241e39d9953cad06ebd0ae75", size = 29034, upload-time = "2025-04-16T09:51:18.218Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/e1/ae/baedc9cb175552e95f3395c43055a6a5e125ae4d48a1d7a924baca83e92e/rsa-3.4.2-py2.py3-none-any.whl", hash = "sha256:43f682fea81c452c98d09fc316aae12de6d30c4b5c84226642cf8f8fd1c93abd", size = 46918, upload-time = "2016-03-29T13:16:23.973Z" },
+    { url = "https://files.pythonhosted.org/packages/64/8d/0133e4eb4beed9e425d9a98ed6e081a55d195481b7632472be1af08d2f6b/rsa-4.9.1-py3-none-any.whl", hash = "sha256:68635866661c6836b8d39430f97a996acbd61bfa49406748ea243539fe239762", size = 34696, upload-time = "2025-04-16T09:51:17.142Z" },
 ]
 
 [[package]]

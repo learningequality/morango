@@ -64,7 +64,7 @@ docs = [
     "django==3.2.25",
     "djangorestframework==3.14.0",
     "django-mptt>=0.14.0,<1",
-    "rsa==3.4.2",
+    "rsa==4.9.1",
     "ifcfg==0.24",
 ]
 
