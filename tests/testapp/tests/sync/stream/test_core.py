@@ -76,6 +76,27 @@ class BufferTestCase(SimpleTestCase):
             Buffer(size=0)
 
 
+class PartitionedBufferTestCase(SimpleTestCase):
+    def setUp(self):
+        self.buff = Buffer(size=3, partition_fn=lambda n: n % 2)
+
+    def test_mixed(self):
+        result = list(self.buff([0, 2, 3, 4, 6, 7, 8]))
+        self.assertEqual([[0, 2], [3], [4, 6], [7], [8]], result)
+
+    def test_uniform(self):
+        result = list(self.buff([0, 2, 4, 6, 8]))
+        self.assertEqual([[0, 2, 4], [6, 8]], result)
+
+    def test_leading(self):
+        result = list(self.buff([0, 3, 5, 7, 9]))
+        self.assertEqual([[0], [3, 5, 7], [9]], result)
+
+    def test_trailing(self):
+        result = list(self.buff([0, 2, 4, 6, 8, 9]))
+        self.assertEqual([[0, 2, 4], [6, 8], [9]], result)
+
+
 class UnbufferTestCase(SimpleTestCase):
     def test_unbuffer(self):
         unbuff = Unbuffer()

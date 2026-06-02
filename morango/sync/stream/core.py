@@ -6,7 +6,7 @@ a pipeline of connected modules, reducing memory overhead.
 """
 
 import abc
-from typing import Any, Generic, Iterable, Iterator, List, Optional, TypeVar
+from typing import Any, Callable, Generic, Iterable, Iterator, List, Optional, TypeVar
 
 T = TypeVar("T")
 
@@ -156,23 +156,32 @@ class Buffer(OperatorModule, Generic[T]):
 
     Inserting a buffer into the pipeline converts a stream of individual items into a stream of
     lists of those items, which is useful for batching database operations such as `bulk_create`.
+    To create uniform chunks, a partition callable can be provided, and chunks will be yielded with
+    consistent partitions (as returned by the callable).
     """
 
-    def __init__(self, size: int) -> None:
+    def __init__(self, size: int, partition_fn: Optional[Callable[[T], Any]] = None) -> None:
         """
         :param size: Maximum number of items per chunk.
+        :param partition_fn: Partitions by the function's return value, invoked with each item
         """
         if size < 1:
             raise ValueError("Buffer size must be >= 1")
         self.size = size
+        self.partition_func = partition_fn
 
     def __call__(self, items: Iterable[T]) -> Iterator[List[T]]:
-        chunk = []
+        chunk: List[T] = []
+        last_partition_value: Optional[Any] = None
+
         for item in items:
-            chunk.append(item)
-            if len(chunk) >= self.size:
+            partition_value = self.partition_func(item) if self.partition_func else None
+            if len(chunk) >= self.size or (chunk and partition_value != last_partition_value):
                 yield chunk
                 chunk = []
+            last_partition_value = partition_value
+            chunk.append(item)
+
         if chunk:
             yield chunk
 
