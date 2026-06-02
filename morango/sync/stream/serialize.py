@@ -1,6 +1,6 @@
 import json
 import logging
-from typing import Generator, Iterable, Iterator, List, Optional, Type
+from typing import Generator, List, Optional, Type
 
 from django.core.serializers.json import DjangoJSONEncoder
 from django.db.models import Q
@@ -17,7 +17,6 @@ from morango.models.core import (
 )
 from morango.registry import syncable_models
 from morango.sync.stream.core import Buffer, Sink, Source, Transform, Unbuffer
-from morango.utils import self_referential_fk
 
 logger = logging.getLogger(__name__)
 
@@ -30,6 +29,7 @@ class SerializeTask(object):
         "obj",
         "store",
         "counter",
+        "_self_ref_fk_value",
         "_self_ref_fk_value",
         "_self_ref_order",
     )
@@ -58,7 +58,7 @@ class SerializeTask(object):
 
     def self_referential_fk(self) -> Optional[str]:
         """Return the attname of the self-referential FK on *model*, or ``None``."""
-        return self_referential_fk(self.model)
+        return syncable_models.get_self_referential_fk(self.model)
 
     @property
     def self_ref_fk_value(self) -> Optional[str]:
@@ -172,23 +172,62 @@ class SelfRefOrderLookup(Transform[List[SerializeTask]]):
     """
 
     def __init__(self):
-        # Carries resolved parent orders across buffered chunks in the same pipeline run.
-        self.known_order_by_id = {}
-        self.current_model = None
+        # Cache of resolved order values keyed by record id.
+        self.known_order_by_id: dict[str, int] = {}
+        self.current_model: Optional[Type[SyncableModel]] = None
 
     def transform(self, tasks: List[SerializeTask]) -> List[SerializeTask]:
-        # Cache of resolved order values keyed by record id.
-        known_order_by_id = self.known_order_by_id
-        unresolved_tasks = []
-
+        # Carries resolved parent orders across buffered chunks in the same pipeline run,
+        # clearing the cache when the model changes, which depends on partitioned buffers.
         if tasks and self.current_model != tasks[0].model:
-            known_order_by_id.clear()
+            self.known_order_by_id.clear()
             self.current_model = tasks[0].model
 
-        # First pass:
-        # - identify roots (order = 0)
-        # - resolve children immediately if parent is already in cache
-        # - queue remaining children for DB fallback and secondary pass
+        # first pass, assign order from cache if available and determine what needs looked up
+        unresolved_tasks = self._assign_from_cache(tasks)
+
+        # DB fallback for parents that were not available in cache during the first pass.
+        unresolved_parent_ids = set(
+            task.self_ref_fk_value for task in unresolved_tasks if task.self_ref_fk_value
+        )
+        if unresolved_parent_ids:
+            for parent_id, parent_order in Store.objects.filter(
+                id__in=unresolved_parent_ids
+            ).values_list("id", "_self_ref_order"):
+                if parent_order is not None:
+                    self.known_order_by_id[parent_id] = parent_order
+
+        # Resolve remaining children by repeatedly scanning only unresolved tasks.
+        pending = unresolved_tasks
+        while pending:
+            next_pending = []
+            progressed = False
+            for task in pending:
+                parent_order = self.known_order_by_id.get(task.self_ref_fk_value)
+                if parent_order is None:
+                    next_pending.append(task)
+                    continue
+
+                child_order = parent_order + 1
+                task.set_self_ref_order(child_order)
+                self.known_order_by_id[task.obj.id] = child_order
+                progressed = True
+
+            if not progressed:
+                break
+            pending = next_pending
+
+        return tasks
+
+    def _assign_from_cache(self, tasks: List[SerializeTask]) -> List[SerializeTask]:
+        """
+        First pass:
+         - identify roots (order = 0)
+         - resolve children immediately if parent is already in cache
+         - queue remaining children for DB fallback and secondary pass
+        """
+        unresolved_tasks = []
+
         for task in tasks:
             self_ref_fk = task.self_referential_fk()
             if not self_ref_fk:
@@ -201,50 +240,19 @@ class SelfRefOrderLookup(Transform[List[SerializeTask]]):
 
             if not self_ref_fk_value:
                 task.set_self_ref_order(0)
-                known_order_by_id[task.obj.id] = 0
+                self.known_order_by_id[task.obj.id] = 0
                 continue
 
-            parent_order = known_order_by_id.get(self_ref_fk_value)
+            parent_order = self.known_order_by_id.get(self_ref_fk_value)
             if parent_order is not None:
                 child_order = parent_order + 1
                 task.set_self_ref_order(child_order)
-                known_order_by_id[task.obj.id] = child_order
+                self.known_order_by_id[task.obj.id] = child_order
             else:
                 task.set_self_ref_order(None)
                 unresolved_tasks.append(task)
 
-        # DB fallback for parents that were not available in cache during the first pass.
-        unresolved_parent_ids = set(
-            task.self_ref_fk_value for task in unresolved_tasks if task.self_ref_fk_value
-        )
-        if unresolved_parent_ids:
-            for parent_id, parent_order in Store.objects.filter(
-                id__in=unresolved_parent_ids
-            ).values_list("id", "_self_ref_order"):
-                if parent_order is not None:
-                    known_order_by_id[parent_id] = parent_order
-
-        # Resolve remaining children by repeatedly scanning only unresolved tasks.
-        pending = unresolved_tasks
-        while pending:
-            next_pending = []
-            progressed = False
-            for task in pending:
-                parent_order = known_order_by_id.get(task.self_ref_fk_value)
-                if parent_order is None:
-                    next_pending.append(task)
-                    continue
-
-                child_order = parent_order + 1
-                task.set_self_ref_order(child_order)
-                known_order_by_id[task.obj.id] = child_order
-                progressed = True
-
-            if not progressed:
-                break
-            pending = next_pending
-
-        return tasks
+        return unresolved_tasks
 
 
 class StoreUpdate(Transform[SerializeTask]):
@@ -322,24 +330,6 @@ class StoreUpdate(Transform[SerializeTask]):
             kwargs["_self_ref_order"] = task.self_ref_order
 
         task.set_store(Store(**kwargs))
-
-
-class ModelPartitionBuffer(Buffer[List[SerializeTask]]):
-    """Buffers tasks into chunks that have the same model class."""
-
-    def __call__(self, tasks: Iterable[SerializeTask]) -> Iterator[List[SerializeTask]]:
-        chunk = []
-        last_model = None
-
-        for task in tasks:
-            if len(chunk) >= self.size or (last_model and last_model != task.model):
-                yield chunk
-                chunk = []
-            last_model = task.model
-            chunk.append(task)
-
-        if chunk:
-            yield chunk
 
 
 class WriteSink(Sink[List[SerializeTask]]):
@@ -494,6 +484,10 @@ class WriteSink(Sink[List[SerializeTask]]):
                 )
 
 
+def task_model_partition_fn(task: SerializeTask) -> Type[SyncableModel]:
+    return task.model
+
+
 def serialize_into_store(
     profile: str, sync_filter: Optional[Filter] = None, dirty_only: bool = True
 ):
@@ -510,12 +504,12 @@ def serialize_into_store(
         # Execute the main pipeline (consumes the source through to the sink).
         result_count = (
             AppModelSource(profile, sync_filter=sync_filter, dirty_only=dirty_only)
-            .pipe(Buffer(size=500))
+            .pipe(Buffer(size=500, partition_fn=task_model_partition_fn))
             .pipe(StoreLookup(current_id))
             .pipe(SelfRefOrderLookup())
             .pipe(Unbuffer())
             .pipe(StoreUpdate(current_id))
-            .pipe(ModelPartitionBuffer(size=500))
+            .pipe(Buffer(size=500, partition_fn=task_model_partition_fn))
             .end(WriteSink(profile, current_id, sync_filter=sync_filter))
         )
         logger.info(f"Serialization done: {result_count} records")

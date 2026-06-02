@@ -9,7 +9,6 @@ from morango.models.certificates import Filter
 from morango.models.core import InstanceIDModel, RecordMaxCounter, Store, SyncableModel
 from morango.sync.stream.serialize import (
     AppModelSource,
-    ModelPartitionBuffer,
     SelfRefOrderLookup,
     SerializeTask,
     StoreLookup,
@@ -38,7 +37,7 @@ class SerializeTaskTestCase(SimpleTestCase):
         self.task.set_counter(counter)
         self.assertTrue(self.task.is_counter_update)
 
-    @mock.patch("morango.sync.stream.serialize.self_referential_fk")
+    @mock.patch("morango.sync.stream.serialize.syncable_models.get_self_referential_fk")
     def test_self_referential_fk(self, mock_self_referential_fk):
         mock_self_referential_fk.return_value = "self_ref_fk"
         self.assertEqual(self.task.self_referential_fk(), "self_ref_fk")
@@ -154,7 +153,10 @@ class SelfRefOrderLookupTestCase(TestCase):
         obj.parent_id = parent_id
         return SerializeTask(self.model, obj)
 
-    @mock.patch("morango.sync.stream.serialize.self_referential_fk", return_value="parent_id")
+    @mock.patch(
+        "morango.sync.stream.serialize.syncable_models.get_self_referential_fk",
+        return_value="parent_id",
+    )
     def test_transform__same_batch_parent_child(self, _mock_srf):
         parent = self._task(parent_id=None)
         child = self._task(parent_id=parent.obj.id)
@@ -166,7 +168,10 @@ class SelfRefOrderLookupTestCase(TestCase):
         self.assertEqual(child.self_ref_fk_value, parent.obj.id)
         self.assertEqual(child.self_ref_order, 1)
 
-    @mock.patch("morango.sync.stream.serialize.self_referential_fk", return_value="parent_id")
+    @mock.patch(
+        "morango.sync.stream.serialize.syncable_models.get_self_referential_fk",
+        return_value="parent_id",
+    )
     def test_transform__same_batch_deeper_chain(self, _mock_srf):
         root = self._task(parent_id=None)
         child = self._task(parent_id=root.obj.id)
@@ -178,7 +183,10 @@ class SelfRefOrderLookupTestCase(TestCase):
         self.assertEqual(child.self_ref_order, 1)
         self.assertEqual(grandchild.self_ref_order, 2)
 
-    @mock.patch("morango.sync.stream.serialize.self_referential_fk", return_value="parent_id")
+    @mock.patch(
+        "morango.sync.stream.serialize.syncable_models.get_self_referential_fk",
+        return_value="parent_id",
+    )
     def test_transform__previous_batches_feed_later_children(self, _mock_srf):
         root = self._task(parent_id=None)
         child = self._task(parent_id=root.obj.id)
@@ -193,7 +201,10 @@ class SelfRefOrderLookupTestCase(TestCase):
         self.assertEqual(child.self_ref_order, 1)
         self.assertEqual(grandchild.self_ref_order, 2)
 
-    @mock.patch("morango.sync.stream.serialize.self_referential_fk", return_value="parent_id")
+    @mock.patch(
+        "morango.sync.stream.serialize.syncable_models.get_self_referential_fk",
+        return_value="parent_id",
+    )
     def test_transform__parent_in_store(self, _mock_srf):
         parent_store = _make_store(_self_ref_order=3)
         child = self._task(parent_id=parent_store.id)
@@ -203,7 +214,10 @@ class SelfRefOrderLookupTestCase(TestCase):
         self.assertEqual(child.self_ref_fk_value, parent_store.id)
         self.assertEqual(child.self_ref_order, 4)
 
-    @mock.patch("morango.sync.stream.serialize.self_referential_fk", return_value="parent_id")
+    @mock.patch(
+        "morango.sync.stream.serialize.syncable_models.get_self_referential_fk",
+        return_value="parent_id",
+    )
     def test_transform__missing_parent(self, _mock_srf):
         missing_parent_id = uuid.uuid4().hex
         child = self._task(parent_id=missing_parent_id)
@@ -213,7 +227,10 @@ class SelfRefOrderLookupTestCase(TestCase):
         self.assertEqual(child.self_ref_fk_value, missing_parent_id)
         self.assertIsNone(child.self_ref_order)
 
-    @mock.patch("morango.sync.stream.serialize.self_referential_fk", return_value=None)
+    @mock.patch(
+        "morango.sync.stream.serialize.syncable_models.get_self_referential_fk",
+        return_value=None,
+    )
     def test_transform__non_self_ref(self, _mock_srf):
         task = self._task()
 
@@ -269,7 +286,10 @@ class StoreUpdateTestCase(SimpleTestCase):
         mock_handle_store_update.assert_called_once_with(task)
         self.assertEqual(task.counter.counter, 10)
 
-    @mock.patch("morango.sync.stream.serialize.self_referential_fk", return_value=None)
+    @mock.patch(
+        "morango.sync.stream.serialize.syncable_models.get_self_referential_fk",
+        return_value=None,
+    )
     def test_handle_store_update(self, _mock_srf):
         current_id = mock.Mock(id="inst_1", counter=10)
         update = StoreUpdate(current_id)
@@ -287,7 +307,10 @@ class StoreUpdateTestCase(SimpleTestCase):
         self.assertEqual(ser_data["old"], 1)
         self.assertEqual(ser_data["new"], 2)
 
-    @mock.patch("morango.sync.stream.serialize.self_referential_fk", return_value=None)
+    @mock.patch(
+        "morango.sync.stream.serialize.syncable_models.get_self_referential_fk",
+        return_value=None,
+    )
     def test_handle_store_create__non_self_ref(self, _mock_srf):
         current_id = mock.Mock(id="inst_1", counter=1)
         update = StoreUpdate(current_id)
@@ -299,7 +322,10 @@ class StoreUpdateTestCase(SimpleTestCase):
 
         self.assertIsNone(task.store._self_ref_order)
 
-    @mock.patch("morango.sync.stream.serialize.self_referential_fk", return_value="parent_id")
+    @mock.patch(
+        "morango.sync.stream.serialize.syncable_models.get_self_referential_fk",
+        return_value="parent_id",
+    )
     def test_handle_store_create__self_ref_no_parent(self, _mock_srf):
         current_id = mock.Mock(id="inst_1", counter=1)
         update = StoreUpdate(current_id)
@@ -314,7 +340,10 @@ class StoreUpdateTestCase(SimpleTestCase):
         self.assertEqual(task.store._self_ref_fk, "")
         self.assertEqual(task.store._self_ref_order, 0)
 
-    @mock.patch("morango.sync.stream.serialize.self_referential_fk", return_value="parent_id")
+    @mock.patch(
+        "morango.sync.stream.serialize.syncable_models.get_self_referential_fk",
+        return_value="parent_id",
+    )
     def test_handle_store_update__self_ref_fk_unchanged(self, _mock_srf):
         current_id = mock.Mock(id="inst_1", counter=2)
         update = StoreUpdate(current_id)
@@ -369,7 +398,10 @@ class StoreUpdateSelfRefOrderDbTestCase(TestCase):
         setattr(obj, self_ref_fk_field, fk_value)
         return SerializeTask(mock.Mock(), obj)
 
-    @mock.patch("morango.sync.stream.serialize.self_referential_fk", return_value="parent_id")
+    @mock.patch(
+        "morango.sync.stream.serialize.syncable_models.get_self_referential_fk",
+        return_value="parent_id",
+    )
     def test_handle_store_create__self_ref_with_parent(self, _mock_srf):
         parent_store = _make_store(_self_ref_order=3)
 
@@ -381,7 +413,10 @@ class StoreUpdateSelfRefOrderDbTestCase(TestCase):
         self.assertEqual(task.store._self_ref_fk, parent_store.id)
         self.assertEqual(task.store._self_ref_order, 4)
 
-    @mock.patch("morango.sync.stream.serialize.self_referential_fk", return_value="parent_id")
+    @mock.patch(
+        "morango.sync.stream.serialize.syncable_models.get_self_referential_fk",
+        return_value="parent_id",
+    )
     def test_handle_store_create__self_ref_parent_not_in_store(self, _mock_srf):
         missing_parent_id = uuid.uuid4().hex
 
@@ -393,7 +428,10 @@ class StoreUpdateSelfRefOrderDbTestCase(TestCase):
         self.assertEqual(task.store._self_ref_fk, missing_parent_id)
         self.assertIsNone(task.store._self_ref_order)
 
-    @mock.patch("morango.sync.stream.serialize.self_referential_fk", return_value="parent_id")
+    @mock.patch(
+        "morango.sync.stream.serialize.syncable_models.get_self_referential_fk",
+        return_value="parent_id",
+    )
     def test_handle_store_update__self_ref_fk_changed(self, _mock_srf):
         old_parent_store = _make_store(_self_ref_order=0)
         new_parent_store = _make_store(_self_ref_order=7)
@@ -416,23 +454,6 @@ class StoreUpdateSelfRefOrderDbTestCase(TestCase):
 
         self.assertEqual(task.store._self_ref_fk, new_parent_store.id)
         self.assertEqual(task.store._self_ref_order, 8)
-
-
-class ModelPartitionBufferTestCase(SimpleTestCase):
-    def test_buffer_splits_on_model_change(self):
-        buff = ModelPartitionBuffer(size=10)
-        m1, m2 = mock.Mock(), mock.Mock()
-        tasks = [
-            SerializeTask(m1, mock.Mock()),
-            SerializeTask(m1, mock.Mock()),
-            SerializeTask(m2, mock.Mock()),
-        ]
-
-        chunks = list(buff(tasks))
-        self.assertEqual(len(chunks), 2)
-        self.assertEqual(chunks[0][0].model, m1)
-        self.assertEqual(chunks[0][1].model, m1)
-        self.assertEqual(chunks[1][0].model, m2)
 
 
 class WriteSinkTestCase(SimpleTestCase):
