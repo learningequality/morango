@@ -1,5 +1,6 @@
 import os
 from importlib import import_module
+from typing import Optional
 
 from django.conf import settings
 
@@ -134,7 +135,7 @@ def _assert(condition, message, error_type=AssertionError):
         raise error_type(message)
 
 
-def self_referential_fk(klass_model):
+def self_referential_fk(klass_model) -> Optional[str]:
     """
     Return whether this model has a self ref FK, and the name for the field
     """

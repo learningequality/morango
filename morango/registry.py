@@ -5,8 +5,8 @@ This class is registered at app load time for morango in `apps.py`.
 
 import inspect
 import sys
-from collections import OrderedDict
-from typing import Generator
+from collections import OrderedDict, defaultdict
+from typing import Generator, Optional
 
 from django.db.models import F, QuerySet
 from django.db.models.fields.related import ForeignKey
@@ -17,7 +17,9 @@ from morango.errors import (
     ModelRegistryNotReady,
     UnsupportedFieldType,
 )
-from morango.utils import SETTINGS, do_import
+from morango.utils import SETTINGS, do_import, self_referential_fk
+
+_UNSET = object()
 
 
 def _get_foreign_key_classes(m):
@@ -57,6 +59,7 @@ class SyncableModelRegistry(object):
         self.profile_models = {}
         self.ready = False
         self.models_ready = {}
+        self.self_referential_fks = defaultdict(dict)
         if hasattr(sys.modules[__name__], "syncable_models"):
             raise RuntimeError("Master registry has already been initialized.")
 
@@ -78,6 +81,19 @@ class SyncableModelRegistry(object):
         """
         self.check_models_ready(profile)
         return list(self.profile_models.get(profile, {}).values())
+
+    def get_self_referential_fk(self, model) -> Optional[str]:
+        """
+        Cached helper for determining a syncable model's self-referential foreign key attribute name
+        :param model: The Morango syncable model
+        :type model: Type[MorangoSyncableModel]
+        """
+        profile_self_ref_fks = self.self_referential_fks[model.morango_profile]
+        model_self_ref_fk = profile_self_ref_fks.get(model.morango_model_name, _UNSET)
+        if model_self_ref_fk is _UNSET:
+            model_self_ref_fk = self_referential_fk(model)
+            profile_self_ref_fks[model.morango_model_name] = model_self_ref_fk
+        return model_self_ref_fk
 
     def get_model_querysets(self, profile) -> Generator[QuerySet, None, None]:
         """
