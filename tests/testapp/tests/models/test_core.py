@@ -2,13 +2,14 @@ import uuid
 
 import factory
 import mock
+from django.core.exceptions import ValidationError
 from django.test import TestCase, override_settings
 from django.utils import timezone
 from facility_profile.models import Facility, MyUser
 
 from morango.constants import transfer_stages, transfer_statuses
 from morango.models.certificates import Filter
-from morango.models.core import DatabaseMaxCounter, Store, SyncSession, TransferSession
+from morango.models.core import Buffer, DatabaseMaxCounter, Store, SyncSession, TransferSession
 from morango.sync.controller import MorangoProfileController
 
 from ..helpers import RecordMaxCounterFactory, StoreFactory
@@ -475,3 +476,63 @@ class StoreDeserializationErrorTestCase(TestCase):
         store.unset_deserialization_error()
         self.assertIsNone(store.deserialization_error)
         self.assertIsNone(store.deserialization_exception)
+
+
+class AbstractStoreSelfRefOrderValidationTestCase(TestCase):
+    def _store(self, self_ref_order):
+        return Store(
+            id=uuid.uuid4().hex,
+            profile="facilitydata",
+            serialized="{}",
+            deleted=False,
+            hard_deleted=False,
+            last_saved_instance=uuid.uuid4().hex,
+            last_saved_counter=1,
+            partition="partition",
+            source_id="source",
+            model_name="model",
+            _self_ref_order=self_ref_order,
+        )
+
+    def _buffer(self, self_ref_order):
+        sync_session = SyncSession.objects.create(
+            id=uuid.uuid4().hex,
+            profile="facilitydata",
+            last_activity_timestamp=timezone.now(),
+        )
+        transfer_session = TransferSession.objects.create(
+            id=uuid.uuid4().hex,
+            sync_session=sync_session,
+            push=True,
+            last_activity_timestamp=timezone.now(),
+        )
+        return Buffer(
+            transfer_session=transfer_session,
+            model_uuid=uuid.uuid4().hex,
+            profile="facilitydata",
+            serialized="{}",
+            deleted=False,
+            hard_deleted=False,
+            last_saved_instance=uuid.uuid4().hex,
+            last_saved_counter=1,
+            partition="partition",
+            source_id="source",
+            model_name="model",
+            _self_ref_order=self_ref_order,
+        )
+
+    def test_store_self_ref_order_allows_null(self):
+        self._store(None).full_clean()
+
+    def test_store_self_ref_order_rejects_negative(self):
+        store = self._store(-1)
+        with self.assertRaises(ValidationError):
+            store.full_clean()
+
+    def test_buffer_self_ref_order_allows_null(self):
+        self._buffer(None).full_clean()
+
+    def test_buffer_self_ref_order_rejects_negative(self):
+        buffer = self._buffer(-1)
+        with self.assertRaises(ValidationError):
+            buffer.full_clean()

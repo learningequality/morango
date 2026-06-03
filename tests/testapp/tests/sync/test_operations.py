@@ -8,7 +8,7 @@ from django.utils import timezone
 from facility_profile.models import ConditionalLog, Facility, MyUser, SummaryLog
 
 from morango.constants import transfer_statuses
-from morango.constants.capabilities import FSIC_V2_FORMAT
+from morango.constants.capabilities import FSIC_V2_FORMAT, SELF_REF_ORDER
 from morango.errors import MorangoLimitExceeded
 from morango.models.certificates import Filter
 from morango.models.core import (
@@ -37,6 +37,7 @@ from morango.sync.operations import (
     _deserialize_from_store,
     _queue_into_buffer_v1,
     _queue_into_buffer_v2,
+    _update_legacy_self_ref_order,
 )
 from morango.sync.syncsession import TransferClient
 
@@ -87,6 +88,14 @@ class QueueStoreIntoBufferV1TestCase(TestCase):
         assertRecordsBuffered(self.data["group1_c1"])
         assertRecordsBuffered(self.data["group1_c2"])
         assertRecordsBuffered(self.data["group2_c1"])
+
+    def test_self_ref_order_propagates_to_buffer(self):
+        Store.objects.update(_self_ref_order=42)
+        fsics = {self.data["group1_id"].id: 1, self.data["group2_id"].id: 1}
+        self.transfer_session.client_fsic = json.dumps(fsics)
+        _queue_into_buffer_v1(self.transfer_session)
+        self.assertTrue(Buffer.objects.exists())
+        self.assertFalse(Buffer.objects.exclude(_self_ref_order=42).exists())
 
     def test_very_many_fsics(self):
         """
@@ -277,6 +286,18 @@ class QueueStoreIntoBufferV2TestCase(TestCase):
             is_server=False,
             capabilities=[FSIC_V2_FORMAT],
         )
+
+    def test_self_ref_order_propagates_to_buffer(self):
+        Store.objects.update(_self_ref_order=42)
+        fsics = {
+            "super": {},
+            "sub": {"": {self.data["group1_id"].id: 1, self.data["group2_id"].id: 1}},
+        }
+        self.transfer_session.client_fsic = json.dumps(fsics)
+        self.transfer_session.server_fsic = json.dumps({"super": {}, "sub": {}})
+        _queue_into_buffer_v2(self.transfer_session)
+        self.assertTrue(Buffer.objects.exists())
+        self.assertFalse(Buffer.objects.exclude(_self_ref_order=42).exists())
 
     # @pytest.mark.skip("Takes 30+ seconds, manual run only")
     def test_very_many_instances_in_fsic(self):
@@ -634,7 +655,7 @@ class DequeueBufferIntoStoreTestCase(TestCase):
         conn.server_info = dict(capabilities=[])
         self.data["mc"] = MorangoProfileController("facilitydata")
         session = SyncSession.objects.create(
-            id=uuid.uuid4().hex, profile="", last_activity_timestamp=timezone.now()
+            id=uuid.uuid4().hex, profile="facilitydata", last_activity_timestamp=timezone.now()
         )
         self.transfer_session = TransferSession.objects.create(
             id=uuid.uuid4().hex,
@@ -663,6 +684,21 @@ class DequeueBufferIntoStoreTestCase(TestCase):
                 assert Store.objects.get(id=store_id).last_transfer_session_id != session_id
             except Store.DoesNotExist:
                 pass
+
+    def _make_transferred_store(self, **kwargs):
+        defaults = {
+            "id": uuid.uuid4().hex,
+            "serialized": "{}",
+            "last_saved_instance": self.current_id.id,
+            "last_saved_counter": 1,
+            "model_name": "facility",
+            "profile": "facilitydata",
+            "partition": uuid.uuid4().hex,
+            "source_id": uuid.uuid4().hex,
+            "last_transfer_session_id": self.transfer_session.id,
+        }
+        defaults.update(kwargs)
+        return Store.objects.create(**defaults)
 
     def test_dequeuing_sets_last_session(self):
         store_ids = [self.data[key] for key in ["model2", "model3", "model4", "model5", "model7"]]
@@ -788,6 +824,14 @@ class DequeueBufferIntoStoreTestCase(TestCase):
         self.assertEqual(store.serialized, "")
         self.assertEqual(store.conflicting_serialized_data, "")
 
+    def test_dequeuing_merge_conflict_buffer__self_ref_order_preserved(self):
+        Store.objects.filter(id=self.data["model2"]).update(_self_ref_order=11)
+        Buffer.objects.filter(model_uuid=self.data["model2"]).update(_self_ref_order=99)
+        with connection.cursor() as cursor:
+            current_id = InstanceIDModel.get_current_instance_and_increment_counter()
+            DBBackend._dequeuing_merge_conflict_buffer(cursor, current_id, self.transfer_session.id)
+        self.assertEqual(Store.objects.get(id=self.data["model2"])._self_ref_order, 11)
+
     def test_dequeuing_update_rmcs_last_saved_by(self):
         self.assertFalse(RecordMaxCounter.objects.filter(instance_id=self.current_id.id).exists())
         with connection.cursor() as cursor:
@@ -841,6 +885,13 @@ class DequeueBufferIntoStoreTestCase(TestCase):
             DBBackend._dequeuing_insert_remaining_buffer(cursor, self.transfer_session.id)
         self.assertEqual(Store.objects.get(id=self.data["model3"]).serialized, "buffer")
         self.assertTrue(Store.objects.filter(id=self.data["model4"]).exists())
+
+    def test_dequeuing_insert_remaining_buffer__self_ref_order_propagates(self):
+        Buffer.objects.filter(model_uuid=self.data["model4"]).update(_self_ref_order=7)
+        self.assertFalse(Store.objects.filter(id=self.data["model4"]).exists())
+        with connection.cursor() as cursor:
+            DBBackend._dequeuing_insert_remaining_buffer(cursor, self.transfer_session.id)
+        self.assertEqual(Store.objects.get(id=self.data["model4"])._self_ref_order, 7)
 
     def test_dequeuing_insert_remaining_rmcb(self):
         for i in self.data["model4_rmcb_ids"]:
@@ -956,6 +1007,55 @@ class DequeueBufferIntoStoreTestCase(TestCase):
             ).exists()
         )
 
+    def test_dequeue_into_store__self_ref_order_fallback_for_missing_capability(self):
+        Buffer.objects.filter(model_uuid=self.data["model3"]).update(
+            _self_ref_fk="", _self_ref_order=None
+        )
+        Buffer.objects.filter(model_uuid=self.data["model4"]).update(
+            _self_ref_fk=self.data["model3"], _self_ref_order=None
+        )
+
+        _dequeue_into_store(
+            self.transfer_session,
+            self.transfer_session.client_fsic,
+            v2_format=False,
+            self_ref_order=False,
+        )
+
+        self.assertEqual(Store.objects.get(id=self.data["model3"])._self_ref_order, 0)
+        self.assertEqual(Store.objects.get(id=self.data["model4"])._self_ref_order, 1)
+
+    def test_update_legacy_self_ref_order_nulls_non_self_ref_models(self):
+        store = self._make_transferred_store(
+            model_name=SummaryLog.morango_model_name,
+            _self_ref_order=3,
+        )
+
+        _update_legacy_self_ref_order(self.transfer_session)
+
+        store.refresh_from_db()
+        self.assertIsNone(store._self_ref_order)
+
+    def test_update_legacy_self_ref_order_handles_deeper_self_ref_chains(self):
+        root = self._make_transferred_store(_self_ref_fk="", _self_ref_order=None)
+        child = self._make_transferred_store(
+            _self_ref_fk=root.id,
+            _self_ref_order=None,
+        )
+        grandchild = self._make_transferred_store(
+            _self_ref_fk=child.id,
+            _self_ref_order=None,
+        )
+
+        _update_legacy_self_ref_order(self.transfer_session)
+
+        root.refresh_from_db()
+        child.refresh_from_db()
+        grandchild.refresh_from_db()
+        self.assertEqual(root._self_ref_order, 0)
+        self.assertEqual(child._self_ref_order, 1)
+        self.assertEqual(grandchild._self_ref_order, 2)
+
     def test_local_dequeue_operation(self):
         self.transfer_session.records_transferred = 1
         self.context.filter = [self.transfer_session.filter]
@@ -963,6 +1063,19 @@ class DequeueBufferIntoStoreTestCase(TestCase):
         self.assertEqual(transfer_statuses.COMPLETED, operation.handle(self.context))
         self.assertFalse(
             Buffer.objects.filter(transfer_session_id=self.transfer_session.id).exists()
+        )
+
+    @mock.patch("morango.sync.operations._dequeue_into_store")
+    def test_local_dequeue_operation__passes_self_ref_order_capability(self, mock_dequeue):
+        self.transfer_session.records_transferred = 1
+        self.context.capabilities = {SELF_REF_ORDER}
+        operation = ReceiverDequeueOperation()
+        self.assertEqual(transfer_statuses.COMPLETED, operation.handle(self.context))
+        mock_dequeue.assert_called_once_with(
+            self.transfer_session,
+            self.transfer_session.client_fsic,
+            v2_format=False,
+            self_ref_order=True,
         )
 
     @mock.patch("morango.sync.operations._dequeue_into_store")

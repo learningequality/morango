@@ -1,5 +1,6 @@
 import os
 from importlib import import_module
+from typing import Optional
 
 from django.conf import settings
 
@@ -9,6 +10,7 @@ from morango.constants.capabilities import (
     ASYNC_OPERATIONS,
     FSIC_V2_FORMAT,
     GZIP_BUFFER_POST,
+    SELF_REF_ORDER,
 )
 
 
@@ -60,6 +62,8 @@ def get_capabilities():
     # Middleware async operation capabilities are standard in 0.6.0 and above
     if not SETTINGS.MORANGO_DISALLOW_ASYNC_OPERATIONS:
         capabilities.add(ASYNC_OPERATIONS)
+
+    capabilities.add(SELF_REF_ORDER)
 
     return capabilities
 
@@ -131,7 +135,7 @@ def _assert(condition, message, error_type=AssertionError):
         raise error_type(message)
 
 
-def self_referential_fk(klass_model):
+def self_referential_fk(klass_model) -> Optional[str]:
     """
     Return whether this model has a self ref FK, and the name for the field
     """

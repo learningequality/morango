@@ -6,6 +6,7 @@ from collections import defaultdict, namedtuple
 from functools import reduce
 
 from django.core import exceptions
+from django.core.validators import MinValueValidator
 from django.db import connection, models, router, transaction
 from django.db.models import F, Func, Max, Q, TextField, Value, signals
 from django.db.models.deletion import Collector
@@ -391,6 +392,9 @@ class AbstractStore(models.Model):
     conflicting_serialized_data = models.TextField(blank=True)
 
     _self_ref_fk = models.CharField(max_length=32, blank=True)
+    _self_ref_order = models.IntegerField(
+        blank=True, null=True, validators=[MinValueValidator(0)]
+    )
 
     class Meta:
         abstract = True
@@ -786,6 +790,7 @@ class SyncableModel(UUIDModelMixin):
 
     _morango_internal_fields_not_to_serialize = ("_morango_dirty_bit",)
     morango_model_dependencies = ()
+    morango_ordering = ()
     morango_fields_not_to_serialize = ()
     morango_profile = None
 

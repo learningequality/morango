@@ -10,11 +10,14 @@ from django.db import connection
 from django.db import transaction
 from django.db.models import CharField
 from django.db.models import F
+from django.db.models import Exists
+from django.db.models import OuterRef
 from django.db.models import Q
+from django.db.models import Subquery
 from django.db.models import signals
 from django.db.models import Value
 from django.db.models.fields import BooleanField
-from django.db.models.functions import NullIf
+from django.db.models.functions import NullIf, Cast
 from django.db.utils import IntegrityError
 from django.db.utils import OperationalError
 from django.utils import timezone
@@ -25,6 +28,7 @@ from morango.constants import transfer_stages
 from morango.constants import transfer_statuses
 from morango.constants.capabilities import ASYNC_OPERATIONS
 from morango.constants.capabilities import FSIC_V2_FORMAT
+from morango.constants.capabilities import SELF_REF_ORDER
 from morango.errors import MorangoDirtyParent
 from morango.errors import MorangoInvalidFSICPartition
 from morango.errors import MorangoLimitExceeded
@@ -525,7 +529,7 @@ def _queue_into_buffer_v1(transfersession):
                 """SELECT
                        id, serialized, deleted, last_saved_instance, last_saved_counter, hard_deleted, model_name, profile,
                        partition, source_id, conflicting_serialized_data,
-                       CAST ('{transfer_session_id}' AS {transfer_session_id_type}), _self_ref_fk
+                       CAST ('{transfer_session_id}' AS {transfer_session_id_type}), _self_ref_fk, _self_ref_order
                    FROM {store} WHERE {condition}
                 """.format(
                     transfer_session_id=transfersession.id,
@@ -556,7 +560,7 @@ def _queue_into_buffer_v1(transfersession):
                 """INSERT INTO {outgoing_buffer}
                    (model_uuid, serialized, deleted, last_saved_instance, last_saved_counter,
                    hard_deleted, model_name, profile, partition, source_id, conflicting_serialized_data,
-                   transfer_session_id, _self_ref_fk)
+                   transfer_session_id, _self_ref_fk, _self_ref_order)
                    {select}
                 """.format(
                     outgoing_buffer=Buffer._meta.db_table,
@@ -674,7 +678,7 @@ def _queue_into_buffer_v2(transfersession, chunk_size=200):
                 """SELECT
                         id, serialized, deleted, last_saved_instance, last_saved_counter, hard_deleted, model_name, profile,
                         partition, source_id, conflicting_serialized_data,
-                        CAST ('{transfer_session_id}' AS {transfer_session_id_type}), _self_ref_fk
+                        CAST ('{transfer_session_id}' AS {transfer_session_id_type}), _self_ref_fk, _self_ref_order
                     FROM {store} WHERE {condition}
                 """.format(
                     transfer_session_id=transfersession.id,
@@ -703,7 +707,7 @@ def _queue_into_buffer_v2(transfersession, chunk_size=200):
                 """INSERT INTO {outgoing_buffer}
                    (model_uuid, serialized, deleted, last_saved_instance, last_saved_counter,
                    hard_deleted, model_name, profile, partition, source_id, conflicting_serialized_data,
-                   transfer_session_id, _self_ref_fk)
+                   transfer_session_id, _self_ref_fk, _self_ref_order)
                    {select}
                 """.format(
                     outgoing_buffer=Buffer._meta.db_table,
@@ -721,7 +725,41 @@ def _queue_into_buffer_v2(transfersession, chunk_size=200):
             )
 
 
-def _dequeue_into_store(transfer_session, fsic, v2_format=False):
+def _update_legacy_self_ref_order_for_model(queryset):
+    # root nodes set the _self_ref_order to 0
+    queryset.filter(_self_ref_fk="").exclude(_self_ref_order=0).update(_self_ref_order=0)
+    # reset the _self_ref_order to None for all records that have a parent
+    queryset.exclude(_self_ref_fk="").exclude(_self_ref_order=None).update(
+        _self_ref_order=None
+    )
+
+    parent = Store.objects.filter(
+        id=Cast(OuterRef("_self_ref_fk"), UUIDField()),
+        _self_ref_order__isnull=False,
+    )
+    parent_order = parent.values("_self_ref_order")[:1]
+    pending = queryset.exclude(_self_ref_fk="").filter(_self_ref_order=None)
+
+    while pending.filter(Exists(parent)).update(_self_ref_order=Subquery(parent_order) + 1):
+        pass
+
+
+def _update_legacy_self_ref_order(transfer_session):
+    profile = transfer_session.sync_session.profile
+    transferred_store_records = Store.objects.filter(
+        last_transfer_session_id=transfer_session.id,
+        profile=profile,
+    )
+
+    for Model in syncable_models.get_models(profile):
+        queryset = transferred_store_records.filter(model_name=Model.morango_model_name)
+        if self_referential_fk(Model):
+            _update_legacy_self_ref_order_for_model(queryset)
+        else:
+            queryset.exclude(_self_ref_order=None).update(_self_ref_order=None)
+
+
+def _dequeue_into_store(transfer_session, fsic, v2_format=False, self_ref_order=True):
     """
     Takes data from the buffers and merges into the store and record max counters.
 
@@ -745,6 +783,8 @@ def _dequeue_into_store(transfer_session, fsic, v2_format=False):
             DBBackend._dequeuing_delete_mc_buffer(cursor, transfer_session.id)
             DBBackend._dequeuing_insert_remaining_buffer(cursor, transfer_session.id)
             DBBackend._dequeuing_insert_remaining_rmcb(cursor, transfer_session.id)
+            if not self_ref_order:
+                _update_legacy_self_ref_order(transfer_session)
             DBBackend._dequeuing_delete_remaining_rmcb(cursor, transfer_session.id)
             DBBackend._dequeuing_delete_remaining_buffer(cursor, transfer_session.id)
 
@@ -1083,6 +1123,7 @@ class ReceiverDequeueOperation(LocalOperation):
                 context.transfer_session,
                 fsic,
                 v2_format=FSIC_V2_FORMAT in context.capabilities,
+                self_ref_order=SELF_REF_ORDER in context.capabilities,
             )
 
         return transfer_statuses.COMPLETED
