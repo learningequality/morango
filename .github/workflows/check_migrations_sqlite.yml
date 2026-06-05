@@ -23,7 +23,7 @@ jobs:
           fetch-depth: 0
       - name: Install uv
         if: ${{ needs.pre_job.outputs.should_skip != 'true' }}
-        uses: astral-sh/setup-uv@v7
+        uses: astral-sh/setup-uv@v8.1.0
         with:
           python-version: 3.9
           enable-cache: "true"
