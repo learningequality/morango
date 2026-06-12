@@ -259,3 +259,24 @@ jobs:
         run: |
           $wheel = Get-ChildItem dist\*.whl | Select-Object -ExpandProperty FullName -First 1
           tox --installpkg $wheel -e windows --sitepackages
+
+  # Single stable check for branch protection. Skipped matrix jobs don't
+  # produce per-version check runs, so matrix-suffixed required checks hang
+  # as "Expected" on PRs that skip the tests; require this job instead.
+  required_checks:
+    name: Python tests
+    needs:
+      - pre_job
+      - build
+      - unit_test
+      - unit_test_eol_python
+      - cryptography
+      - cryptography_eol_python
+      - postgres
+      - windows
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - name: Fail if any needed job failed or was cancelled
+        if: contains(needs.*.result, 'failure') || contains(needs.*.result, 'cancelled')
+        run: exit 1
