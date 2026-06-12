@@ -26,7 +26,7 @@ jobs:
     if: ${{ needs.pre_job.outputs.should_skip != 'true' }}
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v6.0.2
+      - uses: actions/checkout@v6.0.3
         with:
           fetch-depth: 0
       - name: Install uv
@@ -59,7 +59,7 @@ jobs:
           echo "Acquire::Check-Valid-Until \"false\";" > /etc/apt/apt.conf.d/99archive
           apt-get -y -qq update
           apt-get install -y build-essential tcl git-lfs
-      - uses: actions/checkout@v6.0.2
+      - uses: actions/checkout@v6.0.3
         with:
           lfs: true
           fetch-depth: 0
