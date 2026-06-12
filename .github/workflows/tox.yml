@@ -1,5 +1,7 @@
 name: Python tests
+
 on: [push, pull_request]
+
 jobs:
   pre_job:
     name: Path match check
@@ -13,62 +15,61 @@ jobs:
         with:
           github_token: ${{ github.token }}
           paths: '["**.py", ".github/workflows/tox.yml", "tox.ini", "pyproject.toml", "uv.lock"]'
+
   build:
     name: Build wheel
     needs: pre_job
+    if: ${{ needs.pre_job.outputs.should_skip != 'true' }}
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v6.0.2
         with:
           fetch-depth: 0
       - name: Install uv
-        if: ${{ needs.pre_job.outputs.should_skip != 'true' }}
-        uses: astral-sh/setup-uv@v7
+        uses: astral-sh/setup-uv@v8.2.0
         with:
           python-version: 3.9
           enable-cache: "true"
       - name: Build wheel
-        if: ${{ needs.pre_job.outputs.should_skip != 'true' }}
         run: uv build --wheel
       - name: Upload wheel artifact
-        if: ${{ needs.pre_job.outputs.should_skip != 'true' }}
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@v7.0.1
         with:
           name: wheel
           path: dist/*.whl
           retention-days: 1
+
   unit_test:
     name: Python unit tests
     needs: [pre_job, build]
+    if: ${{ needs.pre_job.outputs.should_skip != 'true' }}
     runs-on: ubuntu-latest
     strategy:
       max-parallel: 5
       matrix:
         python-version: [3.9, '3.10', '3.11', '3.12', '3.13', '3.14']
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v6.0.2
       - name: Download wheel artifact
-        if: ${{ needs.pre_job.outputs.should_skip != 'true' }}
-        uses: actions/download-artifact@v8
+        uses: actions/download-artifact@v8.0.1
         with:
           name: wheel
           path: dist/
       - name: Install uv
-        if: ${{ needs.pre_job.outputs.should_skip != 'true' }}
-        uses: astral-sh/setup-uv@v7
+        uses: astral-sh/setup-uv@v8.2.0
         with:
           python-version: "${{ matrix.python-version }}"
           activate-environment: "true"
           enable-cache: "true"
       - name: Install dependencies
-        if: ${{ needs.pre_job.outputs.should_skip != 'true' }}
-        run: uv sync --extra dev
+        run: uv sync --frozen --group dev
       - name: Test with tox
-        if: ${{ needs.pre_job.outputs.should_skip != 'true' }}
-        run: uv run tox --installpkg dist/*.whl -e py${{ matrix.python-version }}
+        run: uv run tox --installpkg "$(find dist/ -name '*.whl')" -e py${{ matrix.python-version }}
+
   unit_test_eol_python:
     name: Python unit tests for EOL Python versions
     needs: [pre_job, build]
+    if: ${{ needs.pre_job.outputs.should_skip != 'true' }}
     runs-on: ubuntu-latest
     strategy:
       max-parallel: 5
@@ -77,30 +78,35 @@ jobs:
     container:
       image: python:${{ matrix.python-version }}-buster
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v6.0.2
       - name: Download wheel artifact
-        if: ${{ needs.pre_job.outputs.should_skip != 'true' }}
-        uses: actions/download-artifact@v8
+        uses: actions/download-artifact@v8.0.1
         with:
           name: wheel
           path: dist/
+      - name: Install uv
+        uses: astral-sh/setup-uv@v8.2.0
+        with:
+          enable-cache: "true"
+      - name: Manually install test dependencies
+        run: |
+          uv pip install --system --group test
       - name: Install tox
-        if: ${{ needs.pre_job.outputs.should_skip != 'true' }}
         run: |
           python -m pip install --upgrade pip
           pip install tox
       - name: tox env cache
-        if: ${{ needs.pre_job.outputs.should_skip != 'true' }}
-        uses: actions/cache@v5
+        uses: actions/cache@v5.0.5
         with:
           path: ${{ github.workspace }}/.tox/py${{ matrix.python-version }}
           key: ${{ runner.os }}-tox-py${{ matrix.python-version }}-${{ hashFiles('pyproject.toml') }}
       - name: Test with tox
-        if: ${{ needs.pre_job.outputs.should_skip != 'true' }}
-        run: tox --installpkg dist/*.whl -e py${{ matrix.python-version }}
+        run: tox --installpkg "$(find dist/ -name '*.whl')" -e py${{ matrix.python-version }} --sitepackages
+
   cryptography:
     name: Python unit tests + cryptography
     needs: [pre_job, build]
+    if: ${{ needs.pre_job.outputs.should_skip != 'true' }}
     runs-on: ubuntu-latest
     env:
       cryptography_version: '40.0.2'
@@ -109,33 +115,30 @@ jobs:
       matrix:
         python-version: [3.9, '3.10', '3.11', '3.12', '3.13', '3.14']
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v6.0.2
       - name: Download wheel artifact
-        if: ${{ needs.pre_job.outputs.should_skip != 'true' }}
-        uses: actions/download-artifact@v8
+        uses: actions/download-artifact@v8.0.1
         with:
           name: wheel
           path: dist/
       - name: Install system dependencies
-        if: ${{ needs.pre_job.outputs.should_skip != 'true' }}
         run: |
           sudo apt-get -y -qq update
           sudo apt-get install -y openssl libssl-dev
       - name: Install uv
-        if: ${{ needs.pre_job.outputs.should_skip != 'true' }}
-        uses: astral-sh/setup-uv@v7
+        uses: astral-sh/setup-uv@v8.2.0
         with:
           python-version: "${{ matrix.python-version }}"
           enable-cache: "true"
       - name: Install dependencies
-        if: ${{ needs.pre_job.outputs.should_skip != 'true' }}
-        run: uv sync --extra dev
+        run: uv sync --frozen --group dev
       - name: Test with tox
-        if: ${{ needs.pre_job.outputs.should_skip != 'true' }}
-        run: uv run tox --installpkg dist/*.whl -e py${{ matrix.python-version }}-cryptography${{ env.cryptography_version }}
+        run: uv run tox --installpkg "$(find dist/ -name '*.whl')" -e py${{ matrix.python-version }}-cryptography${{ env.cryptography_version }}
+
   cryptography_eol_python:
     name: Python unit tests + cryptography for EOL Python versions
     needs: [pre_job, build]
+    if: ${{ needs.pre_job.outputs.should_skip != 'true' }}
     runs-on: ubuntu-latest
     env:
       cryptography_version: '40.0.2'
@@ -146,38 +149,42 @@ jobs:
     container:
       image: python:${{ matrix.python-version }}-buster
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v6.0.2
       - name: Download wheel artifact
-        if: ${{ needs.pre_job.outputs.should_skip != 'true' }}
-        uses: actions/download-artifact@v8
+        uses: actions/download-artifact@v8.0.1
         with:
           name: wheel
           path: dist/
       - name: Install system dependencies
-        if: ${{ needs.pre_job.outputs.should_skip != 'true' }}
         run: |
           echo "deb http://archive.debian.org/debian-archive/debian/ buster main" > /etc/apt/sources.list
           echo "deb http://archive.debian.org/debian-archive/debian-security/ buster/updates main" >> /etc/apt/sources.list
           echo "Acquire::Check-Valid-Until \"false\";" > /etc/apt/apt.conf.d/99archive
           apt-get -y -qq update
           apt-get install -y openssl libssl-dev
+      - name: Install uv
+        uses: astral-sh/setup-uv@v8.2.0
+        with:
+          enable-cache: "true"
+      - name: Manually install test dependencies
+        run: |
+          uv pip install --system --group test
       - name: Install tox
-        if: ${{ needs.pre_job.outputs.should_skip != 'true' }}
         run: |
           python -m pip install --upgrade pip
           pip install tox
       - name: tox env cache
-        if: ${{ needs.pre_job.outputs.should_skip != 'true' }}
-        uses: actions/cache@v5
+        uses: actions/cache@v5.0.5
         with:
           path: ${{ github.workspace }}/.tox/py${{ matrix.python-version }}-cryptography${{ env.cryptography_version }}
           key: ${{ runner.os }}-tox-py${{ matrix.python-version }}-crypto${{ env.cryptography_version }}-${{ hashFiles('pyproject.toml') }}
       - name: Test with tox
-        if: ${{ needs.pre_job.outputs.should_skip != 'true' }}
-        run: tox --installpkg dist/*.whl -e py${{ matrix.python-version }}-cryptography${{ env.cryptography_version }}
+        run: tox --installpkg "$(find dist/ -name '*.whl')" -e py${{ matrix.python-version }}-cryptography${{ env.cryptography_version }} --sitepackages
+
   postgres:
     name: Python postgres unit tests
     needs: [pre_job, build]
+    if: ${{ needs.pre_job.outputs.should_skip != 'true' }}
     runs-on: ubuntu-latest
     services:
       # Label used to access the service container
@@ -196,54 +203,55 @@ jobs:
           # Maps tcp port 5432 on service container to the host
           - 5432:5432
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v6.0.2
       - name: Download wheel artifact
-        if: ${{ needs.pre_job.outputs.should_skip != 'true' }}
-        uses: actions/download-artifact@v8
+        uses: actions/download-artifact@v8.0.1
         with:
           name: wheel
           path: dist/
       - name: Install uv
-        if: ${{ needs.pre_job.outputs.should_skip != 'true' }}
-        uses: astral-sh/setup-uv@v7
+        uses: astral-sh/setup-uv@v8.2.0
         with:
           python-version: "3.9"
           activate-environment: "true"
           enable-cache: "true"
       - name: Install dependencies
-        if: ${{ needs.pre_job.outputs.should_skip != 'true' }}
-        run: uv sync --extra dev
+        run: uv sync --frozen --group dev
       - name: Test with tox
-        if: ${{ needs.pre_job.outputs.should_skip != 'true' }}
-        run: uv run tox --installpkg dist/*.whl --discover $(uv python find 3.9) -e postgres
+        run: uv run tox --installpkg "$(find dist/ -name '*.whl')" --discover "$(uv python find 3.9)" -e postgres
+
   windows:
     name: Python unit tests on Windows Server
     needs: [pre_job, build]
+    if: ${{ needs.pre_job.outputs.should_skip != 'true' }}
     runs-on: windows-latest
     strategy:
       max-parallel: 5
       matrix:
         python-version: [3.8]
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v6.0.2
       - name: Download wheel artifact
-        if: ${{ needs.pre_job.outputs.should_skip != 'true' }}
-        uses: actions/download-artifact@v8
+        uses: actions/download-artifact@v8.0.1
         with:
           name: wheel
           path: dist/
       - name: Set up Python ${{ matrix.python-version }}
-        if: ${{ needs.pre_job.outputs.should_skip != 'true' }}
-        uses: actions/setup-python@v6
+        uses: actions/setup-python@v6.2.0
         with:
           python-version: ${{ matrix.python-version }}
+      - name: Install uv
+        uses: astral-sh/setup-uv@v8.2.0
+        with:
+          enable-cache: "true"
+      - name: Manually install test dependencies
+        run: |
+          uv pip install --system --group test
       - name: Install tox
-        if: ${{ needs.pre_job.outputs.should_skip != 'true' }}
         run: |
           python -m pip install --upgrade pip
           pip install tox
       - name: Test with tox
-        if: ${{ needs.pre_job.outputs.should_skip != 'true' }}
         run: |
           $wheel = Get-ChildItem dist\*.whl | Select-Object -ExpandProperty FullName -First 1
-          tox --installpkg $wheel -e windows
+          tox --installpkg $wheel -e windows --sitepackages
