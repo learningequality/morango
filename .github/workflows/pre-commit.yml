@@ -1,0 +1,39 @@
+name: Linting
+
+on:
+  push:
+    branches:
+      - 'release-v**'
+  pull_request:
+    branches:
+      - 'release-v**'
+
+jobs:
+  pre_job:
+    name: Path match check
+    runs-on: ubuntu-latest
+    # Map a step output to a job output
+    outputs:
+      should_skip: ${{ steps.skip_check.outputs.should_skip }}
+    steps:
+      - id: skip_check
+        uses: fkirc/skip-duplicate-actions@master
+        with:
+          github_token: ${{ github.token }}
+          paths_ignore: '["**.po", "**.json"]'
+
+  linting:
+    name: All file linting
+    needs: pre_job
+    if: ${{ needs.pre_job.outputs.should_skip != 'true' }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6.0.2
+      - uses: astral-sh/setup-uv@v8.2.0
+        with:
+          enable-cache: true
+          cache-python: true
+      - name: Install and verify lock
+        run: uv sync --group dev --locked
+      - name: Run prek hooks
+        run: uv run prek run --all-files --show-diff-on-failure
