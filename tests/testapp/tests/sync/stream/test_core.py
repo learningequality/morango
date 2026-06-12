@@ -1,6 +1,12 @@
 from django.test import SimpleTestCase
 
-from morango.sync.stream.core import Buffer, FlatMap, Pipeline, Sink, Source, Transform, Unbuffer
+from morango.sync.stream.core import Buffer
+from morango.sync.stream.core import FlatMap
+from morango.sync.stream.core import Pipeline
+from morango.sync.stream.core import Sink
+from morango.sync.stream.core import Source
+from morango.sync.stream.core import Transform
+from morango.sync.stream.core import Unbuffer
 
 
 class FakeSource(Source):

@@ -5,31 +5,26 @@ import pytest
 from django.db import IntegrityError
 from django.http.request import HttpRequest
 from django.test.testcases import SimpleTestCase
-from facility_profile.models import Facility, MyUser
+from facility_profile.models import Facility
+from facility_profile.models import MyUser
 from requests import Request
 
 from morango.constants import transfer_stages
-from morango.constants.capabilities import (
-    ALLOW_CERTIFICATE_PUSHING,
-    ASYNC_OPERATIONS,
-    FSIC_V2_FORMAT,
-    SELF_REF_ORDER,
-)
-from morango.errors import (
-    MorangoDatabaseError,
-)
-from morango.utils import (
-    CAPABILITIES_CLIENT_HEADER,
-    SETTINGS,
-    _posix_pid_exists,
-    _windows_pid_exists,
-    exception_path,
-    get_capabilities,
-    parse_capabilities_from_server_request,
-    pid_exists,
-    self_referential_fk,
-    serialize_capabilities_to_client_request,
-)
+from morango.constants.capabilities import ALLOW_CERTIFICATE_PUSHING
+from morango.constants.capabilities import ASYNC_OPERATIONS
+from morango.constants.capabilities import FSIC_V2_FORMAT
+from morango.constants.capabilities import SELF_REF_ORDER
+from morango.errors import MorangoDatabaseError
+from morango.utils import _posix_pid_exists
+from morango.utils import _windows_pid_exists
+from morango.utils import CAPABILITIES_CLIENT_HEADER
+from morango.utils import exception_path
+from morango.utils import get_capabilities
+from morango.utils import parse_capabilities_from_server_request
+from morango.utils import pid_exists
+from morango.utils import self_referential_fk
+from morango.utils import serialize_capabilities_to_client_request
+from morango.utils import SETTINGS
 
 
 class SettingsTestCase(SimpleTestCase):

@@ -4,7 +4,8 @@ import datetime
 
 import django.db.models.deletion
 import django.utils.timezone
-from django.db import migrations, models
+from django.db import migrations
+from django.db import models
 from django.utils.timezone import utc
 
 import morango.models.fields.uuids

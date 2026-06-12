@@ -3,7 +3,8 @@ import uuid
 from base64 import encodebytes as b64encode
 
 from django.db import connection
-from django.test.utils import CaptureQueriesContext, override_settings
+from django.test.utils import CaptureQueriesContext
+from django.test.utils import override_settings
 from django.urls import reverse
 from django.urls.exceptions import NoReverseMatch
 from django.utils import timezone
@@ -11,17 +12,21 @@ from django.utils.functional import SimpleLazyObject
 from facility_profile.models import MyUser
 from rest_framework.test import APITestCase
 
-from morango.api.serializers import BufferSerializer, CertificateSerializer, InstanceIDSerializer
-from morango.constants import transfer_stages, transfer_statuses
-from morango.models.certificates import Certificate, Key, Nonce, ScopeDefinition
-from morango.models.core import (
-    Buffer,
-    DatabaseMaxCounter,
-    InstanceIDModel,
-    RecordMaxCounterBuffer,
-    SyncSession,
-    TransferSession,
-)
+from morango.api.serializers import BufferSerializer
+from morango.api.serializers import CertificateSerializer
+from morango.api.serializers import InstanceIDSerializer
+from morango.constants import transfer_stages
+from morango.constants import transfer_statuses
+from morango.models.certificates import Certificate
+from morango.models.certificates import Key
+from morango.models.certificates import Nonce
+from morango.models.certificates import ScopeDefinition
+from morango.models.core import Buffer
+from morango.models.core import DatabaseMaxCounter
+from morango.models.core import InstanceIDModel
+from morango.models.core import RecordMaxCounterBuffer
+from morango.models.core import SyncSession
+from morango.models.core import TransferSession
 from morango.models.fields.crypto import SharedKey
 from morango.registry import syncable_models
 from morango.sync.syncsession import compress_string

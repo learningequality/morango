@@ -5,7 +5,9 @@ import logging
 from django.db import transaction
 from rest_framework.exceptions import ValidationError
 
-from morango.models.core import Buffer, RecordMaxCounterBuffer, SyncableModel
+from morango.models.core import Buffer
+from morango.models.core import RecordMaxCounterBuffer
+from morango.models.core import SyncableModel
 from morango.registry import syncable_models
 
 logger = logging.getLogger(__name__)

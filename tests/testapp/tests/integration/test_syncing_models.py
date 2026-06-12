@@ -1,7 +1,9 @@
 import json
 
 from django.test import TestCase
-from facility_profile.models import Facility, MyUser, TestModel
+from facility_profile.models import Facility
+from facility_profile.models import MyUser
+from facility_profile.models import TestModel
 
 from morango.models.core import Store
 from morango.models.manager import SyncableModelManager

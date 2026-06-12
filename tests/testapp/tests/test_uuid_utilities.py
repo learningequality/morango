@@ -3,17 +3,18 @@ import uuid
 
 import mock
 from django.test import TestCase
-from facility_profile.models import Facility, InteractionLog, MyUser
+from facility_profile.models import Facility
+from facility_profile.models import InteractionLog
+from facility_profile.models import MyUser
 
 from morango.errors import InvalidMorangoSourceId
-from morango.models.core import DatabaseIDModel, InstanceIDModel
+from morango.models.core import DatabaseIDModel
+from morango.models.core import InstanceIDModel
 from morango.models.fields.uuids import sha2_uuid
-from morango.models.utils import (
-    _calculate_0_4_uuid,
-    get_0_4_system_parameters,
-    get_0_5_mac_address,
-    get_0_5_system_id,
-)
+from morango.models.utils import _calculate_0_4_uuid
+from morango.models.utils import get_0_4_system_parameters
+from morango.models.utils import get_0_5_mac_address
+from morango.models.utils import get_0_5_system_id
 
 from .compat import EnvironmentVarGuard
 

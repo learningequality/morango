@@ -1,6 +1,9 @@
 from contextlib import contextmanager
 
-from morango.models.core import Buffer, RecordMaxCounter, RecordMaxCounterBuffer, Store
+from morango.models.core import Buffer
+from morango.models.core import RecordMaxCounter
+from morango.models.core import RecordMaxCounterBuffer
+from morango.models.core import Store
 
 
 class BaseSQLWrapper(object):

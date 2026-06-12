@@ -3,18 +3,20 @@ import uuid
 
 import mock
 from django.db.models import Q
-from django.test import SimpleTestCase, TestCase
+from django.test import SimpleTestCase
+from django.test import TestCase
 
 from morango.models.certificates import Filter
-from morango.models.core import InstanceIDModel, RecordMaxCounter, Store, SyncableModel
-from morango.sync.stream.serialize import (
-    AppModelSource,
-    SelfRefOrderLookup,
-    SerializeTask,
-    StoreLookup,
-    StoreUpdate,
-    WriteSink,
-)
+from morango.models.core import InstanceIDModel
+from morango.models.core import RecordMaxCounter
+from morango.models.core import Store
+from morango.models.core import SyncableModel
+from morango.sync.stream.serialize import AppModelSource
+from morango.sync.stream.serialize import SelfRefOrderLookup
+from morango.sync.stream.serialize import SerializeTask
+from morango.sync.stream.serialize import StoreLookup
+from morango.sync.stream.serialize import StoreUpdate
+from morango.sync.stream.serialize import WriteSink
 
 
 class SerializeTaskTestCase(SimpleTestCase):

@@ -1,15 +1,13 @@
 from rest_framework import routers
 
-from .viewsets import (
-    BufferViewSet,
-    CertificateChainViewSet,
-    CertificateViewSet,
-    MorangoInfoViewSet,
-    NonceViewSet,
-    PublicKeyViewSet,
-    SyncSessionViewSet,
-    TransferSessionViewSet,
-)
+from .viewsets import BufferViewSet
+from .viewsets import CertificateChainViewSet
+from .viewsets import CertificateViewSet
+from .viewsets import MorangoInfoViewSet
+from .viewsets import NonceViewSet
+from .viewsets import PublicKeyViewSet
+from .viewsets import SyncSessionViewSet
+from .viewsets import TransferSessionViewSet
 
 router = routers.SimpleRouter()
 router.register(r"certificates", CertificateViewSet, basename="certificates")

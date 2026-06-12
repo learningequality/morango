@@ -1,7 +1,8 @@
 import mock
 from django.test import TestCase
 
-from morango.sync.utils import SyncSignal, SyncSignalGroup
+from morango.sync.utils import SyncSignal
+from morango.sync.utils import SyncSignalGroup
 
 
 class SyncSignalTestCase(TestCase):

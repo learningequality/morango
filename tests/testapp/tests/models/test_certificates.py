@@ -1,15 +1,17 @@
 import json
 
-from django.test import SimpleTestCase, TestCase
+from django.test import SimpleTestCase
+from django.test import TestCase
 
-from morango.errors import (
-    CertificateIDInvalid,
-    CertificateProfileInvalid,
-    CertificateRootScopeInvalid,
-    CertificateScopeNotSubset,
-    CertificateSignatureInvalid,
-)
-from morango.models.certificates import Certificate, Filter, Key, ScopeDefinition
+from morango.errors import CertificateIDInvalid
+from morango.errors import CertificateProfileInvalid
+from morango.errors import CertificateRootScopeInvalid
+from morango.errors import CertificateScopeNotSubset
+from morango.errors import CertificateSignatureInvalid
+from morango.models.certificates import Certificate
+from morango.models.certificates import Filter
+from morango.models.certificates import Key
+from morango.models.certificates import ScopeDefinition
 
 
 class CertificateTestCaseMixin(object):

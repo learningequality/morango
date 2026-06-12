@@ -1,6 +1,7 @@
 from django.apps import AppConfig
 
-from morango.registry import session_middleware, syncable_models
+from morango.registry import session_middleware
+from morango.registry import syncable_models
 
 
 class MorangoConfig(AppConfig):

@@ -10,23 +10,27 @@ import mock
 from django.core.serializers.json import DjangoJSONEncoder
 from django.test.testcases import LiveServerTestCase
 from django.utils import timezone
-from facility_profile.models import Facility, InteractionLog, MyUser, SummaryLog
+from facility_profile.models import Facility
+from facility_profile.models import InteractionLog
+from facility_profile.models import MyUser
+from facility_profile.models import SummaryLog
 
 from morango.api.serializers import BufferSerializer
-from morango.models.core import (
-    AbstractStore,
-    Buffer,
-    DatabaseIDModel,
-    InstanceIDModel,
-    RecordMaxCounter,
-    RecordMaxCounterBuffer,
-    Store,
-    SyncSession,
-    TransferSession,
-)
+from morango.models.core import AbstractStore
+from morango.models.core import Buffer
+from morango.models.core import DatabaseIDModel
+from morango.models.core import InstanceIDModel
+from morango.models.core import RecordMaxCounter
+from morango.models.core import RecordMaxCounterBuffer
+from morango.models.core import Store
+from morango.models.core import SyncSession
+from morango.models.core import TransferSession
 from morango.sync.context import SessionContext
-from morango.sync.controller import MorangoProfileController, SessionController
-from morango.sync.syncsession import NetworkSyncConnection, SyncSessionClient, TransferClient
+from morango.sync.controller import MorangoProfileController
+from morango.sync.controller import SessionController
+from morango.sync.syncsession import NetworkSyncConnection
+from morango.sync.syncsession import SyncSessionClient
+from morango.sync.syncsession import TransferClient
 
 from .compat import EnvironmentVarGuard
 

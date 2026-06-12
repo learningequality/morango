@@ -5,19 +5,22 @@ This class is registered at app load time for morango in `apps.py`.
 
 import inspect
 import sys
-from collections import OrderedDict, defaultdict
-from typing import Generator, Optional
+from collections import defaultdict
+from collections import OrderedDict
+from typing import Generator
+from typing import Optional
 
-from django.db.models import F, QuerySet
+from django.db.models import F
+from django.db.models import QuerySet
 from django.db.models.fields.related import ForeignKey
 
 from morango.constants import transfer_stages
-from morango.errors import (
-    InvalidMorangoModelConfiguration,
-    ModelRegistryNotReady,
-    UnsupportedFieldType,
-)
-from morango.utils import SETTINGS, do_import, self_referential_fk
+from morango.errors import InvalidMorangoModelConfiguration
+from morango.errors import ModelRegistryNotReady
+from morango.errors import UnsupportedFieldType
+from morango.utils import do_import
+from morango.utils import self_referential_fk
+from morango.utils import SETTINGS
 
 _UNSET = object()
 

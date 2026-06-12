@@ -5,13 +5,11 @@ from typing import Optional
 from django.conf import settings
 
 from morango.constants import settings as default_settings
-from morango.constants.capabilities import (
-    ALLOW_CERTIFICATE_PUSHING,
-    ASYNC_OPERATIONS,
-    FSIC_V2_FORMAT,
-    GZIP_BUFFER_POST,
-    SELF_REF_ORDER,
-)
+from morango.constants.capabilities import ALLOW_CERTIFICATE_PUSHING
+from morango.constants.capabilities import ASYNC_OPERATIONS
+from morango.constants.capabilities import FSIC_V2_FORMAT
+from morango.constants.capabilities import GZIP_BUFFER_POST
+from morango.constants.capabilities import SELF_REF_ORDER
 
 
 def do_import(import_string):

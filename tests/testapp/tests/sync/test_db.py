@@ -5,11 +5,14 @@ from time import sleep
 import pytest
 from django.conf import settings
 from django.db import connection
-from django.test import TransactionTestCase, override_settings
+from django.test import override_settings
+from django.test import TransactionTestCase
 from django.utils import timezone
 
 from morango.models.certificates import Filter
-from morango.models.core import Store, SyncSession, TransferSession
+from morango.models.core import Store
+from morango.models.core import SyncSession
+from morango.models.core import TransferSession
 from morango.sync.backends.utils import load_backend
 from morango.sync.db import begin_transaction
 

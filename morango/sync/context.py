@@ -1,8 +1,11 @@
-from morango.constants import transfer_stages, transfer_statuses
+from morango.constants import transfer_stages
+from morango.constants import transfer_statuses
 from morango.errors import MorangoContextUpdateError
 from morango.models.certificates import Filter
-from morango.models.core import SyncSession, TransferSession
-from morango.utils import CAPABILITIES, parse_capabilities_from_server_request
+from morango.models.core import SyncSession
+from morango.models.core import TransferSession
+from morango.utils import CAPABILITIES
+from morango.utils import parse_capabilities_from_server_request
 
 
 class SessionContext(object):

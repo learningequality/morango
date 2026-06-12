@@ -7,29 +7,31 @@ from django.test.utils import override_settings
 from requests.exceptions import HTTPError
 
 from morango.api.serializers import CertificateSerializer
-from morango.constants import transfer_stages, transfer_statuses
+from morango.constants import transfer_stages
+from morango.constants import transfer_statuses
 from morango.constants.capabilities import ALLOW_CERTIFICATE_PUSHING
-from morango.errors import (
-    CertificateSignatureInvalid,
-    MorangoError,
-    MorangoResumeSyncError,
-    MorangoServerDoesNotAllowNewCertPush,
-)
-from morango.models.certificates import Certificate, Filter, Key, ScopeDefinition
+from morango.errors import CertificateSignatureInvalid
+from morango.errors import MorangoError
+from morango.errors import MorangoResumeSyncError
+from morango.errors import MorangoServerDoesNotAllowNewCertPush
+from morango.models.certificates import Certificate
+from morango.models.certificates import Filter
+from morango.models.certificates import Key
+from morango.models.certificates import ScopeDefinition
 from morango.models.core import SyncSession
 from morango.models.fields.crypto import SharedKey
-from morango.sync.context import LocalSessionContext, NetworkSessionContext
+from morango.sync.context import LocalSessionContext
+from morango.sync.context import NetworkSessionContext
 from morango.sync.controller import MorangoProfileController
 from morango.sync.session import SessionWrapper
-from morango.sync.syncsession import (
-    NetworkSyncConnection,
-    PullClient,
-    PushClient,
-    SyncSessionClient,
-    TransferClient,
-)
+from morango.sync.syncsession import NetworkSyncConnection
+from morango.sync.syncsession import PullClient
+from morango.sync.syncsession import PushClient
+from morango.sync.syncsession import SyncSessionClient
+from morango.sync.syncsession import TransferClient
 
-from ..helpers import BaseClientTestCase, BaseTransferClientTestCase
+from ..helpers import BaseClientTestCase
+from ..helpers import BaseTransferClientTestCase
 
 
 def mock_patch_decorator(func):

@@ -3,45 +3,48 @@ import uuid
 
 import mock
 from django.db import connection
-from django.test import TestCase, override_settings
+from django.test import override_settings
+from django.test import TestCase
 from django.utils import timezone
-from facility_profile.models import ConditionalLog, Facility, MyUser, SummaryLog
+from facility_profile.models import ConditionalLog
+from facility_profile.models import Facility
+from facility_profile.models import MyUser
+from facility_profile.models import SummaryLog
 
 from morango.constants import transfer_statuses
-from morango.constants.capabilities import FSIC_V2_FORMAT, SELF_REF_ORDER
+from morango.constants.capabilities import FSIC_V2_FORMAT
+from morango.constants.capabilities import SELF_REF_ORDER
 from morango.errors import MorangoLimitExceeded
 from morango.models.certificates import Filter
-from morango.models.core import (
-    Buffer,
-    DatabaseIDModel,
-    DatabaseMaxCounter,
-    InstanceIDModel,
-    RecordMaxCounter,
-    RecordMaxCounterBuffer,
-    Store,
-    SyncSession,
-    TransferSession,
-)
+from morango.models.core import Buffer
+from morango.models.core import DatabaseIDModel
+from morango.models.core import DatabaseMaxCounter
+from morango.models.core import InstanceIDModel
+from morango.models.core import RecordMaxCounter
+from morango.models.core import RecordMaxCounterBuffer
+from morango.models.core import Store
+from morango.models.core import SyncSession
+from morango.models.core import TransferSession
 from morango.sync.backends.utils import load_backend
 from morango.sync.context import LocalSessionContext
-from morango.sync.controller import MorangoProfileController, SessionController
-from morango.sync.operations import (
-    CleanupOperation,
-    InitializeOperation,
-    ProducerDequeueOperation,
-    ProducerQueueOperation,
-    ReceiverDequeueOperation,
-    ReceiverDeserializeOperation,
-    ReceiverQueueOperation,
-    _dequeue_into_store,
-    _deserialize_from_store,
-    _queue_into_buffer_v1,
-    _queue_into_buffer_v2,
-    _update_legacy_self_ref_order,
-)
+from morango.sync.controller import MorangoProfileController
+from morango.sync.controller import SessionController
+from morango.sync.operations import _dequeue_into_store
+from morango.sync.operations import _deserialize_from_store
+from morango.sync.operations import _queue_into_buffer_v1
+from morango.sync.operations import _queue_into_buffer_v2
+from morango.sync.operations import _update_legacy_self_ref_order
+from morango.sync.operations import CleanupOperation
+from morango.sync.operations import InitializeOperation
+from morango.sync.operations import ProducerDequeueOperation
+from morango.sync.operations import ProducerQueueOperation
+from morango.sync.operations import ReceiverDequeueOperation
+from morango.sync.operations import ReceiverDeserializeOperation
+from morango.sync.operations import ReceiverQueueOperation
 from morango.sync.syncsession import TransferClient
 
-from ..helpers import create_buffer_and_store_dummy_data, create_dummy_store_data
+from ..helpers import create_buffer_and_store_dummy_data
+from ..helpers import create_dummy_store_data
 
 DBBackend = load_backend(connection)
 
