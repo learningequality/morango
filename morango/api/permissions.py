@@ -1,7 +1,10 @@
 import json
 
-from django.contrib.auth import authenticate, get_user_model
-from rest_framework import authentication, exceptions, permissions
+from django.contrib.auth import authenticate
+from django.contrib.auth import get_user_model
+from rest_framework import authentication
+from rest_framework import exceptions
+from rest_framework import permissions
 
 from morango.models.core import TransferSession
 from morango.utils import SETTINGS

@@ -1,0 +1,4 @@
+paths:
+  .github/workflows/check_migrations_sqlite.yml:
+    ignore:
+      - 'SC2086:info:10:54'

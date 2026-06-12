@@ -1,8 +1,10 @@
 import mock
 from django.test import TestCase
-from requests.exceptions import HTTPError, RequestException
+from requests.exceptions import HTTPError
+from requests.exceptions import RequestException
 
-from morango.sync.session import SessionWrapper, _length_of_headers
+from morango.sync.session import _length_of_headers
+from morango.sync.session import SessionWrapper
 
 
 class SessionWrapperTestCase(TestCase):

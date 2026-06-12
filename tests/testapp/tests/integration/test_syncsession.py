@@ -11,13 +11,21 @@ import pytest
 import requests
 from django.conf import settings
 from django.test.testcases import TransactionTestCase
-from facility_profile.models import InteractionLog, MyUser, SummaryLog
-from requests.exceptions import RequestException, Timeout
+from facility_profile.models import InteractionLog
+from facility_profile.models import MyUser
+from facility_profile.models import SummaryLog
+from requests.exceptions import RequestException
+from requests.exceptions import Timeout
 from testapp.settings import BASE_DIR
 
 from morango.errors import MorangoError
-from morango.models.certificates import Certificate, Filter, Key, ScopeDefinition
-from morango.models.core import Buffer, InstanceIDModel, TransferSession
+from morango.models.certificates import Certificate
+from morango.models.certificates import Filter
+from morango.models.certificates import Key
+from morango.models.certificates import ScopeDefinition
+from morango.models.core import Buffer
+from morango.models.core import InstanceIDModel
+from morango.models.core import TransferSession
 from morango.sync.controller import MorangoProfileController
 
 from ..compat import EnvironmentVarGuard

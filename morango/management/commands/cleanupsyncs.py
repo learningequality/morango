@@ -6,7 +6,8 @@ from django.core.management.base import BaseCommand
 from django.db import transaction
 from django.utils import timezone
 
-from morango.models import SyncSession, TransferSession
+from morango.models import SyncSession
+from morango.models import TransferSession
 
 logger = logging.getLogger(__name__)
 

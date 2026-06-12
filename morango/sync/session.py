@@ -6,7 +6,8 @@ from requests.sessions import Session
 from requests.utils import super_len
 
 from morango import __version__
-from morango.utils import SETTINGS, serialize_capabilities_to_client_request
+from morango.utils import serialize_capabilities_to_client_request
+from morango.utils import SETTINGS
 
 logger = logging.getLogger(__name__)
 

@@ -8,30 +8,42 @@ import os
 import socket
 import uuid
 from io import BytesIO
-from urllib.parse import urljoin, urlparse
+from urllib.parse import urljoin
+from urllib.parse import urlparse
 
-from django.db import connection, transaction
+from django.db import connection
+from django.db import transaction
 from django.utils import timezone
 from requests.adapters import HTTPAdapter
 from requests.exceptions import HTTPError
 from requests.packages.urllib3.util.retry import Retry
 
-from morango.api.serializers import CertificateSerializer, InstanceIDSerializer
-from morango.constants import api_urls, transfer_stages, transfer_statuses
-from morango.constants.capabilities import ALLOW_CERTIFICATE_PUSHING, GZIP_BUFFER_POST
-from morango.errors import (
-    CertificateSignatureInvalid,
-    MorangoError,
-    MorangoResumeSyncError,
-    MorangoServerDoesNotAllowNewCertPush,
-)
-from morango.models.certificates import Certificate, Filter, Key
-from morango.models.core import InstanceIDModel, SyncSession
+from morango.api.serializers import CertificateSerializer
+from morango.api.serializers import InstanceIDSerializer
+from morango.constants import api_urls
+from morango.constants import transfer_stages
+from morango.constants import transfer_statuses
+from morango.constants.capabilities import ALLOW_CERTIFICATE_PUSHING
+from morango.constants.capabilities import GZIP_BUFFER_POST
+from morango.errors import CertificateSignatureInvalid
+from morango.errors import MorangoError
+from morango.errors import MorangoResumeSyncError
+from morango.errors import MorangoServerDoesNotAllowNewCertPush
+from morango.models.certificates import Certificate
+from morango.models.certificates import Filter
+from morango.models.certificates import Key
+from morango.models.core import InstanceIDModel
+from morango.models.core import SyncSession
 from morango.sync.backends.utils import load_backend
-from morango.sync.context import CompositeSessionContext, LocalSessionContext, NetworkSessionContext
+from morango.sync.context import CompositeSessionContext
+from morango.sync.context import LocalSessionContext
+from morango.sync.context import NetworkSessionContext
 from morango.sync.controller import SessionController
-from morango.sync.utils import SyncSignal, SyncSignalGroup, lock_partitions
-from morango.utils import CAPABILITIES, pid_exists
+from morango.sync.utils import lock_partitions
+from morango.sync.utils import SyncSignal
+from morango.sync.utils import SyncSignalGroup
+from morango.utils import CAPABILITIES
+from morango.utils import pid_exists
 
 from .session import SessionWrapper
 

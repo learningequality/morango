@@ -1,21 +1,23 @@
 import pickle
 
 import mock
-from django.test import SimpleTestCase, TestCase
+from django.test import SimpleTestCase
+from django.test import TestCase
 
-from morango.constants import transfer_stages, transfer_statuses
+from morango.constants import transfer_stages
+from morango.constants import transfer_statuses
 from morango.errors import MorangoContextUpdateError
 from morango.models.certificates import Filter
-from morango.models.core import SyncSession, TransferSession
-from morango.sync.context import (
-    CompositeSessionContext,
-    LocalSessionContext,
-    NetworkSessionContext,
-    SessionContext,
-)
+from morango.models.core import SyncSession
+from morango.models.core import TransferSession
+from morango.sync.context import CompositeSessionContext
+from morango.sync.context import LocalSessionContext
+from morango.sync.context import NetworkSessionContext
+from morango.sync.context import SessionContext
 from morango.sync.controller import SessionController
 
-from ..helpers import TestSessionContext, create_dummy_store_data
+from ..helpers import create_dummy_store_data
+from ..helpers import TestSessionContext
 
 
 class SessionContextTestCase(SimpleTestCase):

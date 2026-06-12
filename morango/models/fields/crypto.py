@@ -10,10 +10,12 @@ import re
 import sys
 
 import rsa as PYRSA
-from django.db import models, transaction
+from django.db import models
+from django.db import transaction
 
 try:
-    from M2Crypto import BIO as M2BIO, RSA as M2RSA
+    from M2Crypto import BIO as M2BIO
+    from M2Crypto import RSA as M2RSA
 
     M2CRYPTO_EXISTS = True
 except ImportError:
@@ -34,14 +36,10 @@ try:
     from cryptography.hazmat.backends import default_backend
 
     crypto_backend = default_backend()
-    from cryptography.hazmat.primitives import (
-        hashes as crypto_hashes,
-        serialization as crypto_serialization,
-    )
-    from cryptography.hazmat.primitives.asymmetric import (
-        padding as crypto_padding,
-        rsa as crypto_rsa,
-    )
+    from cryptography.hazmat.primitives import hashes as crypto_hashes
+    from cryptography.hazmat.primitives import serialization as crypto_serialization
+    from cryptography.hazmat.primitives.asymmetric import padding as crypto_padding
+    from cryptography.hazmat.primitives.asymmetric import rsa as crypto_rsa
 
     # Ignore cryptography versions that do not support the 'sign' method
     if not hasattr(crypto_rsa.RSAPrivateKey, "sign"):
@@ -57,7 +55,8 @@ except BaseException as e:
         # Otherwise raise the error again to avoid silently catching other errors
         raise
 
-from base64 import decodebytes as b64decode, encodebytes as b64encode
+from base64 import decodebytes as b64decode
+from base64 import encodebytes as b64encode
 
 PKCS8_HEADER = "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8A"
 

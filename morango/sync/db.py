@@ -1,7 +1,8 @@
 import logging
 from contextlib import contextmanager
 
-from django.db import connection, transaction
+from django.db import connection
+from django.db import transaction
 
 from morango.sync.backends.utils import load_backend
 from morango.sync.utils import lock_partitions

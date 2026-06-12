@@ -13,7 +13,7 @@ resolution-markers = [
 ]
 
 [options]
-exclude-newer = "2026-03-26T07:53:50.714888877Z"
+exclude-newer = "2026-06-05T14:46:36.610476653Z"
 exclude-newer-span = "P7D"
 
 [[package]]
@@ -1660,8 +1660,26 @@ accelerated = [
     { name = "cryptography" },
     { name = "m2crypto" },
 ]
+postgres = [
+    { name = "cryptography" },
+    { name = "m2crypto" },
+    { name = "psycopg2-binary", version = "2.9.8", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.7'" },
+    { name = "psycopg2-binary", version = "2.9.9", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.7'" },
+]
+
+[package.dev-dependencies]
 dev = [
+    { name = "factory-boy", version = "3.2.1", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.7'" },
+    { name = "factory-boy", version = "3.3.0", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version == '3.7.*'" },
+    { name = "factory-boy", version = "3.3.3", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.8'" },
+    { name = "mock" },
+    { name = "more-itertools", version = "8.14.0", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.7'" },
+    { name = "more-itertools", version = "9.1.0", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version == '3.7.*'" },
+    { name = "more-itertools", version = "10.0.0", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.8'" },
     { name = "prek", marker = "python_full_version >= '3.8'" },
+    { name = "pytest", version = "7.0.1", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.7'" },
+    { name = "pytest", version = "7.4.4", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.7'" },
+    { name = "pytest-django" },
     { name = "tox", version = "3.14.6", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.9'" },
     { name = "tox", version = "4.30.3", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version == '3.9.*'" },
     { name = "tox", version = "4.50.2", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.10'" },
@@ -1694,12 +1712,6 @@ docs = [
     { name = "watchdog", version = "4.0.2", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version == '3.8.*'" },
     { name = "watchdog", version = "6.0.0", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.9'" },
 ]
-postgres = [
-    { name = "cryptography" },
-    { name = "m2crypto" },
-    { name = "psycopg2-binary", version = "2.9.8", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.7'" },
-    { name = "psycopg2-binary", version = "2.9.9", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.7'" },
-]
 test = [
     { name = "factory-boy", version = "3.2.1", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.7'" },
     { name = "factory-boy", version = "3.3.0", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version == '3.7.*'" },
@@ -1718,37 +1730,50 @@ requires-dist = [
     { name = "cryptography", marker = "extra == 'accelerated'", specifier = "==40.0.2" },
     { name = "cryptography", marker = "extra == 'postgres'", specifier = "==40.0.2" },
     { name = "django", specifier = ">=3,<4" },
-    { name = "django", marker = "extra == 'docs'", specifier = "==3.2.25" },
     { name = "django-ipware", specifier = "==4.0.2" },
     { name = "django-mptt", specifier = ">0.10.0" },
-    { name = "django-mptt", marker = "extra == 'docs'", specifier = ">=0.14.0,<1" },
     { name = "djangorestframework", specifier = ">3.10" },
-    { name = "djangorestframework", marker = "extra == 'docs'", specifier = "==3.14.0" },
-    { name = "factory-boy", marker = "extra == 'test'", specifier = ">=3.0,<4" },
     { name = "ifcfg" },
-    { name = "ifcfg", marker = "extra == 'docs'", specifier = "==0.24" },
     { name = "m2crypto", marker = "extra == 'accelerated'", specifier = "==0.41.0" },
     { name = "m2crypto", marker = "extra == 'postgres'", specifier = "==0.41.0" },
-    { name = "mock", marker = "extra == 'test'", specifier = ">=4.0,<6" },
-    { name = "more-itertools", marker = "extra == 'test'", specifier = "<=10.0.0" },
-    { name = "prek", marker = "python_full_version >= '3.8' and extra == 'dev'", specifier = ">=0.3.6" },
     { name = "psycopg2-binary", marker = "extra == 'postgres'", specifier = ">=2.9.8,<=2.9.9" },
-    { name = "pytest", marker = "extra == 'test'", specifier = ">=6.2.5,<8" },
-    { name = "pytest-django", marker = "extra == 'test'", specifier = "==4.5.2" },
     { name = "requests" },
     { name = "rsa", specifier = "<4.10" },
-    { name = "rsa", marker = "extra == 'docs'", specifier = "==3.4.2" },
-    { name = "sphinx", marker = "extra == 'docs'" },
-    { name = "sphinx-autobuild", marker = "extra == 'docs'" },
-    { name = "sphinx-intl", marker = "extra == 'docs'" },
-    { name = "sphinx-notfound-page", marker = "extra == 'docs'" },
-    { name = "sphinx-rtd-theme", marker = "extra == 'docs'" },
-    { name = "tox", marker = "python_full_version >= '3.9' and extra == 'dev'", specifier = ">=4" },
-    { name = "tox", marker = "python_full_version < '3.9' and extra == 'dev'", specifier = "<4" },
-    { name = "tox-uv", marker = "python_full_version >= '3.9' and extra == 'dev'", specifier = ">=1.0" },
-    { name = "watchdog", marker = "extra == 'docs'" },
 ]
-provides-extras = ["test", "dev", "docs", "postgres", "accelerated"]
+provides-extras = ["postgres", "accelerated"]
+
+[package.metadata.requires-dev]
+dev = [
+    { name = "factory-boy", specifier = ">=3.0,<4" },
+    { name = "mock", specifier = ">=4.0,<6" },
+    { name = "more-itertools", specifier = "<=10.0.0" },
+    { name = "prek", marker = "python_full_version >= '3.8'", specifier = ">=0.3.6" },
+    { name = "pytest", specifier = ">=6.2.5,<8" },
+    { name = "pytest-django", specifier = "==4.5.2" },
+    { name = "tox", marker = "python_full_version < '3.9'", specifier = "<4" },
+    { name = "tox", marker = "python_full_version >= '3.9'", specifier = ">=4" },
+    { name = "tox-uv", marker = "python_full_version >= '3.9'", specifier = ">=1.0" },
+]
+docs = [
+    { name = "django", specifier = "==3.2.25" },
+    { name = "django-mptt", specifier = ">=0.14.0,<1" },
+    { name = "djangorestframework", specifier = "==3.14.0" },
+    { name = "ifcfg", specifier = "==0.24" },
+    { name = "rsa", specifier = "==3.4.2" },
+    { name = "sphinx" },
+    { name = "sphinx-autobuild" },
+    { name = "sphinx-intl" },
+    { name = "sphinx-notfound-page" },
+    { name = "sphinx-rtd-theme" },
+    { name = "watchdog" },
+]
+test = [
+    { name = "factory-boy", specifier = ">=3.0,<4" },
+    { name = "mock", specifier = ">=4.0,<6" },
+    { name = "more-itertools", specifier = "<=10.0.0" },
+    { name = "pytest", specifier = ">=6.2.5,<8" },
+    { name = "pytest-django", specifier = "==4.5.2" },
+]
 
 [[package]]
 name = "more-itertools"

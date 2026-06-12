@@ -3,16 +3,24 @@ import uuid
 import factory
 import mock
 from django.core.exceptions import ValidationError
-from django.test import TestCase, override_settings
+from django.test import override_settings
+from django.test import TestCase
 from django.utils import timezone
-from facility_profile.models import Facility, MyUser
+from facility_profile.models import Facility
+from facility_profile.models import MyUser
 
-from morango.constants import transfer_stages, transfer_statuses
+from morango.constants import transfer_stages
+from morango.constants import transfer_statuses
 from morango.models.certificates import Filter
-from morango.models.core import Buffer, DatabaseMaxCounter, Store, SyncSession, TransferSession
+from morango.models.core import Buffer
+from morango.models.core import DatabaseMaxCounter
+from morango.models.core import Store
+from morango.models.core import SyncSession
+from morango.models.core import TransferSession
 from morango.sync.controller import MorangoProfileController
 
-from ..helpers import RecordMaxCounterFactory, StoreFactory
+from ..helpers import RecordMaxCounterFactory
+from ..helpers import StoreFactory
 
 
 class DatabaseMaxCounterFactory(factory.django.DjangoModelFactory):

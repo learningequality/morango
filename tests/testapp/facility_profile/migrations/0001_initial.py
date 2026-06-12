@@ -6,7 +6,8 @@ import django.db.models.deletion
 import django.utils.timezone
 import mptt.fields
 from django.conf import settings
-from django.db import migrations, models
+from django.db import migrations
+from django.db import models
 
 import facility_profile.models
 import morango.models.fields.uuids

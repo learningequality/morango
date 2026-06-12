@@ -21,14 +21,9 @@ See [morango.readthedocs.io](https://morango.readthedocs.io) for documentation o
 
 To start contributing to Morango, first make sure you [have `uv` installed](https://docs.astral.sh/uv/getting-started/installation/).
 
-Create a virtual environment, which will create it in the `.venv/` directory, with the python version defined in `.python-version`:
+The following command will create a virtual environment in `.venv/`, with the python version defined in `.python-version`, and install development dependencies:
 ```bash
-uv venv
-```
-
-Then install dependencies:
-```bash
-uv sync --all-extras
+uv sync --group dev
 ```
 
 If you get errors during installation, you may need to install system packages such as `openssl` and `libssl-dev`.
@@ -51,7 +46,7 @@ To build and edit the docs, run:
 
 ```bash
 # install requirements (if necessary)
-uv sync --extra docs
+uv sync --group docs
 
 # build docs
 make docs

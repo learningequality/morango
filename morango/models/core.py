@@ -2,13 +2,23 @@ import functools
 import json
 import logging
 import uuid
-from collections import defaultdict, namedtuple
+from collections import defaultdict
+from collections import namedtuple
 from functools import reduce
 
 from django.core import exceptions
 from django.core.validators import MinValueValidator
-from django.db import connection, models, router, transaction
-from django.db.models import F, Func, Max, Q, TextField, Value, signals
+from django.db import connection
+from django.db import models
+from django.db import router
+from django.db import transaction
+from django.db.models import F
+from django.db.models import Func
+from django.db.models import Max
+from django.db.models import Q
+from django.db.models import signals
+from django.db.models import TextField
+from django.db.models import Value
 from django.db.models.deletion import Collector
 from django.db.models.expressions import CombinedExpression
 from django.db.models.fields.related import ForeignKey
@@ -17,15 +27,23 @@ from django.utils import timezone
 from django.utils.functional import cached_property
 
 from morango import proquint
-from morango.constants import transfer_stages, transfer_statuses
+from morango.constants import transfer_stages
+from morango.constants import transfer_statuses
 from morango.errors import InvalidMorangoSourceId
-from morango.models.certificates import Certificate, Filter
-from morango.models.fields.uuids import UUIDField, UUIDModelMixin, sha2_uuid
+from morango.models.certificates import Certificate
+from morango.models.certificates import Filter
+from morango.models.fields.uuids import sha2_uuid
+from morango.models.fields.uuids import UUIDField
+from morango.models.fields.uuids import UUIDModelMixin
 from morango.models.fsic_utils import remove_redundant_instance_counters
 from morango.models.manager import SyncableModelManager
-from morango.models.utils import get_0_4_system_parameters, get_0_5_mac_address, get_0_5_system_id
+from morango.models.utils import get_0_4_system_parameters
+from morango.models.utils import get_0_5_mac_address
+from morango.models.utils import get_0_5_system_id
 from morango.registry import syncable_models
-from morango.utils import SETTINGS, _assert, exception_path
+from morango.utils import _assert
+from morango.utils import exception_path
+from morango.utils import SETTINGS
 
 logger = logging.getLogger(__name__)
 
@@ -392,9 +410,7 @@ class AbstractStore(models.Model):
     conflicting_serialized_data = models.TextField(blank=True)
 
     _self_ref_fk = models.CharField(max_length=32, blank=True)
-    _self_ref_order = models.IntegerField(
-        blank=True, null=True, validators=[MinValueValidator(0)]
-    )
+    _self_ref_order = models.IntegerField(blank=True, null=True, validators=[MinValueValidator(0)])
 
     class Meta:
         abstract = True

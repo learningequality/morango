@@ -5,7 +5,8 @@ from django.core.management import call_command
 from django.test import TestCase
 from django.utils import timezone
 
-from morango.models.core import SyncSession, TransferSession
+from morango.models.core import SyncSession
+from morango.models.core import TransferSession
 
 from .helpers import create_buffer_and_store_dummy_data
 

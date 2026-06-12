@@ -1,6 +1,7 @@
 import uuid
 
-from django.contrib.auth.models import AbstractBaseUser, UserManager
+from django.contrib.auth.models import AbstractBaseUser
+from django.contrib.auth.models import UserManager
 from django.db import models
 from django.utils import timezone
 

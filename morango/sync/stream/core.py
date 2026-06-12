@@ -6,7 +6,14 @@ a pipeline of connected modules, reducing memory overhead.
 """
 
 import abc
-from typing import Any, Callable, Generic, Iterable, Iterator, List, Optional, TypeVar
+from typing import Any
+from typing import Callable
+from typing import Generic
+from typing import Iterable
+from typing import Iterator
+from typing import List
+from typing import Optional
+from typing import TypeVar
 
 T = TypeVar("T")
 

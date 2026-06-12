@@ -4,16 +4,27 @@ import uuid
 
 import factory
 import mock
-from django.test import SimpleTestCase, TestCase
-from facility_profile.models import Facility, InteractionLog, MyUser, SummaryLog
+from django.test import SimpleTestCase
+from django.test import TestCase
+from facility_profile.models import Facility
+from facility_profile.models import InteractionLog
+from facility_profile.models import MyUser
+from facility_profile.models import SummaryLog
 
-from morango.constants import transfer_stages, transfer_statuses
+from morango.constants import transfer_stages
+from morango.constants import transfer_statuses
 from morango.models.certificates import Filter
-from morango.models.core import DeletedModels, InstanceIDModel, RecordMaxCounter, Store
-from morango.sync.controller import MorangoProfileController, SessionController
+from morango.models.core import DeletedModels
+from morango.models.core import InstanceIDModel
+from morango.models.core import RecordMaxCounter
+from morango.models.core import Store
+from morango.sync.controller import MorangoProfileController
+from morango.sync.controller import SessionController
 
 from ..compat import EnvironmentVarGuard
-from ..helpers import FacilityModelFactory, TestSessionContext, serialized_facility_factory
+from ..helpers import FacilityModelFactory
+from ..helpers import serialized_facility_factory
+from ..helpers import TestSessionContext
 
 
 class StoreModelFacilityFactory(factory.django.DjangoModelFactory):

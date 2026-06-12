@@ -6,20 +6,33 @@ import uuid
 from django.core.exceptions import ValidationError
 from django.utils import timezone
 from ipware import get_client_ip
-from rest_framework import mixins, pagination, response, status, viewsets
+from rest_framework import mixins
+from rest_framework import pagination
+from rest_framework import response
+from rest_framework import status
+from rest_framework import viewsets
 from rest_framework.parsers import JSONParser
 
 import morango
 from morango import errors
-from morango.api import permissions, serializers
-from morango.constants import transfer_stages, transfer_statuses
-from morango.constants.capabilities import ASYNC_OPERATIONS, GZIP_BUFFER_POST
+from morango.api import permissions
+from morango.api import serializers
+from morango.constants import transfer_stages
+from morango.constants import transfer_statuses
+from morango.constants.capabilities import ASYNC_OPERATIONS
+from morango.constants.capabilities import GZIP_BUFFER_POST
 from morango.models import certificates
-from morango.models.core import Buffer, Certificate, InstanceIDModel, SyncSession, TransferSession
+from morango.models.core import Buffer
+from morango.models.core import Certificate
+from morango.models.core import InstanceIDModel
+from morango.models.core import SyncSession
+from morango.models.core import TransferSession
 from morango.models.fields.crypto import SharedKey
 from morango.sync.context import LocalSessionContext
 from morango.sync.controller import SessionController
-from morango.utils import CAPABILITIES, _assert, parse_capabilities_from_server_request
+from morango.utils import _assert
+from morango.utils import CAPABILITIES
+from morango.utils import parse_capabilities_from_server_request
 
 if GZIP_BUFFER_POST in CAPABILITIES:
     from .parsers import GzipParser
