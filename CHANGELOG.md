@@ -2,6 +2,9 @@
 
 List of the most important changes for each release.
 
+## 0.8.13
+- Removes multiprocessing fallback for RSA key generation to avoid leaving zombie processes; key generation now stays in-process
+
 ## 0.8.12
 - Fixes issue where dirty-bit isn't updated when calling save on a syncable model with `update_fields`
 
