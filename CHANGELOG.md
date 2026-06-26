@@ -2,6 +2,9 @@
 
 List of the most important changes for each release.
 
+## 0.8.14
+- Adds utility for addressing immediate FK constraints caused by Django upgrade, automatically performed for morango models in a Django migration.
+
 ## 0.8.13
 - Removes multiprocessing fallback for RSA key generation to avoid leaving zombie processes; key generation now stays in-process
 
