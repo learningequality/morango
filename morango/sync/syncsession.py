@@ -10,11 +10,12 @@ from io import BytesIO
 from urllib.parse import urljoin
 from urllib.parse import urlparse
 
+from django.db import connection
+from django.db import transaction
 from django.utils import timezone
 from requests.adapters import HTTPAdapter
 from requests.exceptions import HTTPError
-from requests.packages.urllib3.util.retry import Retry
-from django.db import transaction, connection
+from urllib3.util.retry import Retry
 
 from .session import SessionWrapper
 from morango.api.serializers import CertificateSerializer
@@ -38,11 +39,11 @@ from morango.sync.context import CompositeSessionContext
 from morango.sync.context import LocalSessionContext
 from morango.sync.context import NetworkSessionContext
 from morango.sync.controller import SessionController
+from morango.sync.utils import lock_partitions
 from morango.sync.utils import SyncSignal
 from morango.sync.utils import SyncSignalGroup
 from morango.utils import CAPABILITIES
 from morango.utils import pid_exists
-from morango.sync.utils import lock_partitions
 
 if GZIP_BUFFER_POST in CAPABILITIES:
     from gzip import GzipFile

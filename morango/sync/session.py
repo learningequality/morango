@@ -1,11 +1,11 @@
 import logging
 
 from requests import exceptions
-from morango import __version__
 from requests.sessions import Session
 from requests.utils import super_len
-from requests.packages.urllib3.util.url import parse_url
+from urllib3.util.url import parse_url
 
+from morango import __version__
 from morango.utils import serialize_capabilities_to_client_request
 from morango.utils import SETTINGS
 
