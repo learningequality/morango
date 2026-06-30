@@ -143,3 +143,16 @@ def exception_path(exc):
     if isinstance(exc, Exception):
         exc_cls = exc.__class__
     return f"{exc_cls.__module__}.{exc_cls.__name__}"
+
+
+class nullcontext:
+    """Replace this with contextlib.nullcontext when python3.6 support is dropped"""
+
+    def __init__(self, value=None):
+        self.value = value
+
+    def __enter__(self, *args, **kwargs):
+        return self.value
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        pass

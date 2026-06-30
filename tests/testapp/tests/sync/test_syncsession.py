@@ -4,7 +4,9 @@ import uuid
 import mock
 from django.test.testcases import LiveServerTestCase
 from django.test.utils import override_settings
+from requests.exceptions import ChunkedEncodingError
 from requests.exceptions import HTTPError
+from requests.sessions import Session
 
 from ..helpers import BaseClientTestCase
 from ..helpers import BaseTransferClientTestCase
@@ -133,6 +135,29 @@ class NetworkSyncConnectionTestCase(LiveServerTestCase):
         remote_certs = self.network_connection.get_remote_certificates(
             self.root_cert.id
         )
+        self.assertSetEqual(set(certs), set(remote_certs))
+
+    def test_get_remote_certs__retries_chunked_encoding_error(self):
+        certs = self.subset_cert.get_ancestors(include_self=True)
+        original_send = Session.send
+        attempts = {"chunked_encoding_errors": 0}
+
+        def flaky_request(session, request, **kwargs):
+            if request.method == "GET" and attempts["chunked_encoding_errors"] == 0:
+                attempts["chunked_encoding_errors"] += 1
+                raise ChunkedEncodingError("Connection broken")
+            return original_send(session, request, **kwargs)
+
+        with mock.patch(
+            "morango.sync.session.Session.send",
+            autospec=True,
+            side_effect=flaky_request,
+        ):
+            remote_certs = self.network_connection.get_remote_certificates(
+                self.root_cert.id
+            )
+
+        self.assertEqual(1, attempts["chunked_encoding_errors"])
         self.assertSetEqual(set(certs), set(remote_certs))
 
     @mock.patch.object(SessionWrapper, "request")
