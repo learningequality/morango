@@ -4,6 +4,9 @@ List of the most important changes for each release.
 
 ## 0.8.14
 - Adds utility for addressing immediate FK constraints caused by Django upgrade, automatically performed for morango models in a Django migration.
+- Adds retry behavior for low-level connection issues not handled by `urllib3` retries
+- Allows repeat pushes and pulls of buffers during transfer
+- Ignores HTTP 404 errors during sync or transfer session closure, which may occur if they're already closed
 
 ## 0.8.13
 - Removes multiprocessing fallback for RSA key generation to avoid leaving zombie processes; key generation now stays in-process
