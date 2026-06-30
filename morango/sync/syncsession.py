@@ -6,6 +6,7 @@ import logging
 import os
 import socket
 import uuid
+from functools import wraps
 from io import BytesIO
 from urllib.parse import urljoin
 from urllib.parse import urlparse
@@ -53,6 +54,7 @@ logger = logging.getLogger(__name__)
 
 DBBackend = load_backend(connection)
 
+
 def _join_with_logical_operator(lst, operator):
     op = ") {operator} (".format(operator=operator)
     return "(({items}))".format(items=op.join(lst))
@@ -75,6 +77,25 @@ def _get_client_ip_for_server(server_host, server_port):
     finally:
         s.close()
     return IP
+
+
+def ignore_404(target):
+    """
+    Decorator that wraps callables to ignore 404s caused by its use of requests
+    :param target: A callable
+    :return: A callable
+    """
+    @wraps(target)
+    def wrapper(*args, **kwargs):
+        try:
+            return target(*args, **kwargs)
+        except HTTPError as e:
+            if e.response is None or e.response.status_code != 404:
+                raise e
+            else:
+                logger.debug(f"Ignoring 404 raised by {target.__name__}")
+
+    return wrapper
 
 
 # borrowed from https://github.com/django/django/blob/1.11.20/django/utils/text.py#L295
@@ -479,13 +500,15 @@ class NetworkSyncConnection(Connection):
             json=data,
         )
 
+    @ignore_404
     def _close_transfer_session(self, transfer_session):
-        return self.session.delete(
+        self.session.delete(
             self.urlresolve(api_urls.TRANSFERSESSION, lookup=transfer_session.id)
         )
 
+    @ignore_404
     def _close_sync_session(self, sync_session):
-        return self.session.delete(
+        self.session.delete(
             self.urlresolve(api_urls.SYNCSESSION, lookup=sync_session.id)
         )
 
