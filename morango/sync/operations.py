@@ -1390,9 +1390,8 @@ class NetworkOperation(BaseOperation):
         Closes remote transfer session
 
         :type context: NetworkSessionContext
-        :return: The Response
         """
-        return context.connection._close_transfer_session(context.transfer_session)
+        context.connection._close_transfer_session(context.transfer_session)
 
     def put_buffers(self, context, buffers):
         """
@@ -1763,8 +1762,5 @@ class NetworkCleanupOperation(NetworkOperation):
         """
         :type context: NetworkSessionContext
         """
-        response = self.close_transfer_session(context)
-        remote_status = transfer_statuses.COMPLETED
-        if response.status_code < 200 or response.status_code >= 300:
-            remote_status = transfer_statuses.ERRORED
-        return remote_status
+        self.close_transfer_session(context)
+        return transfer_statuses.COMPLETED
