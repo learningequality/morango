@@ -1073,6 +1073,22 @@ class BufferEndpointTestCase(CertificateTestCaseMixin, APITestCase):
             for q in ctx.captured_queries:
                 self.assertFalse('morango_transfersession' in q['sql'])
 
+    def test_buffer_serializer_batches_rmcb_queries_for_many(self):
+        transfer_session_id = self.create_records_for_pulling(count=10)
+        buffers = Buffer.objects.filter(
+            transfer_session_id=transfer_session_id
+        ).order_by("pk")
+
+        with CaptureQueriesContext(connection) as ctx:
+            BufferSerializer(buffers, many=True).data
+
+        rmcb_queries = [
+            q
+            for q in ctx.captured_queries
+            if "recordmaxcounterbuffer" in q["sql"].lower()
+        ]
+        self.assertEqual(len(rmcb_queries), 1)
+
     def test_pull_valid_buffer_list(self):
 
         transfer_session_id = self.create_records_for_pulling()

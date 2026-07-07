@@ -1,3 +1,5 @@
+from collections import defaultdict
+
 from rest_framework import exceptions
 from rest_framework import serializers
 from rest_framework.fields import ReadOnlyField
@@ -158,11 +160,38 @@ class RecordMaxCounterBufferSerializer(serializers.ModelSerializer):
         read_only_fields = fields
 
 
+class BufferListSerializer(serializers.ListSerializer):
+    def to_representation(self, data):
+        buffers = list(data)
+        if buffers:
+            rmcb_map = defaultdict(list)
+            transfer_session_ids = {b.transfer_session_id for b in buffers}
+            # Morango implementation will only ever call this for one transfer session ID at a time,
+            # but a loop makes the code straightforward regardless and limits the quantity of
+            # SQLite variables in use
+            for transfer_session_id in transfer_session_ids:
+                # bulk-fetch all RMCB records needed for this batch of buffers in a
+                # single query, then cache the relevant subset on each buffer, instead
+                # of letting each buffer's nested rmcb_list serializer issue its own query
+                rmcb_queryset = RecordMaxCounterBuffer.objects.filter(
+                    transfer_session_id=transfer_session_id,
+                    model_uuid__in={b.model_uuid for b in buffers if b.transfer_session_id == transfer_session_id},
+                )
+                for rmcb in rmcb_queryset:
+                    rmcb_map[(transfer_session_id, rmcb.model_uuid)].append(rmcb)
+            for buffer in buffers:
+                buffer._rmcb_list = rmcb_map[
+                    (buffer.transfer_session_id, buffer.model_uuid)
+                ]
+        return super(BufferListSerializer, self).to_representation(buffers)
+
+
 class BufferSerializer(serializers.ModelSerializer):
     rmcb_list = RecordMaxCounterBufferSerializer(many=True)
 
     class Meta:
         model = Buffer
+        list_serializer_class = BufferListSerializer
         fields = (
             "serialized",
             "deleted",
