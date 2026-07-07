@@ -2,6 +2,9 @@
 
 List of the most important changes for each release.
 
+## 0.8.15
+- Improves buffer serialization performance by performing bulk counter lookup
+
 ## 0.8.14
 - Adds utility for addressing immediate FK constraints caused by Django upgrade, automatically performed for morango models in a Django migration.
 - Adds retry behavior for low-level connection issues not handled by `urllib3` retries
