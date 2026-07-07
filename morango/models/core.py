@@ -553,6 +553,11 @@ class Buffer(AbstractStore):
         unique_together = ("transfer_session", "model_uuid")
 
     def rmcb_list(self):
+        # allow callers (e.g. BufferListSerializer) to batch-fetch RMCB records
+        # for many buffers at once and cache them here, to avoid an N+1 query
+        # pattern when serializing a large number of buffers
+        if hasattr(self, "_rmcb_list"):
+            return self._rmcb_list
         return RecordMaxCounterBuffer.objects.filter(
             model_uuid=self.model_uuid, transfer_session_id=self.transfer_session_id
         )
