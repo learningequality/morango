@@ -52,7 +52,7 @@ class SessionContext(object):
 
         if self.transfer_session:
             self.sync_session = transfer_session.sync_session or self.sync_session
-            self.is_push = transfer_session.push or self.is_push
+            self.is_push = transfer_session.push
             if transfer_session.filter:
                 self.filter = transfer_session.get_filter()
 

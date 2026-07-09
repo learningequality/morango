@@ -1107,9 +1107,11 @@ class SerializeOperation(LocalOperation):
             context.transfer_session.client_fsic = context.request.data.get(
                 "client_fsic", "{}"
             )
+            update_fields = ["server_fsic", "client_fsic"]
         else:
             context.transfer_session.client_fsic = fsic
-        context.transfer_session.save()
+            update_fields = ["client_fsic"]
+        context.transfer_session.save(update_fields=update_fields)
         return transfer_statuses.COMPLETED
 
 
@@ -1138,7 +1140,7 @@ class ProducerQueueOperation(LocalOperation):
 
         logger.debug("[morango] Queued {} records".format(records_total))
         context.transfer_session.records_total = records_total
-        context.transfer_session.save()
+        context.transfer_session.save(update_fields=["records_total"])
         return transfer_statuses.COMPLETED
 
 
@@ -1342,7 +1344,7 @@ class CleanupOperation(LocalOperation):
             context.transfer_session.delete_buffers()
 
         context.transfer_session.active = False
-        context.transfer_session.save()
+        context.transfer_session.save(update_fields=["active"])
         return transfer_statuses.COMPLETED
 
 
@@ -1493,6 +1495,7 @@ class LegacyNetworkInitializeOperation(NetworkOperation):
 
         data = self.create_transfer_session(context)
         context.transfer_session.server_fsic = data.get("server_fsic") or "{}"
+        update_fields = ["server_fsic"]
 
         # A legacy instance performs queuing during the creation of the transfer session, so since we use a new
         # workflow we need to update the network server when pushing to say how many records we've queued. For pull,
@@ -1500,8 +1503,9 @@ class LegacyNetworkInitializeOperation(NetworkOperation):
         # since that's when it's first available.
         if context.transfer_session.pull:
             context.transfer_session.records_total = data.get("records_total", 0)
+            update_fields.append("records_total")
 
-        context.transfer_session.save()
+        context.transfer_session.save(update_fields=update_fields)
         return transfer_statuses.COMPLETED
 
 
@@ -1569,7 +1573,7 @@ class NetworkSerializeOperation(NetworkOperation):
 
         if remote_status == transfer_statuses.COMPLETED:
             context.transfer_session.server_fsic = data.get("server_fsic")
-            context.transfer_session.save()
+            context.transfer_session.save(update_fields=["server_fsic"])
 
         return remote_status
 
@@ -1618,7 +1622,7 @@ class NetworkQueueOperation(NetworkOperation):
 
         if context.is_pull and remote_status == transfer_statuses.COMPLETED:
             context.transfer_session.records_total = data.get("records_total", 0)
-            context.transfer_session.save()
+            context.transfer_session.save(update_fields=["records_total"])
 
         return remote_status
 
@@ -1654,7 +1658,7 @@ class NetworkPushTransferOperation(NetworkOperation):
         )
         context.transfer_session.bytes_sent = context.connection.bytes_sent
         context.transfer_session.bytes_received = context.connection.bytes_received
-        context.transfer_session.save()
+        context.transfer_session.save(update_fields=["records_transferred", "bytes_sent", "bytes_received"])
 
         # if we've transferred all records, return a completed status
         op_status = transfer_statuses.PENDING

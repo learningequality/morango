@@ -4,6 +4,8 @@ List of the most important changes for each release.
 
 ## 0.8.15
 - Improves buffer serialization performance by performing bulk counter lookup
+- Corrects an initialization issue with `SessionContext` that leads to an incorrect value for `is_push`
+- Save calls to Morango models during a sync are now scoped to only the changed fields
 
 ## 0.8.14
 - Adds utility for addressing immediate FK constraints caused by Django upgrade, automatically performed for morango models in a Django migration.

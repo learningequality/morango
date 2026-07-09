@@ -319,6 +319,7 @@ class TransferSession(models.Model):
         :type stage: morango.constants.transfer_stages.*|None
         :type stage_status: morango.constants.transfer_statuses.*|None
         """
+        update_fields = []
         if stage is not None:
             if self.transfer_stage and transfer_stages.stage(
                 self.transfer_stage
@@ -329,13 +330,18 @@ class TransferSession(models.Model):
                     )
                 )
             self.transfer_stage = stage
+            update_fields.append("transfer_stage")
+
         if stage_status is not None:
             self.transfer_stage_status = stage_status
-        if stage is not None or stage_status is not None:
+            update_fields.append("transfer_stage_status")
+
+        if update_fields:
             self.last_activity_timestamp = timezone.now()
-            self.save()
+            update_fields.append("last_activity_timestamp")
+            self.save(update_fields=update_fields)
             self.sync_session.last_activity_timestamp = timezone.now()
-            self.sync_session.save()
+            self.sync_session.save(update_fields=["last_activity_timestamp"])
 
     def delete_buffers(self):
         """
