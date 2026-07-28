@@ -125,17 +125,26 @@ def validate_and_create_buffer_data(  # noqa: C901
         buffer_list += [Buffer(**record)]
 
     with transaction.atomic():
-        transfer_session.records_transferred += len(data)
+        deleted_buffers, _ = Buffer.objects.filter(
+            transfer_session=transfer_session,
+            model_uuid__in=[record["model_uuid"] for record in data],
+        ).delete()
+        RecordMaxCounterBuffer.objects.filter(
+            transfer_session=transfer_session,
+            model_uuid__in=[record["model_uuid"] for record in data],
+        ).delete()
 
+        update_fields = ["records_transferred"]
         if connection is not None:
             transfer_session.bytes_sent = connection.bytes_sent
-        if connection is not None:
             transfer_session.bytes_received = connection.bytes_received
-
-        transfer_session.save()
+            update_fields.extend(["bytes_sent", "bytes_received"])
 
         Buffer.objects.bulk_create(buffer_list)
         RecordMaxCounterBuffer.objects.bulk_create(rmcb_list)
+
+        transfer_session.records_transferred += len(buffer_list) - deleted_buffers
+        transfer_session.save(update_fields=update_fields)
 
 
 class SyncSignal(object):

@@ -178,10 +178,7 @@ class PythonRSAKey(BaseKey):
     _private_key = None
 
     def generate_new_key(self, keysize=2048):
-        try:
-            self._public_key, self._private_key = PYRSA.newkeys(keysize, poolsize=4)
-        except:  # noqa: E722
-            self._public_key, self._private_key = PYRSA.newkeys(keysize)
+        self._public_key, self._private_key = PYRSA.newkeys(keysize)
 
     def _sign(self, message):
 

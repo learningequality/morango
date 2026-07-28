@@ -7,7 +7,7 @@ from django.db import models
 
 class Migration(migrations.Migration):
     dependencies = [
-        ("morango", "0003_store_deserialization_errors"),
+        ("morango", "0004_deferrable_foreign_keys"),
     ]
 
     operations = [

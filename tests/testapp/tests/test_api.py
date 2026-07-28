@@ -848,7 +848,7 @@ class BufferEndpointTestCase(CertificateTestCaseMixin, APITestCase):
 
         return buffermodel
 
-    def make_buffer_post_request(self, buffers, expected_status=201, gzip=False):
+    def make_buffer_post_request(self, buffers, expected_status=201, gzip=False, pre_count=0):
         serialized_recs = BufferSerializer(buffers, many=True)
 
         # extract that data that is to be posted
@@ -862,9 +862,13 @@ class BufferEndpointTestCase(CertificateTestCaseMixin, APITestCase):
             headers["content_type"] = "application/gzip"
             headers["format"] = None
 
-        # delete the records from the DB so we don't conflict when we POST
-        Buffer.objects.all().delete()
-        RecordMaxCounterBuffer.objects.all().delete()
+        # delete the records to match pre_count if zero
+        if pre_count == 0:
+            Buffer.objects.all().delete()
+            RecordMaxCounterBuffer.objects.all().delete()
+        else:
+            self.assertEqual(Buffer.objects.count(), pre_count)
+            self.assertEqual(RecordMaxCounterBuffer.objects.count(), pre_count * 3)
 
         response = self.client.post(reverse("buffers-list"), data, **headers)
         self.assertEqual(response.status_code, expected_status)
@@ -912,6 +916,22 @@ class BufferEndpointTestCase(CertificateTestCaseMixin, APITestCase):
         rec_2 = self.build_buffer_item(transfer_session=rec_1.transfer_session)
         rec_3 = self.build_buffer_item(transfer_session=rec_1.transfer_session)
         self.make_buffer_post_request([rec_1, rec_2, rec_3], expected_status=403)
+
+    def test_push_repeat_chunk(self):
+        rec_1 = self.build_buffer_item(push=True, filter=self.default_push_filter)
+        transfer_session = rec_1.transfer_session
+        rec_2 = self.build_buffer_item(transfer_session=transfer_session)
+        # need to create a third buffer so it doesn't mark the transfer complete after pushing 2
+        self.build_buffer_item(transfer_session=transfer_session)
+        self.assertEqual(transfer_session.records_transferred, 0)
+
+        self.make_buffer_post_request([rec_1, rec_2], expected_status=201)
+        transfer_session.refresh_from_db()
+        self.assertEqual(transfer_session.records_transferred, 2)
+
+        self.make_buffer_post_request([rec_1, rec_2], expected_status=201, pre_count=2)
+        transfer_session.refresh_from_db()
+        self.assertEqual(transfer_session.records_transferred, 2)
 
     def create_records_for_pulling(self, count=3, **kwargs):
 
@@ -965,9 +985,7 @@ class BufferEndpointTestCase(CertificateTestCaseMixin, APITestCase):
             # delete "local" buffer records to avoid uniqueness constraint failures in validation
             Buffer.objects.filter(transfer_session_id=t_id, model_uuid__in=model_uuids).delete()
 
-            # run the validation logic to ensure no errors were returned
-            errors = validate_and_create_buffer_data(data, TransferSession.objects.get(id=t_id))
-            self.assertFalse(errors)
+            validate_and_create_buffer_data(data, TransferSession.objects.get(id=t_id))
 
             # check that the correct number of buffer items were created
             self.assertEqual(
@@ -997,11 +1015,30 @@ class BufferEndpointTestCase(CertificateTestCaseMixin, APITestCase):
         buffer = Buffer.objects.filter(transfer_session_id=transfer_session_id).first()
         self.assertEqual(BufferSerializer(instance=buffer).data["_self_ref_order"], 4)
 
+    def test_buffer_serializer_batches_rmcb_queries_for_many(self):
+        transfer_session_id = self.create_records_for_pulling(count=10)
+        buffers = Buffer.objects.filter(transfer_session_id=transfer_session_id).order_by("pk")
+
+        with CaptureQueriesContext(connection) as ctx:
+            BufferSerializer(buffers, many=True).data
+
+        rmcb_queries = [
+            q for q in ctx.captured_queries if "recordmaxcounterbuffer" in q["sql"].lower()
+        ]
+        self.assertEqual(len(rmcb_queries), 1)
+
     def test_pull_valid_buffer_list(self):
 
         transfer_session_id = self.create_records_for_pulling()
 
         self.make_buffer_get_request(transfer_session_id=transfer_session_id)
+
+    def test_pull_repeat(self):
+
+        transfer_session_id = self.create_records_for_pulling(count=3)
+
+        self.make_buffer_get_request(transfer_session_id=transfer_session_id, expected_count=3)
+        self.make_buffer_get_request(transfer_session_id=transfer_session_id, expected_count=3)
 
     def test_pull_fails_when_transfer_session_id_not_specified(self):
 

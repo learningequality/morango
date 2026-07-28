@@ -7,6 +7,7 @@ import logging
 import os
 import socket
 import uuid
+from functools import wraps
 from io import BytesIO
 from urllib.parse import urljoin
 from urllib.parse import urlparse
@@ -14,9 +15,8 @@ from urllib.parse import urlparse
 from django.db import connection
 from django.db import transaction
 from django.utils import timezone
-from requests.adapters import HTTPAdapter
 from requests.exceptions import HTTPError
-from requests.packages.urllib3.util.retry import Retry
+from urllib3.util.retry import Retry
 
 from morango.api.serializers import CertificateSerializer
 from morango.api.serializers import InstanceIDSerializer
@@ -80,6 +80,26 @@ def _get_client_ip_for_server(server_host, server_port):
     return IP
 
 
+def ignore_404(target):
+    """
+    Decorator that wraps callables to ignore 404s caused by its use of requests
+    :param target: A callable
+    :return: A callable
+    """
+
+    @wraps(target)
+    def wrapper(*args, **kwargs):
+        try:
+            return target(*args, **kwargs)
+        except HTTPError as e:
+            if e.response is None or e.response.status_code != 404:
+                raise e
+            else:
+                logger.debug(f"Ignoring 404 raised by {target.__name__}")
+
+    return wrapper
+
+
 # borrowed from https://github.com/django/django/blob/1.11.20/django/utils/text.py#L295
 def compress_string(s, compresslevel=9):
     zbuf = BytesIO()
@@ -132,15 +152,19 @@ class NetworkSyncConnection(Connection):
         self.base_url = base_url
         self.compresslevel = compresslevel
         # set up requests session with retry logic
-        self.session = SessionWrapper()
         # sleep for {backoff factor} * (2 ^ ({number of total retries} - 1)) between requests
         # with 7 retry attempts, sleep escalation becomes (0.6s, 1.2s, ..., 38.4s)
-        retry = Retry(total=retries, backoff_factor=backoff_factor)
-        adapter = HTTPAdapter(max_retries=retry)
-        self.session.mount("http://", adapter)
-        self.session.mount("https://", adapter)
+        self.session = SessionWrapper(
+            Retry(
+                total=retries,
+                backoff_factor=backoff_factor,
+                allowed_methods=None,  # allow any method
+            )
+        )
         # get morango information about server
-        self.server_info = self.session.get(urljoin(self.base_url, api_urls.INFO)).json()
+        self.server_info = self.session.get(
+            urljoin(self.base_url, api_urls.INFO), is_retryable=True
+        ).json()
         self.capabilities = self.server_info.get("capabilities", [])
         self.chunk_size = chunk_size
 
@@ -409,13 +433,15 @@ class NetworkSyncConnection(Connection):
         return certificate
 
     def _get_public_key(self):
-        return self.session.get(self.urlresolve(api_urls.PUBLIC_KEY))
+        return self.session.get(self.urlresolve(api_urls.PUBLIC_KEY), is_retryable=True)
 
     def _get_nonce(self):
-        return self.session.post(self.urlresolve(api_urls.NONCE))
+        return self.session.post(self.urlresolve(api_urls.NONCE), is_retryable=True)
 
     def _get_certificate_chain(self, params):
-        return self.session.get(self.urlresolve(api_urls.CERTIFICATE), params=params)
+        return self.session.get(
+            self.urlresolve(api_urls.CERTIFICATE), params=params, is_retryable=True
+        )
 
     def _certificate_signing(self, data, userargs, password):
         # convert user arguments into query str for passing to auth layer
@@ -432,29 +458,38 @@ class NetworkSyncConnection(Connection):
         return self.session.post(self.urlresolve(api_urls.SYNCSESSION), json=data)
 
     def _get_sync_session(self, sync_session):
-        return self.session.get(self.urlresolve(api_urls.SYNCSESSION, lookup=sync_session.id))
+        return self.session.get(
+            self.urlresolve(api_urls.SYNCSESSION, lookup=sync_session.id), is_retryable=True
+        )
 
     def _create_transfer_session(self, data):
-        return self.session.post(self.urlresolve(api_urls.TRANSFERSESSION), json=data)
+        return self.session.post(
+            self.urlresolve(api_urls.TRANSFERSESSION), json=data, is_retryable=True
+        )
 
     def _get_transfer_session(self, transfer_session):
         return self.session.get(
-            self.urlresolve(api_urls.TRANSFERSESSION, lookup=transfer_session.id)
+            self.urlresolve(api_urls.TRANSFERSESSION, lookup=transfer_session.id), is_retryable=True
         )
 
     def _update_transfer_session(self, data, transfer_session):
         return self.session.patch(
             self.urlresolve(api_urls.TRANSFERSESSION, lookup=transfer_session.id),
             json=data,
+            is_retryable=True,
         )
 
+    @ignore_404
     def _close_transfer_session(self, transfer_session):
-        return self.session.delete(
-            self.urlresolve(api_urls.TRANSFERSESSION, lookup=transfer_session.id)
+        self.session.delete(
+            self.urlresolve(api_urls.TRANSFERSESSION, lookup=transfer_session.id), is_retryable=True
         )
 
+    @ignore_404
     def _close_sync_session(self, sync_session):
-        return self.session.delete(self.urlresolve(api_urls.SYNCSESSION, lookup=sync_session.id))
+        self.session.delete(
+            self.urlresolve(api_urls.SYNCSESSION, lookup=sync_session.id), is_retryable=True
+        )
 
     def _push_record_chunk(self, data):
         # gzip the data if both client and server have gzipping capabilities
@@ -467,9 +502,10 @@ class NetworkSyncConnection(Connection):
                 self.urlresolve(api_urls.BUFFER),
                 data=gzipped_data,
                 headers={"content-type": "application/gzip"},
+                is_retryable=True,
             )
         else:
-            return self.session.post(self.urlresolve(api_urls.BUFFER), json=data)
+            return self.session.post(self.urlresolve(api_urls.BUFFER), json=data, is_retryable=True)
 
     def _pull_record_chunk(self, transfer_session):
         # pull records from server for given transfer session
@@ -478,7 +514,7 @@ class NetworkSyncConnection(Connection):
             "offset": transfer_session.records_transferred,
             "transfer_session_id": transfer_session.id,
         }
-        return self.session.get(self.urlresolve(api_urls.BUFFER), params=params)
+        return self.session.get(self.urlresolve(api_urls.BUFFER), params=params, is_retryable=True)
 
 
 class SyncClientSignals(SyncSignal):
