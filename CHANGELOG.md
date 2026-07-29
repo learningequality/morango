@@ -2,6 +2,23 @@
 
 List of the most important changes for each release.
 
+## 0.8.15
+- Improves buffer serialization performance by performing bulk counter lookup
+- Corrects an initialization issue with `SessionContext` that leads to an incorrect value for `is_push`
+- Save calls to Morango models during a sync are now scoped to only the changed fields
+
+## 0.8.14
+- Adds utility for addressing immediate FK constraints caused by Django upgrade, automatically performed for morango models in a Django migration.
+- Adds retry behavior for low-level connection issues not handled by `urllib3` retries
+- Allows repeat pushes and pulls of buffers during transfer
+- Ignores HTTP 404 errors during sync or transfer session closure, which may occur if they're already closed
+
+## 0.8.13
+- Removes multiprocessing fallback for RSA key generation to avoid leaving zombie processes; key generation now stays in-process
+
+## 0.8.12
+- Fixes issue where dirty-bit isn't updated when calling save on a syncable model with `update_fields`
+
 ## 0.8.11
 - Adds additional `deserialization_exception` field to `Store` model to track the fully qualified exception path
 

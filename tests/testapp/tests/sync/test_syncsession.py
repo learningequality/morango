@@ -4,7 +4,9 @@ import uuid
 import mock
 from django.test.testcases import LiveServerTestCase
 from django.test.utils import override_settings
+from requests.exceptions import ChunkedEncodingError
 from requests.exceptions import HTTPError
+from requests.sessions import Session
 
 from morango.api.serializers import CertificateSerializer
 from morango.constants import transfer_stages
@@ -19,6 +21,7 @@ from morango.models.certificates import Filter
 from morango.models.certificates import Key
 from morango.models.certificates import ScopeDefinition
 from morango.models.core import SyncSession
+from morango.models.core import TransferSession
 from morango.models.fields.crypto import SharedKey
 from morango.sync.context import LocalSessionContext
 from morango.sync.context import NetworkSessionContext
@@ -127,6 +130,27 @@ class NetworkSyncConnectionTestCase(LiveServerTestCase):
         remote_certs = self.network_connection.get_remote_certificates(self.root_cert.id)
         self.assertSetEqual(set(certs), set(remote_certs))
 
+    def test_get_remote_certs__retries_chunked_encoding_error(self):
+        certs = self.subset_cert.get_ancestors(include_self=True)
+        original_send = Session.send
+        attempts = {"chunked_encoding_errors": 0}
+
+        def flaky_request(session, request, **kwargs):
+            if request.method == "GET" and attempts["chunked_encoding_errors"] == 0:
+                attempts["chunked_encoding_errors"] += 1
+                raise ChunkedEncodingError("Connection broken")
+            return original_send(session, request, **kwargs)
+
+        with mock.patch(
+            "morango.sync.session.Session.send",
+            autospec=True,
+            side_effect=flaky_request,
+        ):
+            remote_certs = self.network_connection.get_remote_certificates(self.root_cert.id)
+
+        self.assertEqual(1, attempts["chunked_encoding_errors"])
+        self.assertSetEqual(set(certs), set(remote_certs))
+
     @mock.patch.object(SessionWrapper, "request")
     def test_csr(self, mock_request):
         # mock a "signed" cert being returned by server
@@ -224,6 +248,66 @@ class NetworkSyncConnectionTestCase(LiveServerTestCase):
 
         self.network_connection.close_sync_session(client.sync_session)
         self.assertEqual(SyncSession.objects.filter(active=True).count(), 0)
+
+    def test_close_transfer_session_ignores_404(self):
+        mock_response = mock.Mock()
+        mock_response.status_code = 404
+        transfer_session = mock.Mock(spec=TransferSession)
+        transfer_session.id = uuid.uuid4().hex
+
+        with mock.patch.object(
+            self.network_connection.session,
+            "delete",
+            side_effect=HTTPError(response=mock_response),
+        ):
+            # should not raise even though the server returned 404
+            self.network_connection._close_transfer_session(transfer_session)
+
+    def test_close_sync_session_ignores_404(self):
+        mock_response = mock.Mock()
+        mock_response.status_code = 404
+        sync_session = mock.Mock(spec=SyncSession)
+        sync_session.id = uuid.uuid4().hex
+
+        with mock.patch.object(
+            self.network_connection.session,
+            "delete",
+            side_effect=HTTPError(response=mock_response),
+        ):
+            # should not raise even though the server returned 404
+            self.network_connection._close_sync_session(sync_session)
+
+    def test_close_sync_session_raises_500(self):
+        mock_response = mock.Mock()
+        mock_response.status_code = 500
+        sync_session = mock.Mock(spec=SyncSession)
+        sync_session.id = uuid.uuid4().hex
+
+        e = HTTPError(response=mock_response)
+
+        with mock.patch.object(
+            self.network_connection.session,
+            "delete",
+            side_effect=e,
+        ):
+            with self.assertRaises(type(e)) as raised:
+                self.network_connection._close_sync_session(sync_session)
+            self.assertEqual(e, raised.exception)
+
+    def test_close_sync_session_raises_no_response(self):
+        sync_session = mock.Mock(spec=SyncSession)
+        sync_session.id = uuid.uuid4().hex
+
+        e = HTTPError()
+
+        with mock.patch.object(
+            self.network_connection.session,
+            "delete",
+            side_effect=e,
+        ):
+            with self.assertRaises(type(e)) as raised:
+                self.network_connection._close_sync_session(sync_session)
+            self.assertEqual(e, raised.exception)
 
     @mock.patch.object(SyncSession.objects, "create")
     def test_resume_sync_session(self, mock_create):

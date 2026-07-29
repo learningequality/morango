@@ -70,6 +70,26 @@ class SessionContextTestCase(SimpleTestCase):
         self.assertFalse(context.is_push)
         self.assertTrue(context.is_pull)
 
+    def test_init__with_transfer_session__direction_handling(self):
+        sync_session = mock.Mock(spec=SyncSession)
+        sync_filter = Filter("before_filter")
+        transfer_session = mock.Mock(
+            spec=TransferSession,
+            sync_session=sync_session,
+            push=False,
+            filter="after_filter",
+            transfer_stage=transfer_stages.TRANSFERRING,
+            transfer_stage_status=transfer_statuses.STARTED,
+        )
+        transfer_session.get_filter.return_value = Filter(transfer_session.filter)
+
+        # the transfer session's `push=False` should take precedence over the constructor arg
+        context = TestSessionContext(
+            transfer_session=transfer_session, sync_filter=sync_filter, is_push=True
+        )
+        self.assertFalse(context.is_push)
+        self.assertTrue(context.is_pull)
+
     def test_init__with_transfer_session__no_filter(self):
         sync_session = mock.Mock(spec=SyncSession)
         sync_filter = Filter("before_filter")

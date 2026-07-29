@@ -322,6 +322,7 @@ class TransferSession(models.Model):
         :type stage: morango.constants.transfer_stages.*|None
         :type stage_status: morango.constants.transfer_statuses.*|None
         """
+        update_fields = []
         if stage is not None:
             if self.transfer_stage and transfer_stages.stage(
                 self.transfer_stage
@@ -332,13 +333,18 @@ class TransferSession(models.Model):
                     )
                 )
             self.transfer_stage = stage
+            update_fields.append("transfer_stage")
+
         if stage_status is not None:
             self.transfer_stage_status = stage_status
-        if stage is not None or stage_status is not None:
+            update_fields.append("transfer_stage_status")
+
+        if update_fields:
             self.last_activity_timestamp = timezone.now()
-            self.save()
+            update_fields.append("last_activity_timestamp")
+            self.save(update_fields=update_fields)
             self.sync_session.last_activity_timestamp = timezone.now()
-            self.sync_session.save()
+            self.sync_session.save(update_fields=["last_activity_timestamp"])
 
     def delete_buffers(self):
         """
@@ -565,6 +571,11 @@ class Buffer(AbstractStore):
         unique_together = ("transfer_session", "model_uuid")
 
     def rmcb_list(self):
+        # allow callers (e.g. BufferListSerializer) to batch-fetch RMCB records
+        # for many buffers at once and cache them here, to avoid an N+1 query
+        # pattern when serializing a large number of buffers
+        if hasattr(self, "_rmcb_list"):
+            return self._rmcb_list
         return RecordMaxCounterBuffer.objects.filter(
             model_uuid=self.model_uuid, transfer_session_id=self.transfer_session_id
         )
@@ -844,6 +855,11 @@ class SyncableModel(UUIDModelMixin):
             self._morango_dirty_bit = True
         elif not update_dirty_bit_to:
             self._morango_dirty_bit = False
+
+        # ensure the dirty bit field is in the fields to update if present, to keep it in sync
+        if update_dirty_bit_to is not None and kwargs.get("update_fields") is not None:
+            kwargs["update_fields"] = set(kwargs["update_fields"]) | {"_morango_dirty_bit"}
+
         super(SyncableModel, self).save(*args, **kwargs)
 
     def delete(self, using=None, keep_parents=False, hard_delete=False, *args, **kwargs):
