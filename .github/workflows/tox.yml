@@ -30,7 +30,7 @@ jobs:
         with:
           fetch-depth: 0
       - name: Install uv
-        uses: astral-sh/setup-uv@v8.2.0
+        uses: astral-sh/setup-uv@v9.0.0
         with:
           python-version: 3.9
           enable-cache: "true"
@@ -60,7 +60,7 @@ jobs:
           name: wheel
           path: dist/
       - name: Install uv
-        uses: astral-sh/setup-uv@v8.2.0
+        uses: astral-sh/setup-uv@v9.0.0
         with:
           python-version: "${{ matrix.python-version }}"
           activate-environment: "true"
@@ -89,7 +89,7 @@ jobs:
           name: wheel
           path: dist/
       - name: Install uv
-        uses: astral-sh/setup-uv@v8.2.0
+        uses: astral-sh/setup-uv@v9.0.0
         with:
           enable-cache: "true"
       - name: Manually install test dependencies
@@ -130,7 +130,7 @@ jobs:
           sudo apt-get -y -qq update
           sudo apt-get install -y openssl libssl-dev
       - name: Install uv
-        uses: astral-sh/setup-uv@v8.2.0
+        uses: astral-sh/setup-uv@v9.0.0
         with:
           python-version: "${{ matrix.python-version }}"
           enable-cache: "true"
@@ -167,7 +167,7 @@ jobs:
           apt-get -y -qq update
           apt-get install -y openssl libssl-dev
       - name: Install uv
-        uses: astral-sh/setup-uv@v8.2.0
+        uses: astral-sh/setup-uv@v9.0.0
         with:
           enable-cache: "true"
       - name: Manually install test dependencies
@@ -214,7 +214,7 @@ jobs:
           name: wheel
           path: dist/
       - name: Install uv
-        uses: astral-sh/setup-uv@v8.2.0
+        uses: astral-sh/setup-uv@v9.0.0
         with:
           python-version: "3.9"
           activate-environment: "true"
@@ -245,7 +245,7 @@ jobs:
         with:
           python-version: ${{ matrix.python-version }}
       - name: Install uv
-        uses: astral-sh/setup-uv@v8.2.0
+        uses: astral-sh/setup-uv@v9.0.0
         with:
           enable-cache: "true"
       - name: Manually install test dependencies
