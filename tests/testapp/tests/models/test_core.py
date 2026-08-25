@@ -544,3 +544,66 @@ class AbstractStoreSelfRefOrderValidationTestCase(TestCase):
         buffer = self._buffer(-1)
         with self.assertRaises(ValidationError):
             buffer.full_clean()
+
+
+class StoreQuerysetDeserializationErrorTestCase(TestCase):
+    """
+    Tests for the `StoreQueryset` deserialization error filters. `deserialization_error` was
+    historically non-nullable and set to an empty string when there was no error, so both an
+    empty string and null have to be treated as "this record has not errored".
+    """
+
+    def _store(self, deserialization_error):
+        return StoreFactory(
+            id=uuid.uuid4().hex,
+            partition="test",
+            serialized="{}",
+            last_saved_instance=uuid.uuid4().hex,
+            last_saved_counter=1,
+            deserialization_error=deserialization_error,
+        )
+
+    def setUp(self):
+        self.empty = self._store("")
+        self.null = self._store(None)
+        self.errored = self._store("it broke")
+
+    def test_filter_has_deserialization_error(self):
+        self.assertEqual(
+            [store.id for store in Store.objects.all().filter_has_deserialization_error()],
+            [self.errored.id],
+        )
+
+    def test_exclude_has_deserialization_error(self):
+        self.assertEqual(
+            sorted(store.id for store in Store.objects.all().exclude_has_deserialization_error()),
+            sorted([self.empty.id, self.null.id]),
+        )
+
+    def test_filter_deserialization_error__true(self):
+        self.assertEqual(
+            [store.id for store in Store.objects.all().filter_deserialization_error(True)],
+            [self.errored.id],
+        )
+
+    def test_filter_deserialization_error__false(self):
+        self.assertEqual(
+            sorted(store.id for store in Store.objects.all().filter_deserialization_error(False)),
+            sorted([self.empty.id, self.null.id]),
+        )
+
+    def test_filters_are_complementary(self):
+        """Every record falls into exactly one of the two filters"""
+        self.assertEqual(
+            Store.objects.all().filter_has_deserialization_error().count()
+            + Store.objects.all().exclude_has_deserialization_error().count(),
+            Store.objects.count(),
+        )
+
+    def test_chains_onto_an_existing_queryset(self):
+        """The filter is a queryset method, so it must compose with prior filtering"""
+        queryset = Store.objects.filter(id=self.errored.id).filter_has_deserialization_error()
+        self.assertEqual([store.id for store in queryset], [self.errored.id])
+
+        queryset = Store.objects.filter(id=self.empty.id).filter_has_deserialization_error()
+        self.assertEqual(list(queryset), [])
