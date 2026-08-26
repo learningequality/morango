@@ -10,6 +10,12 @@ from morango.sync.stream.core import Unbuffer
 
 
 class FakeSource(Source):
+    def __init__(self):
+        self.begin_count = 0
+
+    def begin(self):
+        self.begin_count += 1
+
     def stream(self):
         yield 1
         yield 2
@@ -38,6 +44,15 @@ class SourceTestCase(SimpleTestCase):
     def test_stream(self):
         source = FakeSource()
         self.assertEqual([1, 2, 3], list(source.stream()))
+
+    def test_begin_defaults_to_a_noop(self):
+        """Subclasses only override `begin` when they have stream state to initialize"""
+
+        class NoBeginSource(Source):
+            def stream(self):
+                yield 1
+
+        self.assertIsNone(NoBeginSource().begin())
 
     def test_pipe(self):
         source = FakeSource()
@@ -121,6 +136,15 @@ class PipelineTestCase(SimpleTestCase):
 
         self.assertEqual(count, 3)
         self.assertEqual([2, 4, 6], sink.consumed)
+
+    def test_pipeline_begins_the_source(self):
+        """`end` is what initializes source stream state, before anything is pulled from it"""
+        source = FakeSource()
+        pipeline = source.pipe(FakeTransform())
+
+        self.assertEqual(source.begin_count, 0)
+        pipeline.end(FakeSink())
+        self.assertEqual(source.begin_count, 1)
 
     def test_pipeline_chaining(self):
         source = FakeSource()
