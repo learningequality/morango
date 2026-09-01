@@ -34,7 +34,7 @@ jobs:
           sudo apt-get -y -qq update
           sudo apt-get install -y swig openssl libssl-dev
       - name: Install uv
-        uses: astral-sh/setup-uv@v8.2.0
+        uses: astral-sh/setup-uv@v10.0.1
         with:
           python-version: "3.10"
           activate-environment: "true"
