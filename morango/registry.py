@@ -110,6 +110,18 @@ class SyncableModelRegistry(object):
                 queryset = queryset.order_by(*self._get_nulls_last_ordering(ordering))
             yield queryset
 
+    def get_store_querysets(self, profile) -> Generator[QuerySet, None, None]:
+        """
+        Complementary method to `get_model_querysets` but for Store querysets
+        """
+        from morango.models.core import Store
+
+        for model in self.get_models(profile):
+            store_qs = Store.objects.filter(profile=profile, model_name=model.morango_model_name)
+            if self.get_self_referential_fk(model) is not None:
+                store_qs = store_qs.order_by(*self._get_nulls_last_ordering(("_self_ref_order",)))
+            yield store_qs
+
     @staticmethod
     def _get_nulls_last_ordering(ordering):
         normalized = []

@@ -23,6 +23,7 @@ from django.db.models.deletion import Collector
 from django.db.models.expressions import CombinedExpression
 from django.db.models.fields.related import ForeignKey
 from django.db.models.functions import Cast
+from django.db.models.functions import NullIf
 from django.utils import timezone
 from django.utils.functional import cached_property
 
@@ -440,10 +441,30 @@ class StoreQueryset(models.QuerySet):
             .values_list("fixed_id", flat=True)
         )
 
+    def filter_deserialization_error(self, has_error: bool) -> "StoreQueryset":
+        """
+        Filters the queryset to return Store records that have or have not any
+        deserialization errors
+        """
+        # this nullIf assertion is generally more performant than an OR'd statement on
+        # unindexed columns, in both SQLite and PostgreSQL
+        return self.annotate(
+            _deserialization_error=NullIf(
+                F("deserialization_error"), Value(""), output_field=models.TextField()
+            )
+        ).filter(_deserialization_error__isnull=not has_error)
 
-class StoreManager(models.Manager):
-    def get_queryset(self):
-        return StoreQueryset(self.model, using=self._db)
+    def filter_has_deserialization_error(self) -> "StoreQueryset":
+        """Filters the queryset to return Store records that have deserialization errors"""
+        return self.filter_deserialization_error(True)
+
+    def exclude_has_deserialization_error(self) -> "StoreQueryset":
+        """Filters the queryset to return Store records that have no deserialization error"""
+        return self.filter_deserialization_error(False)
+
+
+class StoreManager(models.Manager.from_queryset(StoreQueryset)):
+    pass
 
 
 class Store(AbstractStore):
