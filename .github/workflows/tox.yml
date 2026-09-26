@@ -36,7 +36,7 @@ jobs:
     if: ${{ needs.pre_job.outputs.python == 'true' }}
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v6.0.3
+      - uses: actions/checkout@v7.0.1
         with:
           fetch-depth: 0
       - name: Install uv
@@ -63,7 +63,7 @@ jobs:
       matrix:
         python-version: [3.9, '3.10', '3.11', '3.12', '3.13', '3.14']
     steps:
-      - uses: actions/checkout@v6.0.3
+      - uses: actions/checkout@v7.0.1
       - name: Download wheel artifact
         uses: actions/download-artifact@v8.0.1
         with:
@@ -92,7 +92,7 @@ jobs:
     container:
       image: python:${{ matrix.python-version }}-buster
     steps:
-      - uses: actions/checkout@v6.0.3
+      - uses: actions/checkout@v7.0.1
       - name: Download wheel artifact
         uses: actions/download-artifact@v8.0.1
         with:
@@ -110,7 +110,7 @@ jobs:
           python -m pip install --upgrade pip
           pip install tox
       - name: tox env cache
-        uses: actions/cache@v5.0.5
+        uses: actions/cache@v6.1.0
         with:
           path: ${{ github.workspace }}/.tox/py${{ matrix.python-version }}
           key: ${{ runner.os }}-tox-py${{ matrix.python-version }}-${{ hashFiles('pyproject.toml') }}
@@ -129,7 +129,7 @@ jobs:
       matrix:
         python-version: [3.9, '3.10', '3.11', '3.12', '3.13', '3.14']
     steps:
-      - uses: actions/checkout@v6.0.3
+      - uses: actions/checkout@v7.0.1
       - name: Download wheel artifact
         uses: actions/download-artifact@v8.0.1
         with:
@@ -163,7 +163,7 @@ jobs:
     container:
       image: python:${{ matrix.python-version }}-buster
     steps:
-      - uses: actions/checkout@v6.0.3
+      - uses: actions/checkout@v7.0.1
       - name: Download wheel artifact
         uses: actions/download-artifact@v8.0.1
         with:
@@ -188,7 +188,7 @@ jobs:
           python -m pip install --upgrade pip
           pip install tox
       - name: tox env cache
-        uses: actions/cache@v5.0.5
+        uses: actions/cache@v6.1.0
         with:
           path: ${{ github.workspace }}/.tox/py${{ matrix.python-version }}-cryptography${{ env.cryptography_version }}
           key: ${{ runner.os }}-tox-py${{ matrix.python-version }}-crypto${{ env.cryptography_version }}-${{ hashFiles('pyproject.toml') }}
@@ -217,7 +217,7 @@ jobs:
           # Maps tcp port 5432 on service container to the host
           - 5432:5432
     steps:
-      - uses: actions/checkout@v6.0.3
+      - uses: actions/checkout@v7.0.1
       - name: Download wheel artifact
         uses: actions/download-artifact@v8.0.1
         with:
@@ -244,14 +244,14 @@ jobs:
       matrix:
         python-version: [3.8]
     steps:
-      - uses: actions/checkout@v6.0.3
+      - uses: actions/checkout@v7.0.1
       - name: Download wheel artifact
         uses: actions/download-artifact@v8.0.1
         with:
           name: wheel
           path: dist/
       - name: Set up Python ${{ matrix.python-version }}
-        uses: actions/setup-python@v6.2.0
+        uses: actions/setup-python@v7.0.0
         with:
           python-version: ${{ matrix.python-version }}
       - name: Install uv
