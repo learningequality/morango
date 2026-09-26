@@ -10,20 +10,29 @@ jobs:
   pre_job:
     name: Path match check
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: read
     # Map a step output to a job output
     outputs:
-      should_skip: ${{ steps.skip_check.outputs.should_skip }}
+      migrations: ${{ steps.filter.outputs.migrations }}
     steps:
-      - id: skip_check
-        uses: fkirc/skip-duplicate-actions@master
+      # paths-filter needs a checkout to diff push events
+      - uses: actions/checkout@v6.0.3
+      - id: filter
+        uses: dorny/paths-filter@ceb8a2b8f2d89434be7ff52d3de7ec3738c5cc9d # v4.0.3
         with:
-          github_token: ${{ github.token }}
-          paths: '["morango/migrations/*.py", ".github/workflows/check_migrations_sqlite.yml", "pyproject.toml", "uv.lock"]'
+          filters: |
+            migrations:
+              - 'morango/migrations/*.py'
+              - '.github/workflows/check_migrations_sqlite.yml'
+              - 'pyproject.toml'
+              - 'uv.lock'
 
   build:
     name: Build wheel
     needs: pre_job
-    if: ${{ needs.pre_job.outputs.should_skip != 'true' }}
+    if: ${{ needs.pre_job.outputs.migrations == 'true' }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6.0.3
@@ -46,13 +55,12 @@ jobs:
   migration_test:
     name: SQLite migration tests
     needs: [pre_job, build]
-    if: ${{ needs.pre_job.outputs.should_skip != 'true' }}
+    if: ${{ needs.pre_job.outputs.migrations == 'true' }}
     runs-on: ubuntu-latest
     container:
       image: python:3.7-buster
     steps:
       - name: Install build dependencies
-        if: ${{ needs.pre_job.outputs.should_skip != 'true' }}
         run: |
           echo "deb http://archive.debian.org/debian-archive/debian/ buster main" > /etc/apt/sources.list
           echo "deb http://archive.debian.org/debian-archive/debian-security/ buster/updates main" >> /etc/apt/sources.list
@@ -96,5 +104,4 @@ jobs:
       - name: Install dependencies
         run: pip install "$(find dist -name '*.whl' | head -n 1)"
       - name: Run migrations
-        if: ${{ needs.pre_job.outputs.should_skip != 'true' }}
         run: python tests/testapp/manage.py migrate
