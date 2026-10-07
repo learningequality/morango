@@ -24,7 +24,7 @@ jobs:
       lint: ${{ steps.filter.outputs.lint }}
     steps:
       # paths-filter needs a checkout to diff push events
-      - uses: actions/checkout@v6.0.3
+      - uses: actions/checkout@v7.0.1
       - id: filter
         uses: dorny/paths-filter@ceb8a2b8f2d89434be7ff52d3de7ec3738c5cc9d # v4.0.3
         with:
@@ -41,7 +41,7 @@ jobs:
     if: ${{ needs.pre_job.outputs.lint == 'true' }}
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v6.0.3
+      - uses: actions/checkout@v7.0.1
       - uses: astral-sh/setup-uv@v8.2.0
         with:
           enable-cache: true
