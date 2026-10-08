@@ -1,12 +1,22 @@
 import uuid
 
 import mock
+from django.core.exceptions import ValidationError
+from django.core.serializers.json import DjangoJSONEncoder
+from django.db.utils import IntegrityError
 from django.test import SimpleTestCase
 from django.test import TestCase
+from facility_profile.models import ConditionalLog
+from facility_profile.models import Facility
+from facility_profile.models import SummaryLog
 
+from morango.errors import MorangoDirtyParent
+from morango.errors import MorangoMissingParent
 from morango.models.certificates import Filter
 from morango.models.core import Store
 from morango.models.core import SyncableModel
+from morango.sync.stream.deserialize import AppModelDeserialize
+from morango.sync.stream.deserialize import AppModelValidate
 from morango.sync.stream.deserialize import DeserializeOutcome
 from morango.sync.stream.deserialize import DeserializeTask
 from morango.sync.stream.deserialize import StoreModelSource
@@ -93,6 +103,475 @@ class DeserializeTaskTestCase(SimpleTestCase):
     def test_outcome__unresolved(self):
         with self.assertRaises(AssertionError):
             _ = self.task.outcome
+
+
+def _facility_store(facility_id=None, parent_id=None, **kwargs):
+    """An unsaved `Store` record holding a serialized `Facility`"""
+    facility_id = facility_id or uuid.uuid4().hex
+    facility = Facility(id=facility_id, name="Facility {}".format(facility_id), parent_id=parent_id)
+    store_kwargs = dict(
+        id=facility_id,
+        profile="facilitydata",
+        model_name="facility",
+        partition=facility_id,
+        source_id=facility.name,
+        serialized=DjangoJSONEncoder().encode(facility.serialize()),
+        last_saved_instance=uuid.uuid4().hex,
+        last_saved_counter=1,
+    )
+    store_kwargs.update(kwargs)
+    return Store(**store_kwargs)
+
+
+class AppModelDeserializeTestCase(SimpleTestCase):
+    def setUp(self):
+        self.store = _facility_store()
+        self.task = DeserializeTask(self.store, {})
+
+    def test_transform__deserializes_app_model(self):
+        task = AppModelDeserialize().transform(self.task)
+
+        self.assertIs(task, self.task)
+        self.assertIsInstance(task.app_model, Facility)
+        self.assertEqual(task.app_model.id, self.store.id)
+        self.assertEqual(task.outcome, DeserializeOutcome.SAVE)
+
+    def test_transform__sets_morango_fields_from_store(self):
+        task = AppModelDeserialize().transform(self.task)
+
+        self.assertEqual(task.app_model._morango_source_id, self.store.source_id)
+        self.assertEqual(task.app_model._morango_partition, self.store.partition)
+        self.assertFalse(task.app_model._morango_dirty_bit)
+
+    def test_transform__passes_sync_filter(self):
+        sync_filter = Filter(self.store.partition)
+        with mock.patch.object(Facility, "deserialize", wraps=Facility.deserialize) as deserialize:
+            AppModelDeserialize(sync_filter=sync_filter).transform(self.task)
+
+        deserialize.assert_called_once_with(mock.ANY, sync_filter=sync_filter)
+
+    def test_transform__deleted_store(self):
+        """Deleting the app model is the sink's job, so the deleted record passes through as-is"""
+        self.store.deleted = True
+        with mock.patch.object(Facility, "deserialize") as deserialize:
+            task = AppModelDeserialize().transform(self.task)
+
+        deserialize.assert_not_called()
+        self.assertIsNone(task.app_model)
+        self.assertEqual(task.outcome, DeserializeOutcome.DELETE)
+
+    def test_transform__invalid_json(self):
+        self.store.serialized = "{bad"
+        task = AppModelDeserialize().transform(self.task)
+
+        self.assertIsNone(task.app_model)
+        self.assertIsInstance(task.errors[0], ValueError)
+        self.assertEqual(task.outcome, DeserializeOutcome.ERROR)
+
+    def test_transform__validation_error(self):
+        error = ValidationError("bad value")
+        with mock.patch.object(Facility, "deserialize", side_effect=error):
+            task = AppModelDeserialize().transform(self.task)
+
+        self.assertIsNone(task.app_model)
+        self.assertEqual(task.errors, [error])
+
+    def test_transform__unexpected_error_propagates(self):
+        """Only per-record data errors are recorded; anything else is a defect and must surface"""
+        with mock.patch.object(Facility, "deserialize", side_effect=RuntimeError("defect")):
+            with self.assertRaises(RuntimeError):
+                AppModelDeserialize().transform(self.task)
+
+
+def _validate_task(app_model, fk_cache=None, **store_kwargs):
+    """A task carrying an already deserialized `app_model`, as `AppModelDeserialize` leaves it"""
+    store = Store(
+        id=app_model.id,
+        profile=app_model.morango_profile,
+        model_name=app_model.morango_model_name,
+        **store_kwargs,
+    )
+    task = DeserializeTask(store, fk_cache if fk_cache is not None else {})
+    task.set_app_model(app_model)
+    return task
+
+
+class AppModelValidateTestCase(SimpleTestCase):
+    """
+    Covers the in-run checks that run ahead of model validation. Model validation itself is
+    patched out, so these never reach the database.
+    """
+
+    def setUp(self):
+        self.validate = AppModelValidate()
+        self.parent_id = uuid.uuid4().hex
+        self.user_id = uuid.uuid4().hex
+
+        patcher = mock.patch.object(SyncableModel, "cached_clean_fields")
+        self.cached_clean_fields = patcher.start()
+        self.addCleanup(patcher.stop)
+
+    def _facility_task(self, parent_id=None):
+        return _validate_task(Facility(id=uuid.uuid4().hex, parent_id=parent_id))
+
+    def _summary_log_task(self):
+        return _validate_task(SummaryLog(id=uuid.uuid4().hex, user_id=self.user_id))
+
+    def test_transform__valid(self):
+        task = self._facility_task(parent_id=self.parent_id)
+
+        self.assertIs(self.validate.transform(task), task)
+        self.assertEqual(task.outcome, DeserializeOutcome.SAVE)
+        self.assertIn(task.id, self.validate.accepted_ids)
+
+    def test_transform__validates_with_fk_cache_and_sync_filter(self):
+        sync_filter = Filter("abc")
+        task = self._facility_task(parent_id=self.parent_id)
+
+        AppModelValidate(sync_filter=sync_filter).transform(task)
+
+        self.cached_clean_fields.assert_called_once_with(task.fk_cache, sync_filter=sync_filter)
+
+    def test_transform__errored_task_recorded_as_failed(self):
+        task = self._facility_task()
+        task.add_error(ValueError("bad data"))
+
+        self.validate.transform(task)
+
+        self.cached_clean_fields.assert_not_called()
+        self.assertIn(task.id, self.validate.failed_ids)
+        self.assertEqual(task.outcome, DeserializeOutcome.ERROR)
+
+    def test_transform__deleted_task_recorded_as_deleted(self):
+        task = _validate_task(Facility(id=uuid.uuid4().hex), deleted=True)
+
+        self.validate.transform(task)
+
+        self.cached_clean_fields.assert_not_called()
+        self.assertEqual(self.validate.deleted_ids, {task.id: False})
+        self.assertEqual(task.outcome, DeserializeOutcome.DELETE)
+
+    def test_transform__hard_deleted_task_recorded_as_hard_deleted(self):
+        task = _validate_task(Facility(id=uuid.uuid4().hex), deleted=True, hard_deleted=True)
+
+        self.validate.transform(task)
+
+        self.assertEqual(self.validate.deleted_ids, {task.id: True})
+
+    def test_transform__target_deleted_in_run(self):
+        """
+        The sink may not have deleted the target's app row yet, so validation could wrongly pass
+        """
+        self.validate.deleted_ids[self.user_id] = False
+        task = self._summary_log_task()
+
+        self.validate.transform(task)
+
+        self.cached_clean_fields.assert_not_called()
+        self.assertEqual(task.outcome, DeserializeOutcome.PROPAGATE_DELETE)
+        self.assertEqual(self.validate.deleted_ids[task.id], False)
+
+    def test_transform__target_hard_deleted_in_run(self):
+        self.validate.deleted_ids[self.user_id] = True
+        task = self._summary_log_task()
+
+        self.validate.transform(task)
+
+        self.assertEqual(task.outcome, DeserializeOutcome.PROPAGATE_HARD_DELETE)
+        self.assertEqual(self.validate.deleted_ids[task.id], True)
+
+    def test_transform__parent_deleted_in_run(self):
+        """Models with a self-referential FK fail instead, as legacy does once the row is gone"""
+        self.validate.deleted_ids[self.parent_id] = True
+        task = self._facility_task(parent_id=self.parent_id)
+
+        self.validate.transform(task)
+
+        self.cached_clean_fields.assert_not_called()
+        self.assertIsInstance(task.errors[0], ValidationError)
+        self.assertIn(self.parent_id, str(task.errors[0]))
+        self.assertIn(task.id, self.validate.failed_ids)
+        self.assertNotIn(task.id, self.validate.deleted_ids)
+
+    def test_transform__parent_deleted_in_run__grandchildren_fail(self):
+        self.validate.deleted_ids[self.parent_id] = False
+        child = self._facility_task(parent_id=self.parent_id)
+        grandchild = self._facility_task(parent_id=child.id)
+
+        self.validate.transform(child)
+        self.validate.transform(grandchild)
+
+        self.assertIsInstance(grandchild.errors[0], MorangoDirtyParent)
+
+    def test_transform__parent_failed_in_run(self):
+        self.validate.failed_ids.add(self.parent_id)
+        task = self._facility_task(parent_id=self.parent_id)
+
+        self.validate.transform(task)
+
+        self.cached_clean_fields.assert_not_called()
+        self.assertIsInstance(task.errors[0], MorangoDirtyParent)
+        self.assertEqual(str(task.errors[0]), "Parent is dirty; could not deserialize.")
+        self.assertIn(task.id, self.validate.failed_ids)
+
+    def test_transform__failure_propagates_to_grandchildren(self):
+        self.validate.failed_ids.add(self.parent_id)
+        child = self._facility_task(parent_id=self.parent_id)
+        grandchild = self._facility_task(parent_id=child.id)
+
+        self.validate.transform(child)
+        self.validate.transform(grandchild)
+
+        self.assertIsInstance(grandchild.errors[0], MorangoDirtyParent)
+
+    def test_transform__target_failed_in_run(self):
+        self.validate.failed_ids.add(self.user_id)
+        task = self._summary_log_task()
+
+        self.validate.transform(task)
+
+        self.assertIsInstance(task.errors[0], ValidationError)
+        self.assertIn(self.user_id, str(task.errors[0]))
+        self.assertIn(task.id, self.validate.failed_ids)
+
+    def test_transform__deleted_target_precedes_failed_target(self):
+        task = _validate_task(
+            ConditionalLog(id=uuid.uuid4().hex, facility_id=self.parent_id, user_id=self.user_id)
+        )
+        self.validate.failed_ids.add(self.parent_id)
+        self.validate.deleted_ids[self.user_id] = False
+
+        self.validate.transform(task)
+
+        self.assertEqual(task.outcome, DeserializeOutcome.PROPAGATE_DELETE)
+
+    def test_transform__null_fk_ignored(self):
+        """A null FK has no target, so the in-run checks must not match it"""
+        self.validate.failed_ids.add(None)
+        task = self._facility_task(parent_id=None)
+
+        self.validate.transform(task)
+
+        self.assertEqual(task.outcome, DeserializeOutcome.SAVE)
+
+
+class AppModelValidateClassifyFailureTestCase(TestCase):
+    """
+    When model validation fails, the FK targets' store records determine how the failure is
+    resolved and reported
+    """
+
+    def setUp(self):
+        self.validate = AppModelValidate()
+        self.parent_id = uuid.uuid4().hex
+        self.user_id = uuid.uuid4().hex
+        self.error = ValidationError("invalid")
+
+        patcher = mock.patch.object(SyncableModel, "cached_clean_fields", side_effect=self.error)
+        self.cached_clean_fields = patcher.start()
+        self.addCleanup(patcher.stop)
+
+    def _target_store(self, target_id, model_name, **kwargs):
+        return StoreFactory(
+            id=target_id,
+            profile="facilitydata",
+            model_name=model_name,
+            partition=target_id,
+            serialized="{}",
+            last_saved_instance=uuid.uuid4().hex,
+            last_saved_counter=1,
+            **kwargs,
+        )
+
+    def _facility_task(self):
+        return _validate_task(Facility(id=uuid.uuid4().hex, parent_id=self.parent_id))
+
+    def _summary_log_task(self):
+        return _validate_task(SummaryLog(id=uuid.uuid4().hex, user_id=self.user_id))
+
+    def test_target_deleted(self):
+        """The target was deleted in an earlier run, so its app row is already gone"""
+        self._target_store(self.user_id, "user", deleted=True)
+        task = self._summary_log_task()
+
+        self.validate.transform(task)
+
+        self.assertEqual(task.outcome, DeserializeOutcome.PROPAGATE_DELETE)
+        self.assertEqual(self.validate.deleted_ids, {task.id: False})
+        self.assertNotIn(task.id, self.validate.failed_ids)
+
+    def test_parent_deleted__object_does_not_exist(self):
+        """Models with a self-referential FK only propagate the deletion on this error"""
+        self.cached_clean_fields.side_effect = Facility.DoesNotExist()
+        self._target_store(self.parent_id, "facility", deleted=True)
+        task = self._facility_task()
+
+        self.validate.transform(task)
+
+        self.assertEqual(task.outcome, DeserializeOutcome.PROPAGATE_DELETE)
+        self.assertEqual(self.validate.deleted_ids, {task.id: False})
+
+    def test_parent_deleted__validation_error(self):
+        self._target_store(self.parent_id, "facility", deleted=True, hard_deleted=True)
+        task = self._facility_task()
+
+        self.validate.transform(task)
+
+        self.assertEqual(task.errors, [self.error])
+        self.assertIn(task.id, self.validate.failed_ids)
+        self.assertEqual(self.validate.deleted_ids, {})
+
+    def test_target_hard_deleted(self):
+        self._target_store(self.user_id, "user", deleted=True, hard_deleted=True)
+        task = self._summary_log_task()
+
+        self.validate.transform(task)
+
+        self.assertEqual(task.outcome, DeserializeOutcome.PROPAGATE_HARD_DELETE)
+        self.assertEqual(self.validate.deleted_ids, {task.id: True})
+
+    def test_target_hard_deleted_only(self):
+        """Serialization's hard deletion only sets `hard_deleted`, which still counts as deleted"""
+        self._target_store(self.user_id, "user", hard_deleted=True)
+        task = self._summary_log_task()
+
+        self.validate.transform(task)
+
+        self.assertEqual(task.outcome, DeserializeOutcome.PROPAGATE_HARD_DELETE)
+
+    def test_target_deleted_precedes_missing_target(self):
+        """The hard flag comes from the deleted target, regardless of the other targets"""
+        self._target_store(self.user_id, "user", deleted=True, hard_deleted=True)
+        task = _validate_task(
+            ConditionalLog(id=uuid.uuid4().hex, facility_id=self.parent_id, user_id=self.user_id)
+        )
+
+        self.validate.transform(task)
+
+        self.assertEqual(task.outcome, DeserializeOutcome.PROPAGATE_HARD_DELETE)
+
+    def test_parent_missing(self):
+        task = self._facility_task()
+
+        self.validate.transform(task)
+
+        self.assertIsInstance(task.errors[0], MorangoMissingParent)
+        self.assertEqual(
+            str(task.errors[0]), "Parent does not exist in Store; could not deserialize."
+        )
+        self.assertIn(task.id, self.validate.failed_ids)
+
+    def test_parent_dirty(self):
+        """The parent is dirty but was not deserialized in this run, e.g. it was skipped"""
+        self._target_store(self.parent_id, "facility", dirty_bit=True)
+        task = self._facility_task()
+
+        self.validate.transform(task)
+
+        self.assertIsInstance(task.errors[0], MorangoDirtyParent)
+        self.assertEqual(str(task.errors[0]), "Parent is dirty; could not deserialize.")
+        self.assertIn(task.id, self.validate.failed_ids)
+
+    def test_parent_accepted_in_run(self):
+        """The parent's store record stays dirty until the sink writes it, so the error is the
+        record's own"""
+        self._target_store(self.parent_id, "facility", dirty_bit=True)
+        self.validate.accepted_ids.add(self.parent_id)
+        task = self._facility_task()
+
+        self.validate.transform(task)
+
+        self.assertEqual(task.errors, [self.error])
+
+    def test_parent_accepted_in_run__object_does_not_exist(self):
+        """Loading the parent fails because the sink has not written it yet"""
+        self.cached_clean_fields.side_effect = Facility.DoesNotExist()
+        self._target_store(self.parent_id, "facility", dirty_bit=True)
+        self.validate.accepted_ids.add(self.parent_id)
+        task = self._facility_task()
+
+        self.validate.transform(task)
+
+        self.assertIsInstance(task.errors[0], MorangoDirtyParent)
+
+    def test_target_missing(self):
+        task = self._summary_log_task()
+
+        self.validate.transform(task)
+
+        self.assertIsInstance(task.errors[0], IntegrityError)
+        self.assertEqual(
+            str(task.errors[0]),
+            "SummaryLog.user_id references non-existent my user instance with id '{}'".format(
+                self.user_id
+            ),
+        )
+        self.assertIn(task.id, self.validate.failed_ids)
+
+    def test_parent_clean(self):
+        """With nothing wrong with the target, the failure is the record's own"""
+        self._target_store(self.parent_id, "facility", dirty_bit=False)
+        task = self._facility_task()
+
+        self.validate.transform(task)
+
+        self.assertEqual(task.errors, [self.error])
+        self.assertIn(task.id, self.validate.failed_ids)
+
+    def test_target_dirty(self):
+        """Only the self-referential parent is checked for dirtiness, matching legacy behavior"""
+        self._target_store(self.user_id, "user", dirty_bit=True)
+        task = self._summary_log_task()
+
+        self.validate.transform(task)
+
+        self.assertEqual(task.errors, [self.error])
+
+    def test_no_fk_references(self):
+        task = _validate_task(Facility(id=uuid.uuid4().hex))
+
+        with self.assertNumQueries(0):
+            self.validate.transform(task)
+
+        self.assertEqual(task.errors, [self.error])
+
+    def test_object_does_not_exist(self):
+        """e.g. `clean_fields` loading a related object whose row does not exist"""
+        self.cached_clean_fields.side_effect = Facility.DoesNotExist()
+        task = self._facility_task()
+
+        self.validate.transform(task)
+
+        self.assertIsInstance(task.errors[0], MorangoMissingParent)
+
+    def test_value_error(self):
+        """e.g. `clean_fields` failing to coerce bad synced data"""
+        error = ValueError("bad data")
+        self.cached_clean_fields.side_effect = error
+        self._target_store(self.parent_id, "facility", dirty_bit=False)
+        task = self._facility_task()
+
+        self.validate.transform(task)
+
+        self.assertEqual(task.errors, [error])
+        self.assertIn(task.id, self.validate.failed_ids)
+
+    def test_failure_queries_store_once(self):
+        task = _validate_task(
+            ConditionalLog(id=uuid.uuid4().hex, facility_id=self.parent_id, user_id=self.user_id)
+        )
+
+        with self.assertNumQueries(1):
+            self.validate.transform(task)
+
+    def test_success_queries_store_never(self):
+        self.cached_clean_fields.side_effect = None
+        task = self._facility_task()
+
+        with self.assertNumQueries(0):
+            self.validate.transform(task)
+
+        self.assertEqual(task.outcome, DeserializeOutcome.SAVE)
 
 
 class StoreModelSourcePrefixConditionsTestCase(SimpleTestCase):
