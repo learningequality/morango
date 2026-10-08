@@ -12,16 +12,30 @@ from morango.sync.stream.source import MorangoSource
 from morango.sync.stream.source import SourceTask
 
 
+class DeserializeOutcome:
+    """The resolved action for a `DeserializeTask`, which the sink applies"""
+
+    SAVE = "save"
+    DELETE = "delete"
+    PROPAGATE_DELETE = "propagate_delete"
+    PROPAGATE_HARD_DELETE = "propagate_hard_delete"
+    ERROR = "error"
+
+
 class DeserializeTask(SourceTask):
     """Carrier class for providing context through the deserialization pipeline."""
 
-    __slots__ = ("store", "app_model", "fk_cache", "errors")
+    __slots__ = ("store", "app_model", "fk_cache", "errors", "_propagated_deletion")
+
+    HARD_DELETION = "hard"
+    SOFT_DELETION = "soft"
 
     def __init__(self, store: Store, fk_cache: Dict):
         self.store = store
         self.fk_cache: Dict = fk_cache
         self.app_model: Optional[SyncableModel] = None
         self.errors: List[Exception] = []
+        self._propagated_deletion: Optional[str] = None
 
     @property
     def id(self) -> str:
@@ -35,8 +49,34 @@ class DeserializeTask(SourceTask):
     def has_errors(self) -> bool:
         return len(self.errors) > 0
 
+    @property
+    def outcome(self) -> str:
+        """
+        The resolved `DeserializeOutcome` for this task, in order of precedence
+        :raises AssertionError: if the pipeline has not resolved an outcome
+        """
+        if self.has_errors:
+            return DeserializeOutcome.ERROR
+        if self.store.deleted:
+            return DeserializeOutcome.DELETE
+        if self._propagated_deletion == self.HARD_DELETION:
+            return DeserializeOutcome.PROPAGATE_HARD_DELETE
+        if self._propagated_deletion == self.SOFT_DELETION:
+            return DeserializeOutcome.PROPAGATE_DELETE
+        if self.app_model is not None:
+            return DeserializeOutcome.SAVE
+        raise AssertionError("DeserializeTask has no resolved outcome")
+
+    def self_referential_fk(self) -> Optional[str]:
+        """Return the attname of the self-referential FK on the task's model, or ``None``."""
+        return syncable_models.get_self_referential_fk(self.model)
+
     def set_app_model(self, app_model: Optional[SyncableModel]) -> None:
         self.app_model = app_model
+
+    def set_propagated_deletion(self, hard: bool) -> None:
+        """Mark this task's record as deleted because a record it references was deleted"""
+        self._propagated_deletion = self.HARD_DELETION if hard else self.SOFT_DELETION
 
     def add_error(self, error: Exception) -> None:
         self.errors.append(error)
