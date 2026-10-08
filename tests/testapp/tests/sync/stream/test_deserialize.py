@@ -7,6 +7,7 @@ from django.test import TestCase
 from morango.models.certificates import Filter
 from morango.models.core import Store
 from morango.models.core import SyncableModel
+from morango.sync.stream.deserialize import DeserializeOutcome
 from morango.sync.stream.deserialize import DeserializeTask
 from morango.sync.stream.deserialize import StoreModelSource
 
@@ -18,6 +19,7 @@ class DeserializeTaskTestCase(SimpleTestCase):
         self.store = mock.Mock(spec_set=Store)
         self.store.profile = "test"
         self.store.model_name = "testmodel"
+        self.store.deleted = False
         self.task = DeserializeTask(self.store, {})
 
     @mock.patch("morango.sync.stream.deserialize.syncable_models.get_model")
@@ -37,6 +39,60 @@ class DeserializeTaskTestCase(SimpleTestCase):
         app_model = mock.Mock(spec_set=SyncableModel)
         self.task.set_app_model(app_model)
         self.assertEqual(self.task.app_model, app_model)
+
+    @mock.patch("morango.sync.stream.deserialize.syncable_models.get_self_referential_fk")
+    @mock.patch("morango.sync.stream.deserialize.syncable_models.get_model")
+    def test_self_referential_fk(self, mock_get_model, mock_get_self_referential_fk):
+        model = mock.Mock(spec_set=SyncableModel)
+        mock_get_model.return_value = model
+        mock_get_self_referential_fk.return_value = "parent_id"
+
+        self.assertEqual(self.task.self_referential_fk(), "parent_id")
+        mock_get_self_referential_fk.assert_called_once_with(model)
+
+    def test_outcome__save(self):
+        self.task.set_app_model(mock.Mock(spec_set=SyncableModel))
+        self.assertEqual(self.task.outcome, DeserializeOutcome.SAVE)
+
+    def test_outcome__delete(self):
+        self.store.deleted = True
+        self.assertEqual(self.task.outcome, DeserializeOutcome.DELETE)
+
+    def test_outcome__propagate_delete(self):
+        self.task.set_propagated_deletion(hard=False)
+        self.assertEqual(self.task.outcome, DeserializeOutcome.PROPAGATE_DELETE)
+
+    def test_outcome__propagate_hard_delete(self):
+        self.task.set_propagated_deletion(hard=True)
+        self.assertEqual(self.task.outcome, DeserializeOutcome.PROPAGATE_HARD_DELETE)
+
+    def test_outcome__error(self):
+        self.task.add_error(ValueError("bad data"))
+        self.assertEqual(self.task.outcome, DeserializeOutcome.ERROR)
+
+    def test_outcome__error_precedes_delete(self):
+        self.store.deleted = True
+        self.task.add_error(ValueError("bad data"))
+        self.assertEqual(self.task.outcome, DeserializeOutcome.ERROR)
+
+    def test_outcome__error_precedes_propagated_deletion(self):
+        self.task.set_propagated_deletion(hard=True)
+        self.task.add_error(ValueError("bad data"))
+        self.assertEqual(self.task.outcome, DeserializeOutcome.ERROR)
+
+    def test_outcome__delete_precedes_propagated_deletion(self):
+        self.store.deleted = True
+        self.task.set_propagated_deletion(hard=True)
+        self.assertEqual(self.task.outcome, DeserializeOutcome.DELETE)
+
+    def test_outcome__propagated_deletion_precedes_save(self):
+        self.task.set_app_model(mock.Mock(spec_set=SyncableModel))
+        self.task.set_propagated_deletion(hard=False)
+        self.assertEqual(self.task.outcome, DeserializeOutcome.PROPAGATE_DELETE)
+
+    def test_outcome__unresolved(self):
+        with self.assertRaises(AssertionError):
+            _ = self.task.outcome
 
 
 class StoreModelSourcePrefixConditionsTestCase(SimpleTestCase):
