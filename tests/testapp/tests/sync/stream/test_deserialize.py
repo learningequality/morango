@@ -1,25 +1,34 @@
+import json
 import uuid
 
 import mock
 from django.core.exceptions import ValidationError
 from django.core.serializers.json import DjangoJSONEncoder
+from django.db import connection
 from django.db.utils import IntegrityError
 from django.test import SimpleTestCase
 from django.test import TestCase
+from django.test.utils import CaptureQueriesContext
 from facility_profile.models import ConditionalLog
 from facility_profile.models import Facility
+from facility_profile.models import MyUser
 from facility_profile.models import SummaryLog
 
 from morango.errors import MorangoDirtyParent
 from morango.errors import MorangoMissingParent
 from morango.models.certificates import Filter
+from morango.models.core import DeletedModels
+from morango.models.core import HardDeletedModels
 from morango.models.core import Store
 from morango.models.core import SyncableModel
+from morango.sync.operations import _deserialize_from_store
+from morango.sync.stream.core import Sink
 from morango.sync.stream.deserialize import AppModelDeserialize
 from morango.sync.stream.deserialize import AppModelValidate
 from morango.sync.stream.deserialize import DeserializeOutcome
 from morango.sync.stream.deserialize import DeserializeTask
 from morango.sync.stream.deserialize import StoreModelSource
+from morango.utils import exception_path
 
 from ...helpers import StoreFactory
 
@@ -750,3 +759,337 @@ class StoreModelSourceStreamTestCase(TestCase):
         )
 
         self.assertEqual(self._stream_ids(), [included.id])
+
+
+class CollectingSink(Sink[DeserializeTask]):
+    """Collects each task's resolved outcome and first error type, keyed by the task's ID"""
+
+    def __init__(self):
+        self.results = {}
+
+    def consume(self, task: DeserializeTask) -> None:
+        error_type = type(task.errors[0]) if task.errors else None
+        self.results[task.id] = (task.outcome, error_type)
+
+
+class DeserializeFixturesMixin:
+    """Builds store records for the `facilitydata` profile and runs them through the transforms"""
+
+    profile = "facilitydata"
+
+    def _store(self, app_model, dirty_bit=True, **kwargs):
+        store_kwargs = dict(
+            id=app_model.id,
+            profile=self.profile,
+            model_name=app_model.morango_model_name,
+            partition=app_model.id,
+            source_id=uuid.uuid4().hex,
+            serialized=DjangoJSONEncoder().encode(app_model.serialize()),
+            last_saved_instance=uuid.uuid4().hex,
+            last_saved_counter=1,
+            dirty_bit=dirty_bit,
+        )
+        store_kwargs.update(kwargs)
+        return StoreFactory(**store_kwargs)
+
+    def _facility(self, parent=None, order=None, name="facility", **kwargs):
+        facility = Facility(
+            id=uuid.uuid4().hex,
+            name=name,
+            parent_id=parent.id if parent else None,
+        )
+        if order is None and parent is None:
+            order = 0
+        return self._store(
+            facility, _self_ref_fk=facility.parent_id or "", _self_ref_order=order, **kwargs
+        )
+
+    def _user(self, **kwargs):
+        user = MyUser(id=uuid.uuid4().hex, username=uuid.uuid4().hex[:20], password="password")
+        return self._store(user, **kwargs)
+
+    def _summary_log(self, user_id, **kwargs):
+        return self._store(SummaryLog(id=uuid.uuid4().hex, user_id=user_id), **kwargs)
+
+    def _run(self, sync_filter=None):
+        sink = CollectingSink()
+        (
+            StoreModelSource(self.profile, sync_filter=sync_filter)
+            .pipe(AppModelDeserialize(sync_filter=sync_filter))
+            .pipe(AppModelValidate(sync_filter=sync_filter))
+            .end(sink)
+        )
+        return sink.results
+
+    def _run_both_modes(self):
+        """Runs once for each `Facility.clean_dereferences_parent` mode, returning both results"""
+        results = {}
+        for dereferences_parent in (False, True):
+            with mock.patch.object(Facility, "clean_dereferences_parent", dereferences_parent):
+                results[dereferences_parent] = self._run()
+        return results
+
+
+class DeserializeTransformsIntegrationTestCase(DeserializeFixturesMixin, TestCase):
+    """
+    Streams real store records through the source and both transforms, without a writing sink,
+    so app rows only exist where a test creates them. This mirrors the sink lag, where records
+    accepted earlier in the run have not been written yet.
+    """
+
+    def test_self_ref_chain_in_run(self):
+        root = self._facility()
+        child = self._facility(parent=root, order=1)
+        grandchild = self._facility(parent=child, order=2)
+
+        with mock.patch.object(Facility, "clean_dereferences_parent", False):
+            results = self._run()
+
+        self.assertEqual(results[root.id], (DeserializeOutcome.SAVE, None))
+        self.assertEqual(results[child.id], (DeserializeOutcome.SAVE, None))
+        self.assertEqual(results[grandchild.id], (DeserializeOutcome.SAVE, None))
+        self.assertEqual(Facility.objects.count(), 0)
+
+    def test_self_ref_chain_in_run__dereferences_parent(self):
+        """Loading the parent fails, because the sink has not written it yet"""
+        root = self._facility()
+        child = self._facility(parent=root, order=1)
+        grandchild = self._facility(parent=child, order=2)
+
+        with mock.patch.object(Facility, "clean_dereferences_parent", True):
+            results = self._run()
+
+        self.assertEqual(results[root.id], (DeserializeOutcome.SAVE, None))
+        self.assertEqual(results[child.id], (DeserializeOutcome.ERROR, MorangoDirtyParent))
+        self.assertEqual(results[grandchild.id], (DeserializeOutcome.ERROR, MorangoDirtyParent))
+
+    def test_own_error_with_parent_accepted_in_run(self):
+        """The parent's store record is still dirty, but the child fails on its own field"""
+        root = self._facility()
+        child = self._facility(parent=root, order=1, name="x" * 200)
+
+        with mock.patch.object(Facility, "clean_dereferences_parent", False):
+            results = self._run()
+
+        self.assertEqual(results[root.id], (DeserializeOutcome.SAVE, None))
+        self.assertEqual(results[child.id], (DeserializeOutcome.ERROR, ValidationError))
+
+    def test_cross_model_chain_in_run(self):
+        user = self._user()
+        log = self._summary_log(user.id)
+
+        results = self._run()
+
+        self.assertEqual(results[user.id], (DeserializeOutcome.SAVE, None))
+        self.assertEqual(results[log.id], (DeserializeOutcome.SAVE, None))
+
+    def test_parent_not_in_run(self):
+        """The common case, where the parent is unchanged and found through the app tables"""
+        parent = Facility.objects.create(name="parent")
+        self._store(parent, dirty_bit=False, _self_ref_order=0)
+        child = self._facility(parent=parent, order=1)
+
+        for mode, results in self._run_both_modes().items():
+            with self.subTest(dereferences_parent=mode):
+                self.assertEqual(results[child.id], (DeserializeOutcome.SAVE, None))
+
+    def test_parent_failed_in_run(self):
+        root = self._facility(serialized="{bad")
+        child = self._facility(parent=root, order=1)
+        grandchild = self._facility(parent=child, order=2)
+
+        for mode, results in self._run_both_modes().items():
+            with self.subTest(dereferences_parent=mode):
+                self.assertEqual(results[root.id], (DeserializeOutcome.ERROR, json.JSONDecodeError))
+                self.assertEqual(results[child.id], (DeserializeOutcome.ERROR, MorangoDirtyParent))
+                self.assertEqual(
+                    results[grandchild.id], (DeserializeOutcome.ERROR, MorangoDirtyParent)
+                )
+
+    def test_parent_missing(self):
+        missing_parent = Facility(id=uuid.uuid4().hex, name="missing")
+        child = self._facility(parent=missing_parent)
+
+        for mode, results in self._run_both_modes().items():
+            with self.subTest(dereferences_parent=mode):
+                self.assertEqual(
+                    results[child.id], (DeserializeOutcome.ERROR, MorangoMissingParent)
+                )
+
+    def test_parent_deleted_in_run(self):
+        """
+        Models with a self-referential FK don't propagate the deletion. When the parent object is
+        loaded, this differs from legacy, which propagates it once the sink has deleted the parent.
+        """
+        root = self._facility(deleted=True)
+        child = self._facility(parent=root, order=1)
+        grandchild = self._facility(parent=child, order=2)
+
+        for mode, results in self._run_both_modes().items():
+            with self.subTest(dereferences_parent=mode):
+                self.assertEqual(results[root.id], (DeserializeOutcome.DELETE, None))
+                self.assertEqual(results[child.id], (DeserializeOutcome.ERROR, ValidationError))
+                self.assertEqual(
+                    results[grandchild.id], (DeserializeOutcome.ERROR, MorangoDirtyParent)
+                )
+
+    def test_parent_deleted_earlier(self):
+        root = self._facility(dirty_bit=False, deleted=True)
+        child = self._facility(parent=root, order=1)
+
+        results = self._run_both_modes()
+
+        self.assertEqual(results[False][child.id], (DeserializeOutcome.ERROR, ValidationError))
+        self.assertEqual(results[True][child.id], (DeserializeOutcome.PROPAGATE_DELETE, None))
+
+    def test_parent_hard_deleted_earlier(self):
+        root = self._facility(dirty_bit=False, deleted=True, hard_deleted=True)
+        child = self._facility(parent=root, order=1)
+
+        results = self._run_both_modes()
+
+        self.assertEqual(results[False][child.id], (DeserializeOutcome.ERROR, ValidationError))
+        self.assertEqual(results[True][child.id], (DeserializeOutcome.PROPAGATE_HARD_DELETE, None))
+
+    def test_target_deleted_in_run(self):
+        user = self._user(deleted=True)
+        log = self._summary_log(user.id)
+
+        results = self._run()
+
+        self.assertEqual(results[user.id], (DeserializeOutcome.DELETE, None))
+        self.assertEqual(results[log.id], (DeserializeOutcome.PROPAGATE_DELETE, None))
+
+    def test_target_deleted_earlier(self):
+        user = self._user(dirty_bit=False, deleted=True, hard_deleted=True)
+        log = self._summary_log(user.id)
+
+        results = self._run()
+
+        self.assertEqual(results[log.id], (DeserializeOutcome.PROPAGATE_HARD_DELETE, None))
+
+    def test_target_missing(self):
+        log = self._summary_log(uuid.uuid4().hex)
+
+        results = self._run()
+
+        self.assertEqual(results[log.id], (DeserializeOutcome.ERROR, IntegrityError))
+
+    def test_transforms_only_read(self):
+        root = self._facility()
+        self._facility(parent=root, order=1)
+        self._facility(serialized="{bad")
+        self._facility(deleted=True)
+        self._summary_log(uuid.uuid4().hex)
+
+        with CaptureQueriesContext(connection) as context:
+            self._run()
+
+        statements = [query["sql"].strip().upper() for query in context.captured_queries]
+        self.assertTrue(statements)
+        for statement in statements:
+            # postgres wraps iterated reads in a server-side cursor (`DECLARE ... FOR SELECT`), so
+            # check for writes rather than requiring every statement to start with `SELECT`
+            self.assertFalse(
+                statement.startswith(("INSERT", "UPDATE", "DELETE")),
+                statement,
+            )
+
+
+class LegacyParityTestCase(DeserializeFixturesMixin, TestCase):
+    """
+    Characterizes legacy `_deserialize_from_store` errors and propagated deletions against the
+    transforms, on the same store records. The transforms don't write, so both can run against the
+    same database state. Runs with the default `Facility.clean_dereferences_parent`, which is the
+    legacy test behavior, unless a test patches it.
+    """
+
+    def _legacy_result(self, store_id):
+        """The legacy result of a store record that did not save, in the transforms' terms"""
+        if HardDeletedModels.objects.filter(id=store_id).exists():
+            return DeserializeOutcome.PROPAGATE_HARD_DELETE, None
+        if DeletedModels.objects.filter(id=store_id).exists():
+            return DeserializeOutcome.PROPAGATE_DELETE, None
+        exception = Store.objects.get(id=store_id).deserialization_exception
+        self.assertIsNotNone(exception)
+        return DeserializeOutcome.ERROR, exception
+
+    def _assert_parity(self, *store_ids):
+        results = self._run()
+        _deserialize_from_store(self.profile)
+
+        for store_id in store_ids:
+            with self.subTest(store_id=store_id):
+                outcome, error_type = results[store_id]
+                error_path = exception_path(error_type) if error_type else None
+                self.assertEqual((outcome, error_path), self._legacy_result(store_id))
+
+    def test_parent_failed(self):
+        root = self._facility(serialized="{bad")
+        child = self._facility(parent=root, order=1)
+        grandchild = self._facility(parent=child, order=2)
+
+        self._assert_parity(root.id, child.id, grandchild.id)
+
+    def test_parent_missing(self):
+        missing_parent = Facility(id=uuid.uuid4().hex, name="missing")
+        child = self._facility(parent=missing_parent)
+
+        self._assert_parity(child.id)
+
+    def test_target_missing(self):
+        log = self._summary_log(uuid.uuid4().hex)
+
+        self._assert_parity(log.id)
+
+    @mock.patch.object(Facility, "clean_dereferences_parent", False)
+    def test_own_error_with_parent_accepted(self):
+        root = self._facility()
+        child = self._facility(parent=root, order=1, name="x" * 200)
+
+        self._assert_parity(child.id)
+
+    def test_target_deleted_in_run(self):
+        user = self._user(deleted=True)
+        log = self._summary_log(user.id)
+
+        self._assert_parity(log.id)
+
+    def test_target_deleted_earlier(self):
+        user = self._user(dirty_bit=False, deleted=True)
+        log = self._summary_log(user.id)
+
+        self._assert_parity(log.id)
+
+    def test_target_hard_deleted_earlier(self):
+        user = self._user(dirty_bit=False, deleted=True, hard_deleted=True)
+        log = self._summary_log(user.id)
+
+        self._assert_parity(log.id)
+
+    def test_parent_deleted_earlier(self):
+        root = self._facility(dirty_bit=False, deleted=True)
+        child = self._facility(parent=root, order=1)
+
+        self._assert_parity(child.id)
+
+    def test_parent_hard_deleted_earlier(self):
+        root = self._facility(dirty_bit=False, deleted=True, hard_deleted=True)
+        child = self._facility(parent=root, order=1)
+
+        self._assert_parity(child.id)
+
+    @mock.patch.object(Facility, "clean_dereferences_parent", False)
+    def test_parent_deleted_earlier__parent_not_loaded(self):
+        root = self._facility(dirty_bit=False, deleted=True)
+        child = self._facility(parent=root, order=1)
+
+        self._assert_parity(child.id)
+
+    @mock.patch.object(Facility, "clean_dereferences_parent", False)
+    def test_parent_deleted_in_run__parent_not_loaded(self):
+        root = self._facility(deleted=True)
+        child = self._facility(parent=root, order=1)
+        grandchild = self._facility(parent=child, order=2)
+
+        self._assert_parity(child.id, grandchild.id)
