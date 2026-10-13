@@ -28,6 +28,8 @@ from morango.models.core import HardDeletedModels
 from morango.models.core import Store
 from morango.models.core import SyncableModel
 from morango.registry import syncable_models
+from morango.sync.db import begin_transaction
+from morango.sync.stream.core import Buffer
 from morango.sync.stream.core import Sink
 from morango.sync.stream.core import Transform
 from morango.sync.stream.source import MorangoSource
@@ -562,3 +564,31 @@ def log_deserialization_error(task: DeserializeTask, error: Exception) -> None:
 
 def store_model_partition_fn(task: DeserializeTask) -> str:
     return task.store.model_name
+
+
+CHUNK_SIZE = 500
+
+
+def deserialize_from_store(
+    profile: str,
+    sync_filter: Optional[Filter] = None,
+    skip_errored: bool = False,
+) -> None:
+    """
+    Constructs and executes the deserialization pipeline, streaming dirty store records through
+    transforms that resolve each record's outcome, into a sink that writes them in chunks.
+
+    :param profile: The Morango model profile
+    :param sync_filter: The Filter object for this sync
+    :param skip_errored: Whether to skip Store records with deserialization errors
+    """
+    with begin_transaction(sync_filter, isolated=True):
+        sink = DeserializeSink()
+        (
+            StoreModelSource(profile, sync_filter=sync_filter, skip_errored=skip_errored)
+            .pipe(AppModelDeserialize(sync_filter=sync_filter))
+            .pipe(AppModelValidate(sync_filter=sync_filter))
+            .pipe(Buffer(size=CHUNK_SIZE, partition_fn=store_model_partition_fn))
+            .end(sink)
+        )
+        logger.info("Deserialization done: %s", sink.summary())
