@@ -25,7 +25,6 @@ from morango.models.core import DeletedModels
 from morango.models.core import HardDeletedModels
 from morango.models.core import Store
 from morango.models.core import SyncableModel
-from morango.sync.operations import _deserialize_from_store
 from morango.sync.stream.core import Buffer
 from morango.sync.stream.core import Sink
 from morango.sync.stream.deserialize import AppModelDeserialize
@@ -1047,15 +1046,21 @@ class DeserializeTransformsIntegrationTestCase(DeserializeFixturesMixin, TestCas
             )
 
 
-class LegacyParityTestCase(DeserializeFixturesMixin, TestCase):
+class DeserializeParityTestCase(DeserializeFixturesMixin, TestCase):
     """
-    Characterizes the end state that legacy `_deserialize_from_store` stores for errors and
-    propagated deletions. The expected values were captured from legacy, with the default
+    Checks the end state that `deserialize_from_store` stores for errors and propagated deletions
+    against the values captured from legacy `_deserialize_from_store`, with the default
     `Facility.clean_dereferences_parent` at the time patched in where a test relies on it.
+
+    The exceptions are:
+    - A record that propagates the deletion of its FK target, which legacy left dirty. It now ends
+      clean, since its deletion is tracked.
+    - A child of a parent that is dirty but left out of the run, which legacy failed with
+      `MorangoMissingParent`. It is now saved against the parent's older app row.
     """
 
     def _deserialize(self):
-        _deserialize_from_store(self.profile)
+        deserialize_from_store(self.profile)
 
     def _assert_stored(self, store_id, dirty_bit, exception, deleted=False, hard_deleted=False):
         store = Store.objects.get(id=store_id)
@@ -1112,7 +1117,7 @@ class LegacyParityTestCase(DeserializeFixturesMixin, TestCase):
 
         self._deserialize()
 
-        self._assert_stored(log.id, True, None, deleted=True)
+        self._assert_stored(log.id, False, None, deleted=True)
 
     def test_target_deleted_earlier(self):
         user = self._user(dirty_bit=False, deleted=True)
@@ -1120,7 +1125,7 @@ class LegacyParityTestCase(DeserializeFixturesMixin, TestCase):
 
         self._deserialize()
 
-        self._assert_stored(log.id, True, None, deleted=True)
+        self._assert_stored(log.id, False, None, deleted=True)
 
     def test_target_hard_deleted_earlier(self):
         user = self._user(dirty_bit=False, deleted=True, hard_deleted=True)
@@ -1128,7 +1133,7 @@ class LegacyParityTestCase(DeserializeFixturesMixin, TestCase):
 
         self._deserialize()
 
-        self._assert_stored(log.id, True, None, deleted=True, hard_deleted=True)
+        self._assert_stored(log.id, False, None, deleted=True, hard_deleted=True)
 
     @mock.patch.object(Facility, "clean_dereferences_parent", True)
     def test_parent_deleted_earlier(self):
@@ -1160,15 +1165,17 @@ class LegacyParityTestCase(DeserializeFixturesMixin, TestCase):
     def test_dirty_parent_not_in_run(self):
         """
         Legacy never deserializes children of a parent whose store record is dirty, and records
-        `MorangoMissingParent` when the parent is left out of the run.
+        `MorangoMissingParent` when the parent is left out of the run. The child is now saved,
+        since it validates against the parent's older app row.
         """
         parent = Facility.objects.create(name="parent")
         self._store(parent, _self_ref_order=0, deserialization_error="failed earlier")
         child = self._facility(parent=parent, order=1)
 
-        _deserialize_from_store(self.profile, skip_erroring=True)
+        deserialize_from_store(self.profile, skip_errored=True)
 
-        self._assert_stored(child.id, True, MorangoMissingParent.path())
+        self.assertTrue(Facility.objects.filter(id=child.id).exists())
+        self._assert_stored(child.id, False, None)
 
     @mock.patch.object(Facility, "clean_dereferences_parent", False)
     def test_parent_deleted_in_run__parent_not_loaded(self):

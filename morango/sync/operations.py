@@ -56,6 +56,7 @@ from morango.sync.backends.utils import TemporaryTable
 from morango.sync.context import LocalSessionContext
 from morango.sync.context import NetworkSessionContext
 from morango.sync.db import begin_transaction
+from morango.sync.stream.deserialize import deserialize_from_store
 from morango.sync.stream.serialize import serialize_into_store
 from morango.sync.utils import mute_signals
 from morango.sync.utils import validate_and_create_buffer_data
@@ -1166,8 +1167,8 @@ class ReceiverDeserializeOperation(LocalOperation):
                 serialize_into_store(
                     context.sync_session.profile, sync_filter=context.filter
                 )
-                _deserialize_from_store(
-                    context.sync_session.profile, filter=context.filter
+                deserialize_from_store(
+                    context.sync_session.profile, sync_filter=context.filter
                 )
             except OperationalError as e:
                 # if we run into a transaction isolation error, we return a pending status to force

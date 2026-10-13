@@ -5,8 +5,8 @@ from time import sleep
 from morango.constants import transfer_stages
 from morango.constants import transfer_statuses
 from morango.registry import session_middleware
-from morango.sync.operations import _deserialize_from_store
 from morango.sync.operations import OperationLogger
+from morango.sync.stream.deserialize import deserialize_from_store
 from morango.sync.stream.serialize import serialize_into_store
 from morango.sync.utils import SyncSignalGroup
 from morango.utils import _assert
@@ -33,7 +33,9 @@ class MorangoProfileController(object):
         with OperationLogger("Deserializing records", "Deserialization complete"):
             # we first serialize to avoid deserialization merge conflicts
             serialize_into_store(self.profile, sync_filter=sync_filter)
-            _deserialize_from_store(self.profile, filter=sync_filter, skip_erroring=skip_erroring)
+            deserialize_from_store(
+                self.profile, sync_filter=sync_filter, skip_errored=skip_erroring
+            )
 
     def create_network_connection(self, base_url, **kwargs):
         from morango.sync.syncsession import NetworkSyncConnection
