@@ -157,6 +157,36 @@ class StoreModelSource(MorangoSource[DeserializeTask]):
                 yield DeserializeTask(store_model, self.fk_cache)
 
 
+def fk_references(app_model: SyncableModel) -> List[Tuple[ForeignKey, str]]:
+    """The FK fields on the app model that hold a value, paired with that value"""
+    references = []
+    for field in app_model._meta.fields:
+        if not isinstance(field, ForeignKey):
+            continue
+        target_id = getattr(app_model, field.attname)
+        if target_id is not None:
+            references.append((field, target_id))
+    return references
+
+
+def failed_target_error(task: DeserializeTask, field: ForeignKey, target_id: str) -> Exception:
+    """The error for a task whose FK target failed to deserialize in the run"""
+    if field.attname == task.self_referential_fk():
+        return MorangoDirtyParent(DIRTY_PARENT_MESSAGE)
+    return exceptions.ValidationError(
+        "{} with id {} failed to deserialize".format(
+            field.related_model._meta.verbose_name, target_id
+        )
+    )
+
+
+def deleted_target_error(field: ForeignKey, target_id: str) -> Exception:
+    """The error for a task whose FK target was deleted in the run"""
+    return exceptions.ValidationError(
+        "{} with id {} was deleted".format(field.related_model._meta.verbose_name, target_id)
+    )
+
+
 class AppModelDeserialize(Transform[DeserializeTask]):
     """
     Builds the unsaved app model from each task's serialized store data. Deleted store records
@@ -216,87 +246,59 @@ class AppModelValidate(Transform[DeserializeTask]):
             self.deleted_ids[task.id] = task.store.hard_deleted
             return task
 
-        fk_references = self._fk_references(task.app_model)
+        references = fk_references(task.app_model)
 
-        for field, target_id in fk_references:
+        for field, target_id in references:
             if target_id in self.deleted_ids:
                 if task.self_referential_fk() is not None:
                     # the sink has not deleted the target's app row yet, so validation can't
                     # report the missing target; fail as legacy does once the row is gone
-                    self._fail(task, self._deleted_target_error(field, target_id))
+                    self._fail(task, deleted_target_error(field, target_id))
                 else:
                     self._propagate_deletion(task, hard=self.deleted_ids[target_id])
                 return task
 
-        for field, target_id in fk_references:
+        for field, target_id in references:
             if target_id in self.failed_ids:
-                self._fail(task, self._failed_target_error(task, field, target_id))
+                self._fail(task, failed_target_error(task, field, target_id))
                 return task
 
         try:
             task.app_model.cached_clean_fields(task.fk_cache, sync_filter=self.sync_filter)
         except (exceptions.ValidationError, exceptions.ObjectDoesNotExist, ValueError) as e:
-            self._classify_failure(task, fk_references, e)
+            self._classify_failure(task, references, e)
         return task
-
-    @staticmethod
-    def _fk_references(app_model: SyncableModel) -> List[Tuple[ForeignKey, str]]:
-        """The FK fields on the app model that hold a value, paired with that value"""
-        references = []
-        for field in app_model._meta.fields:
-            if not isinstance(field, ForeignKey):
-                continue
-            target_id = getattr(app_model, field.attname)
-            if target_id is not None:
-                references.append((field, target_id))
-        return references
-
-    @staticmethod
-    def _failed_target_error(task: DeserializeTask, field: ForeignKey, target_id: str) -> Exception:
-        if field.attname == task.self_referential_fk():
-            return MorangoDirtyParent(DIRTY_PARENT_MESSAGE)
-        return exceptions.ValidationError(
-            "{} with id {} failed to deserialize".format(
-                field.related_model._meta.verbose_name, target_id
-            )
-        )
-
-    @staticmethod
-    def _deleted_target_error(field: ForeignKey, target_id: str) -> Exception:
-        return exceptions.ValidationError(
-            "{} with id {} was deleted".format(field.related_model._meta.verbose_name, target_id)
-        )
 
     def _classify_failure(
         self,
         task: DeserializeTask,
-        fk_references: List[Tuple[ForeignKey, str]],
+        references: List[Tuple[ForeignKey, str]],
         error: Exception,
     ) -> None:
         """
         Resolves a validation failure using the store records of the FK targets. Only runs on
         failure, so it costs at most one query per failed record and none per valid record.
         """
-        targets = self._lookup_targets(fk_references)
+        targets = self._lookup_targets(references)
 
         # a reference to a deleted record propagates the deletion, instead of failing
         if task.self_referential_fk() is None or isinstance(error, exceptions.ObjectDoesNotExist):
-            for _, target_id in fk_references:
+            for _, target_id in references:
                 target = targets.get(target_id)
                 if target is not None and (target.deleted or target.hard_deleted):
                     self._propagate_deletion(task, hard=target.hard_deleted)
                     return
 
-        self._fail(task, self._failure_error(task, fk_references, targets, error))
+        self._fail(task, self._failure_error(task, references, targets, error))
 
     @staticmethod
     def _lookup_targets(
-        fk_references: List[Tuple[ForeignKey, str]],
+        references: List[Tuple[ForeignKey, str]],
     ) -> Dict[str, _TargetState]:
         """The store state of each FK target that has a store record, keyed by the target ID"""
-        if not fk_references:
+        if not references:
             return {}
-        target_ids = [target_id for _, target_id in fk_references]
+        target_ids = [target_id for _, target_id in references]
         return {
             target_id: _TargetState(deleted, hard_deleted, dirty_bit)
             for target_id, deleted, hard_deleted, dirty_bit in Store.objects.filter(
@@ -307,7 +309,7 @@ class AppModelValidate(Transform[DeserializeTask]):
     def _failure_error(
         self,
         task: DeserializeTask,
-        fk_references: List[Tuple[ForeignKey, str]],
+        references: List[Tuple[ForeignKey, str]],
         targets: Dict[str, _TargetState],
         error: Exception,
     ) -> Exception:
@@ -316,7 +318,7 @@ class AppModelValidate(Transform[DeserializeTask]):
         parent take precedence, then missing targets, otherwise the original validation error.
         """
         self_ref_fk = task.self_referential_fk()
-        for field, target_id in fk_references:
+        for field, target_id in references:
             if field.attname != self_ref_fk:
                 continue
             if target_id not in targets:
@@ -326,7 +328,7 @@ class AppModelValidate(Transform[DeserializeTask]):
             ):
                 return MorangoDirtyParent(DIRTY_PARENT_MESSAGE)
 
-        for field, target_id in fk_references:
+        for field, target_id in references:
             if target_id not in targets:
                 return IntegrityError(
                     "{from_model}.{from_field} references non-existent {to_model} instance with "
