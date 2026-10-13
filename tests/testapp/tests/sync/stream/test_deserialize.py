@@ -31,6 +31,7 @@ from morango.sync.stream.deserialize import AppModelDeserialize
 from morango.sync.stream.deserialize import AppModelValidate
 from morango.sync.stream.deserialize import delete_app_models
 from morango.sync.stream.deserialize import deserialize_from_store
+from morango.sync.stream.deserialize import deserialize_store_model
 from morango.sync.stream.deserialize import DeserializeOutcome
 from morango.sync.stream.deserialize import DeserializeSink
 from morango.sync.stream.deserialize import DeserializeTask
@@ -1723,3 +1724,54 @@ class DeserializeFromStoreTestCase(DeserializeSinkFixturesMixin, TransactionTest
 
         self.assertIn("'save': 1", logs.output[-1])
         self.assertIn("'error': 1", logs.output[-1])
+
+
+class DeserializeStoreModelTestCase(DeserializeSinkFixturesMixin, TestCase):
+    """Deserializes a single store record by hand, outside of a pipeline run"""
+
+    def test_valid(self):
+        store = self._user()
+
+        app_model = deserialize_store_model(store, {})
+
+        self.assertIsInstance(app_model, MyUser)
+        self.assertEqual(app_model.id, store.id)
+        self.assertFalse(MyUser.objects.exists())
+        self.assertTrue(Store.objects.get(id=store.id).dirty_bit)
+
+    def test_deleted(self):
+        user = self._app_user()
+        store = Store.objects.get(id=user.id)
+        store.deleted = True
+
+        self.assertIsNone(deserialize_store_model(store, {}))
+        self.assertFalse(MyUser.objects.exists())
+
+    def test_target_deleted(self):
+        user = self._user(dirty_bit=False, deleted=True)
+        store = self._summary_log(user.id)
+
+        self.assertIsNone(deserialize_store_model(store, {}))
+        self.assertTrue(DeletedModels.objects.filter(id=store.id).exists())
+        self.assertTrue(Store.objects.get(id=store.id).dirty_bit)
+
+    def test_invalid(self):
+        user = MyUser(id=uuid.uuid4().hex, username="x" * 256, password="password")
+        store = self._store(user)
+
+        with self.assertLogs(self.logger_name, "WARNING") as logs:
+            with self.assertRaises(ValidationError):
+                deserialize_store_model(store, {})
+
+        self.assertIn(store.id, logs.output[0])
+
+    def test_fk_cache(self):
+        """The user is validated but never saved, so the log only validates through the cache"""
+        fk_cache = {}
+        user = self._user()
+        log = self._summary_log(user.id)
+
+        deserialize_store_model(user, fk_cache)
+        app_model = deserialize_store_model(log, fk_cache)
+
+        self.assertEqual(app_model.id, log.id)

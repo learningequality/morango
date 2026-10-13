@@ -566,6 +566,40 @@ def store_model_partition_fn(task: DeserializeTask) -> str:
     return task.store.model_name
 
 
+def deserialize_store_model(
+    store: Store, fk_cache: Dict, sync_filter: Optional[Filter] = None
+) -> Optional[SyncableModel]:
+    """
+    Deserializes and validates a single store record outside of a pipeline run. Deleted records are
+    applied: a deleted record's app model is deleted, and a record whose FK target was deleted is
+    tracked as deleted. Neither the store record nor a valid app model is saved.
+
+    :param store: The store record to deserialize
+    :param fk_cache: Dictionary cache for FK references, shared across calls
+    :param sync_filter: The Filter object for the current sync, if any
+    :return: The validated app model, or None if the record was deleted
+    :raises Exception: The error that the record failed with, after logging it
+    """
+    task = DeserializeTask(store, fk_cache)
+    AppModelDeserialize(sync_filter=sync_filter).transform(task)
+    AppModelValidate(sync_filter=sync_filter).transform(task)
+
+    outcome = task.outcome
+    if outcome == DeserializeOutcome.ERROR:
+        error = task.errors[0]
+        log_deserialization_error(task, error)
+        raise error
+    if outcome == DeserializeOutcome.DELETE:
+        # without sink lag, a later call validates against the app tables where the cascaded rows
+        # are already gone, so the cascaded keys aren't needed
+        delete_app_models(task.model, [task.id])
+        return None
+    if outcome in (DeserializeOutcome.PROPAGATE_DELETE, DeserializeOutcome.PROPAGATE_HARD_DELETE):
+        record_propagated_deletions([task])
+        return None
+    return task.app_model
+
+
 CHUNK_SIZE = 500
 
 
