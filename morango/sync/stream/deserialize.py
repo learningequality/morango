@@ -1,4 +1,6 @@
 import json
+import logging
+from collections import defaultdict
 from collections import namedtuple
 from enum import Enum
 from typing import Dict
@@ -11,6 +13,7 @@ from typing import Type
 
 from django.core import exceptions
 from django.db import router
+from django.db import transaction
 from django.db.models import ForeignKey
 from django.db.models import Model
 from django.db.models import signals
@@ -25,10 +28,13 @@ from morango.models.core import HardDeletedModels
 from morango.models.core import Store
 from morango.models.core import SyncableModel
 from morango.registry import syncable_models
+from morango.sync.stream.core import Sink
 from morango.sync.stream.core import Transform
 from morango.sync.stream.source import MorangoSource
 from morango.sync.stream.source import SourceTask
 from morango.sync.utils import mute_signals
+
+logger = logging.getLogger(__name__)
 
 DIRTY_PARENT_MESSAGE = "Parent is dirty; could not deserialize."
 MISSING_PARENT_MESSAGE = "Parent does not exist in Store; could not deserialize."
@@ -419,3 +425,123 @@ class AppModelValidate(Transform[DeserializeTask]):
     def _fail(self, task: DeserializeTask, error: Exception) -> None:
         task.add_error(error)
         self.failed_ids.add(task.id)
+
+
+class DeserializeSink(Sink[List[DeserializeTask]]):
+    """
+    Writes each task's resolved outcome to the app tables, the store and the deletion tracking
+    tables. Consumes chunks of tasks, which the pipeline partitions by model.
+
+    Must be instantiated per pipeline run, since it tracks the records that failed and the app rows
+    removed by cascading deletes. The buffer in front of the sink means a task is validated before
+    the sink writes the chunks ahead of it, so a save is checked against both before saving.
+    """
+
+    def __init__(self):
+        self.failed_ids: Set[str] = set()
+        self.cascaded_keys: Set[Tuple[str, str]] = set()
+        self.counts: Dict[DeserializeOutcome, int] = defaultdict(int)
+
+    def consume(self, tasks: List[DeserializeTask]) -> None:
+        by_outcome = defaultdict(list)
+        for task in tasks:
+            by_outcome[task.outcome].append(task)
+
+        clean = []
+        errored = []
+
+        for task in by_outcome[DeserializeOutcome.ERROR]:
+            self._record_error(task, task.errors[0])
+            errored.append(task)
+
+        # deletes run before saves, so the saves are checked against the rows they cascade to
+        deletes = by_outcome[DeserializeOutcome.DELETE]
+        self._delete_all(deletes)
+        clean.extend(deletes)
+
+        propagated = (
+            by_outcome[DeserializeOutcome.PROPAGATE_DELETE]
+            + by_outcome[DeserializeOutcome.PROPAGATE_HARD_DELETE]
+        )
+        record_propagated_deletions(propagated)
+        clean.extend(propagated)
+
+        self._save_all(by_outcome[DeserializeOutcome.SAVE], clean, errored)
+        self._write_stores(clean, errored)
+
+    def _delete_all(self, tasks: List[DeserializeTask]) -> None:
+        """Deletes the tasks' app rows with one delete per model, recording the cascaded rows"""
+        ids_by_model = defaultdict(list)
+        for task in tasks:
+            ids_by_model[task.model].append(task.id)
+        for model, ids in ids_by_model.items():
+            self.cascaded_keys |= delete_app_models(model, ids)
+
+    def _save_all(
+        self,
+        tasks: List[DeserializeTask],
+        clean: List[DeserializeTask],
+        errored: List[DeserializeTask],
+    ) -> None:
+        """Saves the tasks' app models in arrival order, adding each task to `clean` or `errored`"""
+        if not tasks:
+            return
+        with mute_signals(signals.pre_save, signals.post_save):
+            for task in tasks:
+                if self._save(task):
+                    clean.append(task)
+                else:
+                    errored.append(task)
+
+    def _write_stores(self, clean: List[DeserializeTask], errored: List[DeserializeTask]) -> None:
+        """Clears the store records that were written, and saves the errors of those that weren't"""
+        if clean:
+            Store.objects.filter(id__in=[task.id for task in clean]).update(
+                dirty_bit=False, deserialization_error=None, deserialization_exception=None
+            )
+        # errors are rare, and `bulk_update` is slower than saving each record
+        for task in errored:
+            task.store.save(update_fields=["deserialization_error", "deserialization_exception"])
+
+        for task in clean + errored:
+            self.counts[task.outcome] += 1
+
+    def summary(self) -> Dict[str, int]:
+        """The number of tasks consumed per outcome, counting failed saves as errors"""
+        return {outcome.value: count for outcome, count in self.counts.items()}
+
+    def _save(self, task: DeserializeTask) -> bool:
+        """Saves the task's app model in its own savepoint, recording the error if it fails"""
+        try:
+            with transaction.atomic():
+                task.app_model.save(update_dirty_bit_to=False)
+        except (
+            exceptions.ValidationError,
+            exceptions.ObjectDoesNotExist,
+            ValueError,
+            IntegrityError,
+        ) as e:
+            self._record_error(task, e)
+            return False
+        return True
+
+    def _record_error(self, task: DeserializeTask, error: Exception) -> None:
+        if error not in task.errors:
+            task.add_error(error)
+        task.store.set_deserialization_error(error)
+        self.failed_ids.add(task.id)
+        log_deserialization_error(task, error)
+
+
+def log_deserialization_error(task: DeserializeTask, error: Exception) -> None:
+    """Logs a record that failed to deserialize, with the message used by legacy deserialization"""
+    logger.warning(
+        "Failed to deserialize Store record %s for %s: %s",
+        task.id,
+        task.model.__name__,
+        error,
+    )
+
+
+def store_model_partition_fn(task: DeserializeTask) -> str:
+    return task.store.model_name
