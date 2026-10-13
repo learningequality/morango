@@ -10,18 +10,25 @@ from typing import Tuple
 from typing import Type
 
 from django.core import exceptions
+from django.db import router
 from django.db.models import ForeignKey
+from django.db.models import Model
+from django.db.models import signals
+from django.db.models.deletion import Collector
 from django.db.utils import IntegrityError
 
 from morango.errors import MorangoDirtyParent
 from morango.errors import MorangoMissingParent
 from morango.models.certificates import Filter
+from morango.models.core import DeletedModels
+from morango.models.core import HardDeletedModels
 from morango.models.core import Store
 from morango.models.core import SyncableModel
 from morango.registry import syncable_models
 from morango.sync.stream.core import Transform
 from morango.sync.stream.source import MorangoSource
 from morango.sync.stream.source import SourceTask
+from morango.sync.utils import mute_signals
 
 DIRTY_PARENT_MESSAGE = "Parent is dirty; could not deserialize."
 MISSING_PARENT_MESSAGE = "Parent does not exist in Store; could not deserialize."
@@ -185,6 +192,55 @@ def deleted_target_error(field: ForeignKey, target_id: str) -> Exception:
     return exceptions.ValidationError(
         "{} with id {} was deleted".format(field.related_model._meta.verbose_name, target_id)
     )
+
+
+def row_key(model: Type[Model], pk) -> Tuple[str, str]:
+    """Identifies an app row across models, as the concrete model's label and the primary key"""
+    return model._meta.concrete_model._meta.label_lower, str(pk)
+
+
+def delete_app_models(model: Type[SyncableModel], ids: List[str]) -> Set[Tuple[str, str]]:
+    """
+    Deletes app rows without tracking them, and Django cascades to the rows that reference them.
+
+    :return: The row keys of the cascaded rows, not including the rows in `ids`
+    """
+    if not ids:
+        return set()
+
+    with mute_signals(signals.post_delete):
+        # the collector checks for signal receivers when deciding to fast delete, so it must
+        # collect while `post_delete` is muted
+        collector = Collector(using=router.db_for_write(model))
+        collector.collect(model.syncing_objects.filter(id__in=ids))
+
+        keys = set()
+        for related_model, instances in collector.data.items():
+            keys.update(row_key(related_model, instance.pk) for instance in instances)
+        for qs in collector.fast_deletes:
+            keys.update(row_key(qs.model, pk) for pk in qs.values_list("pk", flat=True))
+
+        collector.delete()
+
+    return keys - {row_key(model, pk) for pk in ids}
+
+
+def record_propagated_deletions(tasks: List[DeserializeTask]) -> None:
+    """
+    Adds the tasks to `DeletedModels`, and those with a propagated hard deletion to
+    `HardDeletedModels`, so the next serialization marks their store records deleted
+    """
+    deleted = []
+    hard_deleted = []
+    for task in tasks:
+        deleted.append(DeletedModels(id=task.id, profile=task.store.profile))
+        if task.outcome == DeserializeOutcome.PROPAGATE_HARD_DELETE:
+            hard_deleted.append(HardDeletedModels(id=task.id, profile=task.store.profile))
+
+    if deleted:
+        DeletedModels.objects.bulk_create(deleted, ignore_conflicts=True)
+    if hard_deleted:
+        HardDeletedModels.objects.bulk_create(hard_deleted, ignore_conflicts=True)
 
 
 class AppModelDeserialize(Transform[DeserializeTask]):

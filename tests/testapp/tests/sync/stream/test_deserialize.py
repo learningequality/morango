@@ -5,12 +5,15 @@ import mock
 from django.core.exceptions import ValidationError
 from django.core.serializers.json import DjangoJSONEncoder
 from django.db import connection
+from django.db.models import SET_NULL
+from django.db.models import signals
 from django.db.utils import IntegrityError
 from django.test import SimpleTestCase
 from django.test import TestCase
 from django.test.utils import CaptureQueriesContext
 from facility_profile.models import ConditionalLog
 from facility_profile.models import Facility
+from facility_profile.models import InteractionLog
 from facility_profile.models import MyUser
 from facility_profile.models import SummaryLog
 
@@ -25,8 +28,11 @@ from morango.sync.operations import _deserialize_from_store
 from morango.sync.stream.core import Sink
 from morango.sync.stream.deserialize import AppModelDeserialize
 from morango.sync.stream.deserialize import AppModelValidate
+from morango.sync.stream.deserialize import delete_app_models
 from morango.sync.stream.deserialize import DeserializeOutcome
 from morango.sync.stream.deserialize import DeserializeTask
+from morango.sync.stream.deserialize import record_propagated_deletions
+from morango.sync.stream.deserialize import row_key
 from morango.sync.stream.deserialize import StoreModelSource
 from morango.utils import exception_path
 
@@ -1153,3 +1159,118 @@ class LegacyParityTestCase(DeserializeFixturesMixin, TestCase):
         grandchild = self._facility(parent=child, order=2)
 
         self._assert_parity(child.id, grandchild.id)
+
+
+class DeleteAppModelsTestCase(TestCase):
+    def _facility(self, name, parent=None):
+        facility = Facility(name=name, parent=parent)
+        facility.save(update_dirty_bit_to=False)
+        return facility
+
+    def _user(self, username="user"):
+        user = MyUser(username=username, password="password")
+        user.save(update_dirty_bit_to=False)
+        return user
+
+    def test_self_ref_cascade(self):
+        root = self._facility("root")
+        child = self._facility("child", parent=root)
+        grandchild = self._facility("grandchild", parent=child)
+
+        cascaded = delete_app_models(Facility, [root.id])
+
+        self.assertEqual(cascaded, {row_key(Facility, child.id), row_key(Facility, grandchild.id)})
+        self.assertFalse(
+            Facility.objects.filter(id__in=[root.id, child.id, grandchild.id]).exists()
+        )
+        self.assertFalse(DeletedModels.objects.exists())
+        self.assertFalse(HardDeletedModels.objects.exists())
+
+    def test_cross_model_cascade__fast_delete(self):
+        """With `post_delete` muted, Django deletes the logs without loading them"""
+        user = self._user()
+        log = SummaryLog(user=user)
+        log.save(update_dirty_bit_to=False)
+
+        cascaded = delete_app_models(MyUser, [user.id])
+
+        self.assertEqual(cascaded, {row_key(SummaryLog, log.id)})
+        self.assertFalse(MyUser.objects.filter(id=user.id).exists())
+        self.assertFalse(SummaryLog.objects.filter(id=log.id).exists())
+        self.assertFalse(DeletedModels.objects.exists())
+
+    def test_set_null_not_cascaded(self):
+        user = self._user()
+        log = InteractionLog(user=user)
+        log.save(update_dirty_bit_to=False)
+
+        remote_field = InteractionLog._meta.get_field("user").remote_field
+        with mock.patch.object(remote_field, "on_delete", SET_NULL):
+            cascaded = delete_app_models(MyUser, [user.id])
+
+        self.assertEqual(cascaded, set())
+        self.assertIsNone(InteractionLog.objects.get(id=log.id).user_id)
+
+    def test_post_delete_muted(self):
+        root = self._facility("root")
+        self._facility("child", parent=root)
+        receiver = mock.Mock()
+        signals.post_delete.connect(receiver)
+        self.addCleanup(signals.post_delete.disconnect, receiver)
+
+        delete_app_models(Facility, [root.id])
+
+        receiver.assert_not_called()
+
+    def test_missing_rows(self):
+        self.assertEqual(delete_app_models(Facility, [uuid.uuid4().hex]), set())
+
+    def test_empty_ids(self):
+        with self.assertNumQueries(0):
+            self.assertEqual(delete_app_models(Facility, []), set())
+
+
+class RecordPropagatedDeletionsTestCase(DeserializeFixturesMixin, TestCase):
+    def _task(self, hard=False):
+        task = DeserializeTask(self._user(), {})
+        task.set_propagated_deletion(hard=hard)
+        return task
+
+    def test_soft(self):
+        task = self._task()
+
+        record_propagated_deletions([task])
+
+        self.assertEqual(
+            list(DeletedModels.objects.values_list("id", "profile")), [(task.id, self.profile)]
+        )
+        self.assertFalse(HardDeletedModels.objects.exists())
+
+    def test_hard(self):
+        task = self._task(hard=True)
+
+        record_propagated_deletions([task])
+
+        self.assertTrue(DeletedModels.objects.filter(id=task.id, profile=self.profile).exists())
+        self.assertTrue(HardDeletedModels.objects.filter(id=task.id, profile=self.profile).exists())
+
+    def test_existing_row(self):
+        task = self._task()
+        DeletedModels.objects.create(id=task.id, profile=self.profile)
+
+        record_propagated_deletions([task])
+
+        self.assertEqual(DeletedModels.objects.filter(id=task.id).count(), 1)
+
+    def test_empty(self):
+        with self.assertNumQueries(0):
+            record_propagated_deletions([])
+
+    def test_full_chunk(self):
+        """Crosses SQLite's 499-row batch limit for `bulk_create`"""
+        tasks = [self._task(hard=True) for _ in range(500)]
+
+        record_propagated_deletions(tasks)
+
+        self.assertEqual(DeletedModels.objects.count(), 500)
+        self.assertEqual(HardDeletedModels.objects.count(), 500)
