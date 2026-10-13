@@ -1289,7 +1289,9 @@ class ListSink(Sink[DeserializeTask]):
         self.tasks.append(task)
 
 
-class DeserializeSinkTestCase(DeserializeFixturesMixin, TestCase):
+class DeserializeSinkFixturesMixin(DeserializeFixturesMixin):
+    """Runs the transforms into `DeserializeSink`, and checks what it wrote"""
+
     logger_name = "morango.sync.stream.deserialize"
 
     def _transform(self):
@@ -1329,6 +1331,8 @@ class DeserializeSinkTestCase(DeserializeFixturesMixin, TestCase):
         self._store(user, dirty_bit=False)
         return user
 
+
+class DeserializeSinkTestCase(DeserializeSinkFixturesMixin, TestCase):
     def test_save(self):
         user = self._user(deserialization_error="old", deserialization_exception="old.Error")
 
@@ -1503,3 +1507,105 @@ class DeserializeSinkTestCase(DeserializeFixturesMixin, TestCase):
         self.assertEqual(large - small, 1 if connection.vendor == "sqlite" else 0)
         self.assertEqual(DeletedModels.objects.count(), 510)
         self.assertFalse(Store.objects.filter(dirty_bit=True).exists())
+
+
+class DeserializeSinkGuardsTestCase(DeserializeSinkFixturesMixin, TestCase):
+    """Saves whose FK target the sink failed or removed after the save was validated"""
+
+    def _app_facility(self, name, parent=None):
+        facility = Facility(name=name, parent=parent)
+        facility.save(update_dirty_bit_to=False)
+        self._store(
+            facility,
+            dirty_bit=False,
+            _self_ref_fk=facility.parent_id or "",
+            _self_ref_order=0 if parent is None else 1,
+        )
+        return facility
+
+    def _error(self, store_id):
+        return Store.objects.get(id=store_id).deserialization_error
+
+    def test_failed_target__self_ref(self):
+        parent = self._app_facility("parent")
+        child = self._facility(parent=parent, order=1)
+        tasks = self._transform()
+        sink = DeserializeSink()
+        sink.failed_ids.add(parent.id)
+
+        with self.assertLogs(self.logger_name, "WARNING"):
+            sink.consume(tasks)
+
+        self.assertFalse(Facility.objects.filter(id=child.id).exists())
+        self._assert_store(child.id, dirty_bit=True, exception=MorangoDirtyParent.path())
+        self.assertIn(child.id, sink.failed_ids)
+
+    def test_failed_target__cross_model(self):
+        user = self._app_user()
+        log = self._summary_log(user.id)
+        tasks = self._transform()
+        sink = DeserializeSink()
+        sink.failed_ids.add(user.id)
+
+        with self.assertLogs(self.logger_name, "WARNING"):
+            sink.consume(tasks)
+
+        self.assertFalse(SummaryLog.objects.exists())
+        self._assert_store(
+            log.id, dirty_bit=True, exception="django.core.exceptions.ValidationError"
+        )
+        self.assertIn(user.id, self._error(log.id))
+        self.assertIn(log.id, sink.failed_ids)
+
+    def test_failed_save(self):
+        """The log was validated against the user before the user's save failed"""
+        self._app_user(username="same")
+        user = self._store(MyUser(id=uuid.uuid4().hex, username="same", password="password"))
+        log = self._summary_log(user.id)
+
+        with self.assertLogs(self.logger_name, "WARNING"):
+            self._run()
+
+        self._assert_store(user.id, dirty_bit=True, exception="django.db.utils.IntegrityError")
+        self.assertFalse(SummaryLog.objects.exists())
+        self._assert_store(
+            log.id, dirty_bit=True, exception="django.core.exceptions.ValidationError"
+        )
+        self.assertIn("failed to deserialize", self._error(log.id))
+
+    def _cascade_fixture(self):
+        """A deleted root, its clean child, and a dirty grandchild validated against the child"""
+        root = self._app_facility("root")
+        child = self._app_facility("child", parent=root)
+        Store.objects.filter(id=root.id).update(deleted=True, dirty_bit=True)
+        grandchild = self._facility(parent=child, order=2)
+        tasks = {task.id: task for task in self._transform()}
+        self.assertEqual(tasks[grandchild.id].outcome, DeserializeOutcome.SAVE)
+        return root, child, grandchild, tasks
+
+    def _assert_cascaded(self, child, grandchild):
+        self.assertFalse(Facility.objects.exists())
+        self._assert_store(
+            grandchild.id, dirty_bit=True, exception="django.core.exceptions.ValidationError"
+        )
+        self.assertIn("was deleted", self._error(grandchild.id))
+        self.assertIn(child.id, self._error(grandchild.id))
+
+    def test_cascaded_target__same_chunk(self):
+        root, child, grandchild, tasks = self._cascade_fixture()
+        sink = DeserializeSink()
+
+        with self.assertLogs(self.logger_name, "WARNING"):
+            sink.consume([tasks[root.id], tasks[grandchild.id]])
+
+        self._assert_cascaded(child, grandchild)
+
+    def test_cascaded_target__later_chunk(self):
+        root, child, grandchild, tasks = self._cascade_fixture()
+        sink = DeserializeSink()
+
+        sink.consume([tasks[root.id]])
+        with self.assertLogs(self.logger_name, "WARNING"):
+            sink.consume([tasks[grandchild.id]])
+
+        self._assert_cascaded(child, grandchild)

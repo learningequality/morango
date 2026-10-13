@@ -488,10 +488,27 @@ class DeserializeSink(Sink[List[DeserializeTask]]):
             return
         with mute_signals(signals.pre_save, signals.post_save):
             for task in tasks:
-                if self._save(task):
+                error = self._removed_target_error(task)
+                if error is not None:
+                    self._record_error(task, error)
+                    errored.append(task)
+                elif self._save(task):
                     clean.append(task)
                 else:
                     errored.append(task)
+
+    def _removed_target_error(self, task: DeserializeTask) -> Optional[Exception]:
+        """
+        The error for a task whose FK target was removed after the task was validated, because the
+        target failed in the sink or a delete cascaded to it. FK constraints are deferred, so saving
+        the task would only fail when the transaction commits.
+        """
+        for field, target_id in fk_references(task.app_model):
+            if target_id in self.failed_ids:
+                return failed_target_error(task, field, target_id)
+            if row_key(field.related_model, target_id) in self.cascaded_keys:
+                return deleted_target_error(field, target_id)
+        return None
 
     def _write_stores(self, clean: List[DeserializeTask], errored: List[DeserializeTask]) -> None:
         """Clears the store records that were written, and saves the errors of those that weren't"""
