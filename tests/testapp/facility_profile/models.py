@@ -24,6 +24,10 @@ class SyncableUserModelManager(SyncableModelManager, UserManager):
 class Facility(FacilityDataSyncableModel):
     morango_model_name = "facility"
 
+    # when True, clean_fields loads the parent object, which raises ObjectDoesNotExist if the
+    # parent row is not in the app table; used to test non-validation error handling
+    clean_dereferences_parent = True
+
     name = models.CharField(max_length=100)
     now_date = models.DateTimeField(default=timezone.now)
     parent = models.ForeignKey(
@@ -45,8 +49,9 @@ class Facility(FacilityDataSyncableModel):
             return "{id}".format(id=self.ID_PLACEHOLDER)
 
     def clean_fields(self, *args, **kwargs):
-        # reference parent here just to trigger a non-validation error to make sure we handle it
-        _ = self.parent
+        if self.clean_dereferences_parent:
+            # reference parent here just to trigger a non-validation error to make sure we handle it
+            _ = self.parent
         super(Facility, self).clean_fields(*args, **kwargs)
 
 
