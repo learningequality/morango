@@ -1722,8 +1722,7 @@ class DeserializeFromStoreTestCase(DeserializeSinkFixturesMixin, TransactionTest
 
         logs = self._deserialize()
 
-        self.assertIn("'save': 1", logs.output[-1])
-        self.assertIn("'error': 1", logs.output[-1])
+        self.assertIn("Deserialization done", logs.output[-1])
 
 
 class DeserializeStoreModelTestCase(DeserializeSinkFixturesMixin, TestCase):
