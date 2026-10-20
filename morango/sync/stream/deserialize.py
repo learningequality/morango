@@ -133,7 +133,6 @@ class StoreModelSource(MorangoSource[DeserializeTask]):
         profile: str,
         sync_filter: Optional[Filter] = None,
         dirty_only: bool = True,
-        partition_order: str = "asc",
         fk_cache: Optional[Dict] = None,
         skip_errored: bool = False,
     ):
@@ -141,11 +140,10 @@ class StoreModelSource(MorangoSource[DeserializeTask]):
         :param profile: The Morango model profile
         :param sync_filter: The Filter object for this sync
         :param dirty_only: Whether to filter on dirty records only
-        :param partition_order: Controls how the filter specificity is applied, "asc" or "desc"
         :param fk_cache: Dictionary cache for FK references
         :param skip_errored: Whether to skip Store records with deserialization errors
         """
-        super().__init__(profile, sync_filter, dirty_only, partition_order)
+        super().__init__(profile, sync_filter, dirty_only)
         self.fk_cache = fk_cache if fk_cache is not None else {}
         self.skip_errored = skip_errored
 

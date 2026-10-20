@@ -600,31 +600,16 @@ class AppModelValidateClassifyFailureTestCase(TestCase):
 
 
 class StoreModelSourcePrefixConditionsTestCase(SimpleTestCase):
-    """`prefix_conditions` is pure ordering logic over the sync filter and touches no ORM"""
+    """`prefix_conditions` only reads the sync filter, and makes no queries"""
 
     def test_prefix_conditions__none(self):
         source = StoreModelSource(profile="test")
         self.assertEqual(list(source.prefix_conditions()), [None])
 
-    def test_prefix_conditions__with_filter_asc(self):
-        source = StoreModelSource(profile="test", sync_filter=Filter("b\na"), partition_order="asc")
-        self.assertEqual(list(source.prefix_conditions()), ["a", "b"])
-
-    def test_prefix_conditions__with_filter_asc__realistic(self):
-        """
-        Partitions often take the form of `{id}:{additional specificity}`, so the important aspect
-        of partition ordering is that the least specific filter is generally first
-        """
-        source = StoreModelSource(
-            profile="test", sync_filter=Filter("a:test:z\na\na:initial"), partition_order="asc"
-        )
-        self.assertEqual(list(source.prefix_conditions()), ["a", "a:initial", "a:test:z"])
-
-    def test_prefix_conditions__with_filter_desc(self):
-        source = StoreModelSource(
-            profile="test", sync_filter=Filter("a\nb"), partition_order="desc"
-        )
-        self.assertEqual(list(source.prefix_conditions()), ["b", "a"])
+    def test_prefix_conditions__with_filter(self):
+        """The prefixes keep the order of the sync filter, which the caller is responsible for"""
+        source = StoreModelSource(profile="test", sync_filter=Filter("b:user\na\na:initial"))
+        self.assertEqual(list(source.prefix_conditions()), ["b:user", "a", "a:initial"])
 
 
 class StoreModelSourceBeginTestCase(SimpleTestCase):
@@ -1715,6 +1700,20 @@ class DeserializeFromStoreTestCase(DeserializeSinkFixturesMixin, TransactionTest
 
         self.assertEqual(list(MyUser.objects.values_list("id", flat=True)), [included.id])
         self._assert_store(excluded.id, dirty_bit=True)
+
+    def test_sync_filter__partition_order(self):
+        """
+        The source streams the partitions in the order of the sync filter, so a filter that lists
+        the user's partition first deserializes the user before a log in a later partition
+        """
+        user = self._user(partition="b:user")
+        log = self._summary_log(user.id, partition="a:user:summary")
+
+        self._deserialize(sync_filter=Filter("b:user\na:user:summary"))
+
+        self._assert_store(user.id, dirty_bit=False)
+        self._assert_store(log.id, dirty_bit=False)
+        self.assertTrue(SummaryLog.objects.filter(id=log.id).exists())
 
     def test_summary_logged(self):
         self._user()
