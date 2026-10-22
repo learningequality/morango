@@ -2,6 +2,16 @@
 
 List of the most important changes for each release.
 
+## 0.9.0
+- Deserializes `Store` records as a stream with chunked writes, so memory use no longer grows with the number of dirty records
+- Replaces `morango.sync.operations._deserialize_from_store` with `morango.sync.stream.deserialize.deserialize_from_store`. The `filter` argument is renamed to `sync_filter`, and `skip_erroring` to `skip_errored`
+- Replaces `Store._deserialize_store_model` with `morango.sync.stream.deserialize.deserialize_store_model`, which returns the validated app model, or `None` for a deleted record. The `defer_fks` option is removed
+- Records that reference a record which failed to save or was removed by a cascading delete now get a deserialization error, instead of failing the deserialization transaction
+- Records that propagate the deletion of a referenced record are now marked clean after deserialization
+- Children of a dirty parent that is left out of the deserialization run are now deserialized against the parent's existing app row
+- For models whose `clean_fields` loads related objects, a dirty self-referential chain is now deserialized one level per run
+- Logs deserialization warnings under `morango.sync.stream.deserialize` instead of `morango.sync.operations`
+
 ## 0.8.15
 - Improves buffer serialization performance by performing bulk counter lookup
 - Corrects an initialization issue with `SessionContext` that leads to an incorrect value for `is_push`

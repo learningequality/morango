@@ -27,25 +27,22 @@ class MorangoSource(Source[T], abc.ABC):
     Common source functionality for Morango sources, such as SyncableModels and Store records.
     """
 
-    __slots__ = ("profile", "sync_filter", "dirty_only", "partition_order", "_seen")
+    __slots__ = ("profile", "sync_filter", "dirty_only", "_seen")
 
     def __init__(
         self,
         profile: str,
         sync_filter: Optional[Filter] = None,
         dirty_only: bool = True,
-        partition_order: str = "asc",
     ):
         """
         :param profile: The Morango model profile
         :param sync_filter: The Filter object for this sync
         :param dirty_only: Whether to filter on dirty records only
-        :param partition_order: Controls how the filter specificity is applied, "asc" or "desc"
         """
         self.profile = profile
         self.sync_filter = sync_filter
         self.dirty_only = dirty_only
-        self.partition_order = partition_order
         self._seen: Optional[set] = None
 
     def begin(self) -> None:
@@ -54,11 +51,12 @@ class MorangoSource(Source[T], abc.ABC):
 
     def prefix_conditions(self) -> Generator[Optional[str], None, None]:
         """
-        Generates partition prefixes for queries based on the sync filter and partition order.
+        Generates partition prefixes for queries based on the sync filter.
 
-        This method outputs prefixes in sorted order according to the specified partition
-        order. If no sync filter is provided, it yields `None` to indicate a query
-        without filtering by partition.
+        This method outputs prefixes in the order of the sync filter. Records are streamed one
+        prefix at a time, so the filter must list the partitions of FK targets before the
+        partitions of the records that reference them. If no sync filter is provided, it yields
+        `None` to indicate a query without filtering by partition.
 
         :return: A generator yielding partition prefixes or `None` if no filtering is applied.
         """
@@ -66,14 +64,8 @@ class MorangoSource(Source[T], abc.ABC):
             # yield None once, so we do one query without a partition filter (everything)
             yield None
         else:
-            partitions_prefixes = [str(prefix) for prefix in self.sync_filter]
-            partition_iterator = sorted(
-                partitions_prefixes,
-                reverse=self.partition_order == "desc",
-            )
-
-            for prefix in partition_iterator:
-                yield prefix
+            for prefix in self.sync_filter:
+                yield str(prefix)
 
     def stream(self) -> Generator[T, None, None]:
         """

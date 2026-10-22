@@ -614,7 +614,7 @@ class UniqueConstraintDeserializationTestCase(TestCase):
         """A warning should be logged when deserialization fails due to a unique constraint."""
         self._create_conflicting_user_store_records()
 
-        with self.assertLogs("morango.sync.operations", level="WARNING") as cm:
+        with self.assertLogs("morango.sync.stream.deserialize", level="WARNING") as cm:
             self.mc.deserialize_from_store()
 
         unique_warnings = [

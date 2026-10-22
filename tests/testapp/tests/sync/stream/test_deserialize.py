@@ -5,12 +5,16 @@ import mock
 from django.core.exceptions import ValidationError
 from django.core.serializers.json import DjangoJSONEncoder
 from django.db import connection
+from django.db.models import SET_NULL
+from django.db.models import signals
 from django.db.utils import IntegrityError
 from django.test import SimpleTestCase
 from django.test import TestCase
+from django.test import TransactionTestCase
 from django.test.utils import CaptureQueriesContext
 from facility_profile.models import ConditionalLog
 from facility_profile.models import Facility
+from facility_profile.models import InteractionLog
 from facility_profile.models import MyUser
 from facility_profile.models import SummaryLog
 
@@ -21,14 +25,20 @@ from morango.models.core import DeletedModels
 from morango.models.core import HardDeletedModels
 from morango.models.core import Store
 from morango.models.core import SyncableModel
-from morango.sync.operations import _deserialize_from_store
+from morango.sync.stream.core import Buffer
 from morango.sync.stream.core import Sink
 from morango.sync.stream.deserialize import AppModelDeserialize
 from morango.sync.stream.deserialize import AppModelValidate
+from morango.sync.stream.deserialize import delete_app_models
+from morango.sync.stream.deserialize import deserialize_from_store
+from morango.sync.stream.deserialize import deserialize_store_model
 from morango.sync.stream.deserialize import DeserializeOutcome
+from morango.sync.stream.deserialize import DeserializeSink
 from morango.sync.stream.deserialize import DeserializeTask
+from morango.sync.stream.deserialize import record_propagated_deletions
+from morango.sync.stream.deserialize import row_key
+from morango.sync.stream.deserialize import store_model_partition_fn
 from morango.sync.stream.deserialize import StoreModelSource
-from morango.utils import exception_path
 
 from ...helpers import StoreFactory
 
@@ -590,31 +600,16 @@ class AppModelValidateClassifyFailureTestCase(TestCase):
 
 
 class StoreModelSourcePrefixConditionsTestCase(SimpleTestCase):
-    """`prefix_conditions` is pure ordering logic over the sync filter and touches no ORM"""
+    """`prefix_conditions` only reads the sync filter, and makes no queries"""
 
     def test_prefix_conditions__none(self):
         source = StoreModelSource(profile="test")
         self.assertEqual(list(source.prefix_conditions()), [None])
 
-    def test_prefix_conditions__with_filter_asc(self):
-        source = StoreModelSource(profile="test", sync_filter=Filter("b\na"), partition_order="asc")
-        self.assertEqual(list(source.prefix_conditions()), ["a", "b"])
-
-    def test_prefix_conditions__with_filter_asc__realistic(self):
-        """
-        Partitions often take the form of `{id}:{additional specificity}`, so the important aspect
-        of partition ordering is that the least specific filter is generally first
-        """
-        source = StoreModelSource(
-            profile="test", sync_filter=Filter("a:test:z\na\na:initial"), partition_order="asc"
-        )
-        self.assertEqual(list(source.prefix_conditions()), ["a", "a:initial", "a:test:z"])
-
-    def test_prefix_conditions__with_filter_desc(self):
-        source = StoreModelSource(
-            profile="test", sync_filter=Filter("a\nb"), partition_order="desc"
-        )
-        self.assertEqual(list(source.prefix_conditions()), ["b", "a"])
+    def test_prefix_conditions__with_filter(self):
+        """The prefixes keep the order of the sync filter, which the caller is responsible for"""
+        source = StoreModelSource(profile="test", sync_filter=Filter("b:user\na\na:initial"))
+        self.assertEqual(list(source.prefix_conditions()), ["b:user", "a", "a:initial"])
 
 
 class StoreModelSourceBeginTestCase(SimpleTestCase):
@@ -1037,114 +1032,136 @@ class DeserializeTransformsIntegrationTestCase(DeserializeFixturesMixin, TestCas
             )
 
 
-class LegacyParityTestCase(DeserializeFixturesMixin, TestCase):
+class DeserializeParityTestCase(DeserializeFixturesMixin, TestCase):
     """
-    Characterizes legacy `_deserialize_from_store` errors and propagated deletions against the
-    transforms, on the same store records. The transforms don't write, so both can run against the
-    same database state. Runs with the default `Facility.clean_dereferences_parent`, which is the
-    legacy test behavior, unless a test patches it.
+    Checks the end state that `deserialize_from_store` stores for errors and propagated deletions
+    against the values captured from legacy `_deserialize_from_store`, with the default
+    `Facility.clean_dereferences_parent` at the time patched in where a test relies on it.
+
+    The exceptions are:
+    - A record that propagates the deletion of its FK target, which legacy left dirty. It now ends
+      clean, since its deletion is tracked.
+    - A child of a parent that is dirty but left out of the run, which legacy failed with
+      `MorangoMissingParent`. It is now saved against the parent's older app row.
     """
 
-    def _legacy_result(self, store_id):
-        """The legacy result of a store record that did not save, in the transforms' terms"""
-        if HardDeletedModels.objects.filter(id=store_id).exists():
-            return DeserializeOutcome.PROPAGATE_HARD_DELETE, None
-        if DeletedModels.objects.filter(id=store_id).exists():
-            return DeserializeOutcome.PROPAGATE_DELETE, None
-        exception = Store.objects.get(id=store_id).deserialization_exception
-        self.assertIsNotNone(exception)
-        return DeserializeOutcome.ERROR, exception
+    def _deserialize(self):
+        deserialize_from_store(self.profile)
 
-    def _assert_parity(self, *store_ids):
-        results = self._run()
-        _deserialize_from_store(self.profile)
+    def _assert_stored(self, store_id, dirty_bit, exception, deleted=False, hard_deleted=False):
+        store = Store.objects.get(id=store_id)
+        self.assertEqual(
+            (
+                store.dirty_bit,
+                store.deserialization_exception,
+                DeletedModels.objects.filter(id=store_id).exists(),
+                HardDeletedModels.objects.filter(id=store_id).exists(),
+            ),
+            (dirty_bit, exception, deleted, hard_deleted),
+        )
 
-        for store_id in store_ids:
-            with self.subTest(store_id=store_id):
-                outcome, error_type = results[store_id]
-                error_path = exception_path(error_type) if error_type else None
-                self.assertEqual((outcome, error_path), self._legacy_result(store_id))
-
+    @mock.patch.object(Facility, "clean_dereferences_parent", True)
     def test_parent_failed(self):
         root = self._facility(serialized="{bad")
         child = self._facility(parent=root, order=1)
         grandchild = self._facility(parent=child, order=2)
 
-        self._assert_parity(root.id, child.id, grandchild.id)
+        self._deserialize()
 
+        self._assert_stored(root.id, True, "json.decoder.JSONDecodeError")
+        self._assert_stored(child.id, True, MorangoDirtyParent.path())
+        self._assert_stored(grandchild.id, True, MorangoDirtyParent.path())
+
+    @mock.patch.object(Facility, "clean_dereferences_parent", True)
     def test_parent_missing(self):
         missing_parent = Facility(id=uuid.uuid4().hex, name="missing")
         child = self._facility(parent=missing_parent)
 
-        self._assert_parity(child.id)
+        self._deserialize()
+
+        self._assert_stored(child.id, True, MorangoMissingParent.path())
 
     def test_target_missing(self):
         log = self._summary_log(uuid.uuid4().hex)
 
-        self._assert_parity(log.id)
+        self._deserialize()
+
+        self._assert_stored(log.id, True, "django.db.utils.IntegrityError")
 
     @mock.patch.object(Facility, "clean_dereferences_parent", False)
     def test_own_error_with_parent_accepted(self):
         root = self._facility()
         child = self._facility(parent=root, order=1, name="x" * 200)
 
-        self._assert_parity(child.id)
+        self._deserialize()
+
+        self._assert_stored(child.id, True, "django.core.exceptions.ValidationError")
 
     def test_target_deleted_in_run(self):
         user = self._user(deleted=True)
         log = self._summary_log(user.id)
 
-        self._assert_parity(log.id)
+        self._deserialize()
+
+        self._assert_stored(log.id, False, None, deleted=True)
 
     def test_target_deleted_earlier(self):
         user = self._user(dirty_bit=False, deleted=True)
         log = self._summary_log(user.id)
 
-        self._assert_parity(log.id)
+        self._deserialize()
+
+        self._assert_stored(log.id, False, None, deleted=True)
 
     def test_target_hard_deleted_earlier(self):
         user = self._user(dirty_bit=False, deleted=True, hard_deleted=True)
         log = self._summary_log(user.id)
 
-        self._assert_parity(log.id)
+        self._deserialize()
 
+        self._assert_stored(log.id, False, None, deleted=True, hard_deleted=True)
+
+    @mock.patch.object(Facility, "clean_dereferences_parent", True)
     def test_parent_deleted_earlier(self):
         root = self._facility(dirty_bit=False, deleted=True)
         child = self._facility(parent=root, order=1)
 
-        self._assert_parity(child.id)
+        self._deserialize()
 
+        self._assert_stored(child.id, False, None, deleted=True)
+
+    @mock.patch.object(Facility, "clean_dereferences_parent", True)
     def test_parent_hard_deleted_earlier(self):
         root = self._facility(dirty_bit=False, deleted=True, hard_deleted=True)
         child = self._facility(parent=root, order=1)
 
-        self._assert_parity(child.id)
+        self._deserialize()
+
+        self._assert_stored(child.id, False, None, deleted=True, hard_deleted=True)
 
     @mock.patch.object(Facility, "clean_dereferences_parent", False)
     def test_parent_deleted_earlier__parent_not_loaded(self):
         root = self._facility(dirty_bit=False, deleted=True)
         child = self._facility(parent=root, order=1)
 
-        self._assert_parity(child.id)
+        self._deserialize()
 
-    def test_dirty_parent_not_in_run__differs(self):
+        self._assert_stored(child.id, True, "django.core.exceptions.ValidationError")
+
+    def test_dirty_parent_not_in_run(self):
         """
-        Characterizes an intentional difference: legacy never deserializes children of a parent
-        whose store record is dirty. The transforms save the child, which validates against the
-        parent's older app row.
+        Legacy never deserializes children of a parent whose store record is dirty, and records
+        `MorangoMissingParent` when the parent is left out of the run. The child is now saved,
+        since it validates against the parent's older app row.
         """
         parent = Facility.objects.create(name="parent")
         self._store(parent, _self_ref_order=0, deserialization_error="failed earlier")
         child = self._facility(parent=parent, order=1)
 
-        results = self._run(skip_errored=True)
-        _deserialize_from_store(self.profile, skip_erroring=True)
+        deserialize_from_store(self.profile, skip_errored=True)
 
-        self.assertEqual(results[child.id], (DeserializeOutcome.SAVE, None))
-        self.assertEqual(
-            self._legacy_result(child.id),
-            (DeserializeOutcome.ERROR, exception_path(MorangoMissingParent)),
-        )
+        self.assertTrue(Facility.objects.filter(id=child.id).exists())
+        self._assert_stored(child.id, False, None)
 
     @mock.patch.object(Facility, "clean_dereferences_parent", False)
     def test_parent_deleted_in_run__parent_not_loaded(self):
@@ -1152,4 +1169,607 @@ class LegacyParityTestCase(DeserializeFixturesMixin, TestCase):
         child = self._facility(parent=root, order=1)
         grandchild = self._facility(parent=child, order=2)
 
-        self._assert_parity(child.id, grandchild.id)
+        self._deserialize()
+
+        self._assert_stored(child.id, True, "django.core.exceptions.ValidationError")
+        self._assert_stored(grandchild.id, True, MorangoDirtyParent.path())
+
+
+class DeleteAppModelsTestCase(TestCase):
+    def _facility(self, name, parent=None):
+        facility = Facility(name=name, parent=parent)
+        facility.save(update_dirty_bit_to=False)
+        return facility
+
+    def _user(self, username="user"):
+        user = MyUser(username=username, password="password")
+        user.save(update_dirty_bit_to=False)
+        return user
+
+    def test_self_ref_cascade(self):
+        root = self._facility("root")
+        child = self._facility("child", parent=root)
+        grandchild = self._facility("grandchild", parent=child)
+
+        cascaded = delete_app_models(Facility, [root.id])
+
+        self.assertEqual(cascaded, {row_key(Facility, child.id), row_key(Facility, grandchild.id)})
+        self.assertFalse(
+            Facility.objects.filter(id__in=[root.id, child.id, grandchild.id]).exists()
+        )
+        self.assertFalse(DeletedModels.objects.exists())
+        self.assertFalse(HardDeletedModels.objects.exists())
+
+    def test_cross_model_cascade__fast_delete(self):
+        """With `post_delete` muted, Django deletes the logs without loading them"""
+        user = self._user()
+        log = SummaryLog(user=user)
+        log.save(update_dirty_bit_to=False)
+
+        cascaded = delete_app_models(MyUser, [user.id])
+
+        self.assertEqual(cascaded, {row_key(SummaryLog, log.id)})
+        self.assertFalse(MyUser.objects.filter(id=user.id).exists())
+        self.assertFalse(SummaryLog.objects.filter(id=log.id).exists())
+        self.assertFalse(DeletedModels.objects.exists())
+
+    def test_set_null_not_cascaded(self):
+        user = self._user()
+        log = InteractionLog(user=user)
+        log.save(update_dirty_bit_to=False)
+
+        remote_field = InteractionLog._meta.get_field("user").remote_field
+        with mock.patch.object(remote_field, "on_delete", SET_NULL):
+            cascaded = delete_app_models(MyUser, [user.id])
+
+        self.assertEqual(cascaded, set())
+        self.assertIsNone(InteractionLog.objects.get(id=log.id).user_id)
+
+    def test_post_delete_muted(self):
+        root = self._facility("root")
+        self._facility("child", parent=root)
+        receiver = mock.Mock()
+        signals.post_delete.connect(receiver)
+        self.addCleanup(signals.post_delete.disconnect, receiver)
+
+        delete_app_models(Facility, [root.id])
+
+        receiver.assert_not_called()
+
+    def test_missing_rows(self):
+        self.assertEqual(delete_app_models(Facility, [uuid.uuid4().hex]), set())
+
+    def test_empty_ids(self):
+        with self.assertNumQueries(0):
+            self.assertEqual(delete_app_models(Facility, []), set())
+
+
+class RecordPropagatedDeletionsTestCase(DeserializeFixturesMixin, TestCase):
+    def _task(self, hard=False):
+        task = DeserializeTask(self._user(), {})
+        task.set_propagated_deletion(hard=hard)
+        return task
+
+    def test_soft(self):
+        task = self._task()
+
+        record_propagated_deletions([task])
+
+        self.assertEqual(
+            list(DeletedModels.objects.values_list("id", "profile")), [(task.id, self.profile)]
+        )
+        self.assertFalse(HardDeletedModels.objects.exists())
+
+    def test_hard(self):
+        task = self._task(hard=True)
+
+        record_propagated_deletions([task])
+
+        self.assertTrue(DeletedModels.objects.filter(id=task.id, profile=self.profile).exists())
+        self.assertTrue(HardDeletedModels.objects.filter(id=task.id, profile=self.profile).exists())
+
+    def test_existing_row(self):
+        task = self._task()
+        DeletedModels.objects.create(id=task.id, profile=self.profile)
+
+        record_propagated_deletions([task])
+
+        self.assertEqual(DeletedModels.objects.filter(id=task.id).count(), 1)
+
+    def test_empty(self):
+        with self.assertNumQueries(0):
+            record_propagated_deletions([])
+
+    def test_full_chunk(self):
+        """Crosses SQLite's 499-row batch limit for `bulk_create`"""
+        tasks = [self._task(hard=True) for _ in range(500)]
+
+        record_propagated_deletions(tasks)
+
+        self.assertEqual(DeletedModels.objects.count(), 500)
+        self.assertEqual(HardDeletedModels.objects.count(), 500)
+
+
+class ListSink(Sink[DeserializeTask]):
+    """Collects the tasks in stream order"""
+
+    def __init__(self):
+        self.tasks = []
+
+    def consume(self, task: DeserializeTask) -> None:
+        self.tasks.append(task)
+
+
+class DeserializeSinkFixturesMixin(DeserializeFixturesMixin):
+    """Runs the transforms into `DeserializeSink`, and checks what it wrote"""
+
+    logger_name = "morango.sync.stream.deserialize"
+
+    def _transform(self):
+        """The dirty store records as tasks with resolved outcomes, in stream order"""
+        sink = ListSink()
+        (
+            StoreModelSource(self.profile)
+            .pipe(AppModelDeserialize())
+            .pipe(AppModelValidate())
+            .end(sink)
+        )
+        return sink.tasks
+
+    def _run(self, sink=None):
+        sink = sink or DeserializeSink()
+        (
+            StoreModelSource(self.profile)
+            .pipe(AppModelDeserialize())
+            .pipe(AppModelValidate())
+            .pipe(Buffer(size=500, partition_fn=store_model_partition_fn))
+            .end(sink)
+        )
+        return sink
+
+    def _assert_store(self, store_id, dirty_bit, exception=None):
+        store = Store.objects.get(id=store_id)
+        self.assertEqual(store.dirty_bit, dirty_bit)
+        self.assertEqual(store.deserialization_exception, exception)
+        if exception is None:
+            self.assertIsNone(store.deserialization_error)
+        else:
+            self.assertTrue(store.deserialization_error)
+
+    def _app_user(self, username="user"):
+        user = MyUser(username=username, password="password")
+        user.save(update_dirty_bit_to=False)
+        self._store(user, dirty_bit=False)
+        return user
+
+    def _app_facility(self, name, parent=None):
+        facility = Facility(name=name, parent=parent)
+        facility.save(update_dirty_bit_to=False)
+        self._store(
+            facility,
+            dirty_bit=False,
+            _self_ref_fk=facility.parent_id or "",
+            _self_ref_order=0 if parent is None else 1,
+        )
+        return facility
+
+
+class DeserializeSinkTestCase(DeserializeSinkFixturesMixin, TestCase):
+    def test_save(self):
+        user = self._user(deserialization_error="old", deserialization_exception="old.Error")
+
+        self._run()
+
+        self.assertFalse(MyUser.objects.get(id=user.id)._morango_dirty_bit)
+        self._assert_store(user.id, dirty_bit=False)
+
+    def test_save__failure(self):
+        users = [
+            self._store(MyUser(id=uuid.uuid4().hex, username="same", password="password"))
+            for _ in range(2)
+        ]
+
+        with self.assertLogs(self.logger_name, "WARNING") as logs:
+            self._run()
+
+        saved = MyUser.objects.get(username="same")
+        (failed,) = [user for user in users if user.id != saved.id]
+        self._assert_store(saved.id, dirty_bit=False)
+        self._assert_store(failed.id, dirty_bit=True, exception="django.db.utils.IntegrityError")
+        self.assertEqual(len(logs.output), 1)
+        self.assertIn(failed.id, logs.output[0])
+
+    def test_save__failure__task_errored(self):
+        self._app_user(username="same")
+        self._store(MyUser(id=uuid.uuid4().hex, username="same", password="password"))
+        (task,) = self._transform()
+
+        with self.assertLogs(self.logger_name, "WARNING"):
+            DeserializeSink().consume([task])
+
+        self.assertEqual(task.outcome, DeserializeOutcome.ERROR)
+        self.assertEqual(len(task.errors), 1)
+        self.assertIsInstance(task.errors[0], IntegrityError)
+
+    def test_save__signals_muted(self):
+        self._user()
+        receiver = mock.Mock()
+        signals.pre_save.connect(receiver)
+        signals.post_save.connect(receiver)
+        self.addCleanup(signals.pre_save.disconnect, receiver)
+        self.addCleanup(signals.post_save.disconnect, receiver)
+
+        self._run()
+
+        receiver.assert_not_called()
+
+    def test_delete(self):
+        user = self._app_user()
+        Store.objects.filter(id=user.id).update(deleted=True, dirty_bit=True)
+
+        self._run()
+
+        self.assertFalse(MyUser.objects.filter(id=user.id).exists())
+        self._assert_store(user.id, dirty_bit=False)
+        self.assertFalse(DeletedModels.objects.exists())
+
+    def test_delete__app_row_missing(self):
+        user = self._user(deleted=True)
+
+        self._run()
+
+        self._assert_store(user.id, dirty_bit=False)
+
+    def test_propagate_delete(self):
+        user = self._user(dirty_bit=False, deleted=True)
+        log = self._summary_log(user.id)
+
+        self._run()
+
+        self.assertFalse(SummaryLog.objects.exists())
+        self._assert_store(log.id, dirty_bit=False)
+        self.assertEqual(list(DeletedModels.objects.values_list("id", flat=True)), [log.id])
+        self.assertFalse(HardDeletedModels.objects.exists())
+
+    def test_propagate_hard_delete(self):
+        user = self._user(dirty_bit=False, deleted=True, hard_deleted=True)
+        log = self._summary_log(user.id)
+
+        self._run()
+
+        self.assertFalse(SummaryLog.objects.exists())
+        self._assert_store(log.id, dirty_bit=False)
+        self.assertEqual(list(DeletedModels.objects.values_list("id", flat=True)), [log.id])
+        self.assertEqual(list(HardDeletedModels.objects.values_list("id", flat=True)), [log.id])
+
+    def test_error(self):
+        facility = self._facility(serialized="{bad")
+
+        with self.assertLogs(self.logger_name, "WARNING") as logs:
+            self._run()
+
+        self.assertFalse(Facility.objects.exists())
+        self._assert_store(facility.id, dirty_bit=True, exception="json.decoder.JSONDecodeError")
+        self.assertIn(facility.id, logs.output[0])
+
+    def test_error__single_error(self):
+        self._facility(serialized="{bad")
+        (task,) = self._transform()
+
+        with self.assertLogs(self.logger_name, "WARNING"):
+            DeserializeSink().consume([task])
+
+        self.assertEqual(len(task.errors), 1)
+
+    def test_delete__mixed_models(self):
+        """The pipeline partitions chunks by model, but each model's rows are deleted regardless"""
+        user = self._app_user()
+        facility = Facility(name="facility")
+        facility.save(update_dirty_bit_to=False)
+        self._store(facility, dirty_bit=False, _self_ref_fk="", _self_ref_order=0)
+        Store.objects.filter(id__in=[user.id, facility.id]).update(deleted=True, dirty_bit=True)
+        tasks = self._transform()
+        self.assertEqual({task.model for task in tasks}, {MyUser, Facility})
+
+        DeserializeSink().consume(tasks)
+
+        self.assertFalse(MyUser.objects.exists())
+        self.assertFalse(Facility.objects.exists())
+        self._assert_store(user.id, dirty_bit=False)
+        self._assert_store(facility.id, dirty_bit=False)
+
+    def test_summary(self):
+        self._store(MyUser(id=uuid.uuid4().hex, username="same", password="password"))
+        self._store(MyUser(id=uuid.uuid4().hex, username="same", password="password"))
+        deleted_user = self._user(deleted=True)
+        self._summary_log(deleted_user.id)
+        self._facility(serialized="{bad")
+
+        with self.assertLogs(self.logger_name, "WARNING"):
+            sink = self._run()
+
+        self.assertEqual(
+            sink.summary(),
+            {
+                DeserializeOutcome.SAVE.value: 1,
+                DeserializeOutcome.ERROR.value: 2,
+                DeserializeOutcome.DELETE.value: 1,
+                DeserializeOutcome.PROPAGATE_DELETE.value: 1,
+            },
+        )
+
+    def _count_queries(self, sink, tasks):
+        with CaptureQueriesContext(connection) as context:
+            sink.consume(tasks)
+        return len(
+            [
+                query
+                for query in context.captured_queries
+                if not query["sql"].upper().startswith(("SAVEPOINT", "RELEASE SAVEPOINT"))
+            ]
+        )
+
+    def _batched_chunk(self, deleted_user_id, size):
+        """A chunk of one deleted log and `size` logs that propagate a deletion"""
+        self._summary_log(deleted_user_id, deleted=True)
+        for _ in range(size):
+            self._summary_log(deleted_user_id)
+        tasks = self._transform()
+        self.assertEqual(len(tasks), size + 1)
+        return tasks
+
+    def test_consume__batched(self):
+        deleted_user = self._user(dirty_bit=False, deleted=True)
+        sink = DeserializeSink()
+
+        small = self._count_queries(sink, self._batched_chunk(deleted_user.id, 10))
+        large = self._count_queries(sink, self._batched_chunk(deleted_user.id, 500))
+
+        # SQLite splits the 500 `DeletedModels` inserts into batches of 499
+        self.assertEqual(large - small, 1 if connection.vendor == "sqlite" else 0)
+        self.assertEqual(DeletedModels.objects.count(), 510)
+        self.assertFalse(Store.objects.filter(dirty_bit=True).exists())
+
+
+class DeserializeSinkGuardsTestCase(DeserializeSinkFixturesMixin, TestCase):
+    """Saves whose FK target the sink failed or removed after the save was validated"""
+
+    def _error(self, store_id):
+        return Store.objects.get(id=store_id).deserialization_error
+
+    def test_failed_target__self_ref(self):
+        parent = self._app_facility("parent")
+        child = self._facility(parent=parent, order=1)
+        tasks = self._transform()
+        sink = DeserializeSink()
+        sink.failed_ids.add(parent.id)
+
+        with self.assertLogs(self.logger_name, "WARNING"):
+            sink.consume(tasks)
+
+        self.assertFalse(Facility.objects.filter(id=child.id).exists())
+        self._assert_store(child.id, dirty_bit=True, exception=MorangoDirtyParent.path())
+        self.assertIn(child.id, sink.failed_ids)
+
+    def test_failed_target__cross_model(self):
+        user = self._app_user()
+        log = self._summary_log(user.id)
+        tasks = self._transform()
+        sink = DeserializeSink()
+        sink.failed_ids.add(user.id)
+
+        with self.assertLogs(self.logger_name, "WARNING"):
+            sink.consume(tasks)
+
+        self.assertFalse(SummaryLog.objects.exists())
+        self._assert_store(
+            log.id, dirty_bit=True, exception="django.core.exceptions.ValidationError"
+        )
+        self.assertIn(user.id, self._error(log.id))
+        self.assertIn(log.id, sink.failed_ids)
+
+
+class DeserializeFromStoreTestCase(DeserializeSinkFixturesMixin, TransactionTestCase):
+    """
+    Runs the whole pipeline in its own transaction, which commits at the end of each run. FK
+    constraints are deferred, so a save that breaks one would fail the commit.
+    """
+
+    def setUp(self):
+        patcher = mock.patch.object(Facility, "clean_dereferences_parent", False)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
+    def _deserialize(self, **kwargs):
+        with self.assertLogs(self.logger_name, "INFO") as logs:
+            deserialize_from_store(self.profile, **kwargs)
+        return logs
+
+    def test_failed_parent_save__cross_model(self):
+        self._app_user(username="same")
+        user = self._store(MyUser(id=uuid.uuid4().hex, username="same", password="password"))
+        log = self._summary_log(user.id)
+
+        self._deserialize()
+
+        self._assert_store(user.id, dirty_bit=True, exception="django.db.utils.IntegrityError")
+        self._assert_store(
+            log.id, dirty_bit=True, exception="django.core.exceptions.ValidationError"
+        )
+        self.assertFalse(MyUser.objects.filter(id=user.id).exists())
+        self.assertFalse(SummaryLog.objects.exists())
+
+    def test_failed_parent_save__self_ref(self):
+        root = self._facility()
+        child = self._facility(parent=root, order=1)
+        grandchild = self._facility(parent=child, order=2)
+        save = Facility.save
+
+        def failing_save(facility, *args, **kwargs):
+            if facility.id == root.id:
+                raise IntegrityError("root failed")
+            return save(facility, *args, **kwargs)
+
+        with mock.patch.object(Facility, "save", failing_save):
+            self._deserialize()
+
+        self.assertFalse(Facility.objects.exists())
+        self._assert_store(root.id, dirty_bit=True, exception="django.db.utils.IntegrityError")
+        self._assert_store(child.id, dirty_bit=True, exception=MorangoDirtyParent.path())
+        self._assert_store(grandchild.id, dirty_bit=True, exception=MorangoDirtyParent.path())
+
+    def _cascade_fixture(self):
+        """A deleted root, its clean child, and a dirty grandchild"""
+        root = self._app_facility("root")
+        child = self._app_facility("child", parent=root)
+        Store.objects.filter(id=root.id).update(deleted=True, dirty_bit=True)
+        grandchild = self._facility(parent=child, order=2)
+        return root, child, grandchild
+
+    def _assert_cascade(self, root, grandchild):
+        self._deserialize()
+
+        self.assertFalse(Facility.objects.exists())
+        self._assert_store(root.id, dirty_bit=False)
+        self._assert_store(
+            grandchild.id, dirty_bit=True, exception="django.core.exceptions.ValidationError"
+        )
+        self.assertIn("was deleted", Store.objects.get(id=grandchild.id).deserialization_error)
+
+        # the next run fails the grandchild in validation, since the child's row is gone
+        self._deserialize()
+
+        self._assert_store(
+            grandchild.id, dirty_bit=True, exception="django.core.exceptions.ValidationError"
+        )
+        self.assertNotIn("was deleted", Store.objects.get(id=grandchild.id).deserialization_error)
+
+    def test_cascaded_target__same_chunk(self):
+        root, _, grandchild = self._cascade_fixture()
+        self._assert_cascade(root, grandchild)
+
+    @mock.patch("morango.sync.stream.deserialize.CHUNK_SIZE", 1)
+    def test_cascaded_target__later_chunk(self):
+        """The grandchild is validated before the root's chunk is written"""
+        root, _, grandchild = self._cascade_fixture()
+        self._assert_cascade(root, grandchild)
+
+    def test_self_ref_chain(self):
+        root = self._facility()
+        child = self._facility(parent=root, order=1)
+        grandchild = self._facility(parent=child, order=2)
+
+        self._deserialize()
+
+        self.assertEqual(Facility.objects.count(), 3)
+        for facility in (root, child, grandchild):
+            self._assert_store(facility.id, dirty_bit=False)
+
+    def test_self_ref_chain__dereferences_parent(self):
+        """
+        A child can't load a parent that is in the same chunk, so each run saves one level. This
+        characterizes a known limitation of the sink lag, not a contract, so a fix may change it.
+        """
+        root = self._facility()
+        child = self._facility(parent=root, order=1)
+        grandchild = self._facility(parent=child, order=2)
+
+        with mock.patch.object(Facility, "clean_dereferences_parent", True):
+            for saved in ([root], [root, child], [root, child, grandchild]):
+                self._deserialize()
+                self.assertEqual(
+                    set(Facility.objects.values_list("id", flat=True)),
+                    {facility.id for facility in saved},
+                )
+
+        self.assertFalse(Store.objects.filter(dirty_bit=True).exists())
+
+    def test_skip_errored(self):
+        user = self._user(deserialization_error="old", deserialization_exception="old.Error")
+
+        self._deserialize(skip_errored=True)
+
+        self._assert_store(user.id, dirty_bit=True, exception="old.Error")
+        self.assertFalse(MyUser.objects.exists())
+
+    def test_sync_filter(self):
+        included = self._user()
+        excluded = self._user()
+
+        self._deserialize(sync_filter=Filter(included.partition))
+
+        self.assertEqual(list(MyUser.objects.values_list("id", flat=True)), [included.id])
+        self._assert_store(excluded.id, dirty_bit=True)
+
+    def test_sync_filter__partition_order(self):
+        """
+        The source streams the partitions in the order of the sync filter, so a filter that lists
+        the user's partition first deserializes the user before a log in a later partition
+        """
+        user = self._user(partition="b:user")
+        log = self._summary_log(user.id, partition="a:user:summary")
+
+        self._deserialize(sync_filter=Filter("b:user\na:user:summary"))
+
+        self._assert_store(user.id, dirty_bit=False)
+        self._assert_store(log.id, dirty_bit=False)
+        self.assertTrue(SummaryLog.objects.filter(id=log.id).exists())
+
+    def test_summary_logged(self):
+        self._user()
+        self._facility(serialized="{bad")
+
+        logs = self._deserialize()
+
+        self.assertIn("Deserialization done", logs.output[-1])
+
+
+class DeserializeStoreModelTestCase(DeserializeSinkFixturesMixin, TestCase):
+    """Deserializes a single store record by hand, outside of a pipeline run"""
+
+    def test_valid(self):
+        store = self._user()
+
+        app_model = deserialize_store_model(store, {})
+
+        self.assertIsInstance(app_model, MyUser)
+        self.assertEqual(app_model.id, store.id)
+        self.assertFalse(MyUser.objects.exists())
+        self.assertTrue(Store.objects.get(id=store.id).dirty_bit)
+
+    def test_deleted(self):
+        user = self._app_user()
+        store = Store.objects.get(id=user.id)
+        store.deleted = True
+
+        self.assertIsNone(deserialize_store_model(store, {}))
+        self.assertFalse(MyUser.objects.exists())
+
+    def test_target_deleted(self):
+        user = self._user(dirty_bit=False, deleted=True)
+        store = self._summary_log(user.id)
+
+        self.assertIsNone(deserialize_store_model(store, {}))
+        self.assertTrue(DeletedModels.objects.filter(id=store.id).exists())
+        self.assertTrue(Store.objects.get(id=store.id).dirty_bit)
+
+    def test_invalid(self):
+        user = MyUser(id=uuid.uuid4().hex, username="x" * 256, password="password")
+        store = self._store(user)
+
+        with self.assertLogs(self.logger_name, "WARNING") as logs:
+            with self.assertRaises(ValidationError):
+                deserialize_store_model(store, {})
+
+        self.assertIn(store.id, logs.output[0])
+
+    def test_fk_cache(self):
+        """The user is validated but never saved, so the log only validates through the cache"""
+        fk_cache = {}
+        user = self._user()
+        log = self._summary_log(user.id)
+
+        deserialize_store_model(user, fk_cache)
+        app_model = deserialize_store_model(log, fk_cache)
+
+        self.assertEqual(app_model.id, log.id)

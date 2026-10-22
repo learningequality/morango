@@ -25,8 +25,9 @@ class Facility(FacilityDataSyncableModel):
     morango_model_name = "facility"
 
     # when True, clean_fields loads the parent object, which raises ObjectDoesNotExist if the
-    # parent row is not in the app table; used to test non-validation error handling
-    clean_dereferences_parent = True
+    # parent row is not in the app table; used to test non-validation error handling. Defaults to
+    # False like models that don't load related objects, and tests patch it to cover those that do
+    clean_dereferences_parent = False
 
     name = models.CharField(max_length=100)
     now_date = models.DateTimeField(default=timezone.now)

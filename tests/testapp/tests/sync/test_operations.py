@@ -30,7 +30,6 @@ from morango.sync.context import LocalSessionContext
 from morango.sync.controller import MorangoProfileController
 from morango.sync.controller import SessionController
 from morango.sync.operations import _dequeue_into_store
-from morango.sync.operations import _deserialize_from_store
 from morango.sync.operations import _queue_into_buffer_v1
 from morango.sync.operations import _queue_into_buffer_v2
 from morango.sync.operations import _update_legacy_self_ref_order
@@ -41,6 +40,7 @@ from morango.sync.operations import ProducerQueueOperation
 from morango.sync.operations import ReceiverDequeueOperation
 from morango.sync.operations import ReceiverDeserializeOperation
 from morango.sync.operations import ReceiverQueueOperation
+from morango.sync.stream.deserialize import deserialize_from_store
 from morango.sync.syncsession import TransferClient
 
 from ..helpers import create_buffer_and_store_dummy_data
@@ -1257,7 +1257,7 @@ class DeserializationTestCases(TestCase):
 
         self.serialize_all_to_store()
 
-        _deserialize_from_store(self.profile)
+        deserialize_from_store(self.profile)
 
         self.assert_deserialization()
 
@@ -1267,7 +1267,7 @@ class DeserializationTestCases(TestCase):
 
         self.serialize_all_to_store()
 
-        _deserialize_from_store(self.profile)
+        deserialize_from_store(self.profile)
 
         self.assert_deserialization(
             user_deserialized=False,
@@ -1282,7 +1282,7 @@ class DeserializationTestCases(TestCase):
 
         self.serialize_all_to_store()
 
-        _deserialize_from_store(self.profile)
+        deserialize_from_store(self.profile)
 
         self.assert_deserialization(
             user_deserialized=False,
@@ -1297,7 +1297,7 @@ class DeserializationTestCases(TestCase):
 
         self.serialize_all_to_store()
 
-        _deserialize_from_store(self.profile)
+        deserialize_from_store(self.profile)
 
         self.assert_deserialization(log1_deserialized=False)
 
@@ -1307,14 +1307,14 @@ class DeserializationTestCases(TestCase):
 
         self.serialize_all_to_store()
 
-        _deserialize_from_store(self.profile)
+        deserialize_from_store(self.profile)
 
         self.assert_deserialization(log1_deserialized=False)
 
     def test_deserialization__conditional__no_filter(self):
         self.serialize_all_to_store()
 
-        _deserialize_from_store(self.profile)
+        deserialize_from_store(self.profile)
 
         self.assert_deserialization()
         conditional_log = ConditionalLog.objects.get(pk=self.serialized_conditional["id"])
@@ -1323,7 +1323,7 @@ class DeserializationTestCases(TestCase):
     def test_deserialization__conditional__with_filter(self):
         self.serialize_all_to_store()
 
-        _deserialize_from_store(self.profile, filter=Filter(self.serialized_facility["id"]))
+        deserialize_from_store(self.profile, sync_filter=Filter(self.serialized_facility["id"]))
 
         self.assert_deserialization(
             user_deserialized=False,
@@ -1341,7 +1341,7 @@ class DeserializationTestCases(TestCase):
         )
         conditional_log_store.save()
 
-        _deserialize_from_store(self.profile, skip_erroring=True)
+        deserialize_from_store(self.profile, skip_errored=True)
 
         self.assert_deserialization(
             conditional_deserialized=False,
@@ -1353,6 +1353,6 @@ class DeserializationTestCases(TestCase):
         conditional_log_store.deserialization_error = ""
         conditional_log_store.save()
 
-        _deserialize_from_store(self.profile, skip_erroring=True)
+        deserialize_from_store(self.profile, skip_errored=True)
 
         self.assert_deserialization()
