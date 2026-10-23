@@ -97,17 +97,13 @@ def _queue_into_buffer_v1(transfersession):
         if not fsics:
             return
 
-        profile_condition = [
-            "profile = '{}'".format(transfersession.sync_session.profile)
-        ]
+        profile_condition = ["profile = '{}'".format(transfersession.sync_session.profile)]
         partition_conditions = []
         # create condition for filtering by partitions
         for prefix in filter_prefixes:
             partition_conditions += ["partition LIKE '{}%'".format(prefix)]
         if filter_prefixes:
-            partition_conditions = [
-                _join_with_logical_operator(partition_conditions, "OR")
-            ]
+            partition_conditions = [_join_with_logical_operator(partition_conditions, "OR")]
 
         chunk_size = 200
         fsics = list(fsics.items())
@@ -155,9 +151,7 @@ def _queue_into_buffer_v1(transfersession):
                    FROM {store} WHERE {condition}
                 """.format(
                     transfer_session_id=transfersession.id,
-                    transfer_session_id_type=TransferSession._meta.pk.rel_db_type(
-                        connection
-                    ),
+                    transfer_session_id_type=TransferSession._meta.pk.rel_db_type(connection),
                     condition=where_condition,
                     store=Store._meta.db_table,
                 )
@@ -221,9 +215,7 @@ def _queue_into_buffer_v2(transfersession, chunk_size=200):
         assert "super" in client_fsic
 
         # ensure that the partitions in the FSICs are under the current filter, before using them
-        for partition in itertools.chain(
-            server_fsic["sub"].keys(), client_fsic["sub"].keys()
-        ):
+        for partition in itertools.chain(server_fsic["sub"].keys(), client_fsic["sub"].keys()):
             if partition not in sync_filter:
                 raise MorangoInvalidFSICPartition(
                     "Partition '{}' is not in filter".format(partition)
@@ -241,9 +233,7 @@ def _queue_into_buffer_v2(transfersession, chunk_size=200):
         if not fsics:
             return
 
-        profile_condition = [
-            "profile = '{}'".format(transfersession.sync_session.profile)
-        ]
+        profile_condition = ["profile = '{}'".format(transfersession.sync_session.profile)]
 
         fsics_len = sum(len(fsics[part]) for part in fsics) + len(fsics)
         # subtract one because when partitions overflow chunks they add up to an extra item per chunk
@@ -265,7 +255,6 @@ def _queue_into_buffer_v2(transfersession, chunk_size=200):
         select_buffers = []
 
         for fsic_chunk in chunked_fsics:
-
             # create condition for filtering by partitions
             partition_conditions = []
             for part, insts in fsic_chunk.items():
@@ -286,9 +275,7 @@ def _queue_into_buffer_v2(transfersession, chunk_size=200):
                     + ")"
                 )
 
-            partition_conditions = [
-                _join_with_logical_operator(partition_conditions, "OR")
-            ]
+            partition_conditions = [_join_with_logical_operator(partition_conditions, "OR")]
 
             # combine conditions and filter by profile
             where_condition = _join_with_logical_operator(
@@ -304,9 +291,7 @@ def _queue_into_buffer_v2(transfersession, chunk_size=200):
                     FROM {store} WHERE {condition}
                 """.format(
                     transfer_session_id=transfersession.id,
-                    transfer_session_id_type=TransferSession._meta.pk.rel_db_type(
-                        connection
-                    ),
+                    transfer_session_id_type=TransferSession._meta.pk.rel_db_type(connection),
                     condition=where_condition,
                     store=Store._meta.db_table,
                 )
@@ -351,9 +336,7 @@ def _update_legacy_self_ref_order_for_model(queryset):
     # root nodes set the _self_ref_order to 0
     queryset.filter(_self_ref_fk="").exclude(_self_ref_order=0).update(_self_ref_order=0)
     # reset the _self_ref_order to None for all records that have a parent
-    queryset.exclude(_self_ref_fk="").exclude(_self_ref_order=None).update(
-        _self_ref_order=None
-    )
+    queryset.exclude(_self_ref_fk="").exclude(_self_ref_order=None).update(_self_ref_order=None)
 
     parent = Store.objects.filter(
         id=Cast(OuterRef("_self_ref_fk"), UUIDField()),
@@ -394,13 +377,9 @@ def _dequeue_into_store(transfer_session, fsic, v2_format=False, self_ref_order=
             DBBackend._dequeuing_delete_rmcb_records(cursor, transfer_session.id)
             DBBackend._dequeuing_delete_buffered_records(cursor, transfer_session.id)
             current_id = InstanceIDModel.get_current_instance_and_increment_counter()
-            DBBackend._dequeuing_merge_conflict_buffer(
-                cursor, current_id, transfer_session.id
-            )
+            DBBackend._dequeuing_merge_conflict_buffer(cursor, current_id, transfer_session.id)
             DBBackend._dequeuing_merge_conflict_rmcb(cursor, transfer_session.id)
-            DBBackend._dequeuing_update_rmcs_last_saved_by(
-                cursor, current_id, transfer_session.id
-            )
+            DBBackend._dequeuing_update_rmcs_last_saved_by(cursor, current_id, transfer_session.id)
             DBBackend._dequeuing_delete_mc_rmcb(cursor, transfer_session.id)
             DBBackend._dequeuing_delete_mc_buffer(cursor, transfer_session.id)
             DBBackend._dequeuing_insert_remaining_buffer(cursor, transfer_session.id)
@@ -438,9 +417,7 @@ class BaseOperation(object):
         result = False
         try:
             # verify context object matches what the operation expects
-            if self.expects_context is None or isinstance(
-                context, self.expects_context
-            ):
+            if self.expects_context is None or isinstance(context, self.expects_context):
                 logger.debug("{} = ?".format(debug_msg))
                 result = self.handle(context)
 
@@ -491,9 +468,7 @@ class InitializeOperation(LocalOperation):
 
         # attributes that we'll use to identify existing sessions. we really only want there to
         # be one of these at a time
-        data = dict(
-            push=context.is_push, sync_session_id=context.sync_session.id, active=True
-        )
+        data = dict(push=context.is_push, sync_session_id=context.sync_session.id, active=True)
 
         # get the most recent transfer session
         transfer_sessions = TransferSession.objects.order_by("-last_activity_timestamp")
@@ -515,9 +490,7 @@ class InitializeOperation(LocalOperation):
                 data.update(
                     id=context.request.data.get("id"),
                     records_total=(
-                        context.request.data.get("records_total")
-                        if context.is_push
-                        else None
+                        context.request.data.get("records_total") if context.is_push else None
                     ),
                     client_fsic=context.request.data.get("client_fsic") or "{}",
                 )
@@ -552,9 +525,7 @@ class SerializeOperation(LocalOperation):
 
         if context.is_producer and SETTINGS.MORANGO_SERIALIZE_BEFORE_QUEUING:
             try:
-                serialize_into_store(
-                    context.sync_session.profile, sync_filter=context.filter
-                )
+                serialize_into_store(context.sync_session.profile, sync_filter=context.filter)
             except OperationalError as e:
                 # if we run into a transaction isolation error, we return a pending status to force
                 # retrying through the controller flow
@@ -571,9 +542,7 @@ class SerializeOperation(LocalOperation):
         )
         if context.is_server:
             context.transfer_session.server_fsic = fsic
-            context.transfer_session.client_fsic = context.request.data.get(
-                "client_fsic", "{}"
-            )
+            context.transfer_session.client_fsic = context.request.data.get("client_fsic", "{}")
             update_fields = ["server_fsic", "client_fsic"]
         else:
             context.transfer_session.client_fsic = fsic
@@ -601,9 +570,7 @@ class ProducerQueueOperation(LocalOperation):
             _queue_into_buffer_v1(context.transfer_session)
 
         # update the records_total for client and server transfer session
-        records_total = Buffer.objects.filter(
-            transfer_session=context.transfer_session
-        ).count()
+        records_total = Buffer.objects.filter(transfer_session=context.transfer_session).count()
 
         logger.debug("[morango] Queued {} records".format(records_total))
         context.transfer_session.records_total = records_total
@@ -700,10 +667,7 @@ class PushReceiverOperation(LocalOperation):
 
             validate_and_create_buffer_data(data, context.transfer_session)
 
-        if (
-            context.transfer_session.records_transferred
-            == context.transfer_session.records_total
-        ):
+        if context.transfer_session.records_transferred == context.transfer_session.records_total:
             return transfer_statuses.COMPLETED
         return transfer_statuses.PENDING
 
@@ -785,12 +749,8 @@ class ReceiverDeserializeOperation(LocalOperation):
         if SETTINGS.MORANGO_DESERIALIZE_AFTER_DEQUEUING and records_transferred > 0:
             try:
                 # we first serialize to avoid deserialization merge conflicts
-                serialize_into_store(
-                    context.sync_session.profile, sync_filter=context.filter
-                )
-                deserialize_from_store(
-                    context.sync_session.profile, sync_filter=context.filter
-                )
+                serialize_into_store(context.sync_session.profile, sync_filter=context.filter)
+                deserialize_from_store(context.sync_session.profile, sync_filter=context.filter)
             except OperationalError as e:
                 # if we run into a transaction isolation error, we return a pending status to force
                 # retrying through the controller flow
@@ -855,9 +815,7 @@ class NetworkOperation(BaseOperation):
         :param data: Data to update remote transfer session wiht
         :return: A response dict
         """
-        return context.connection._update_transfer_session(
-            data, context.transfer_session
-        ).json()
+        return context.connection._update_transfer_session(data, context.transfer_session).json()
 
     def close_transfer_session(self, context):
         """
@@ -1118,9 +1076,7 @@ class NetworkPushTransferOperation(NetworkOperation):
             transfer_session=context.transfer_session
         ).order_by("pk")
 
-        data = BufferSerializer(
-            buffered_records[offset : offset + chunk_size], many=True
-        ).data
+        data = BufferSerializer(buffered_records[offset : offset + chunk_size], many=True).data
 
         # push buffers chunk to server
         self.put_buffers(context, data)
@@ -1130,14 +1086,13 @@ class NetworkPushTransferOperation(NetworkOperation):
         )
         context.transfer_session.bytes_sent = context.connection.bytes_sent
         context.transfer_session.bytes_received = context.connection.bytes_received
-        context.transfer_session.save(update_fields=["records_transferred", "bytes_sent", "bytes_received"])
+        context.transfer_session.save(
+            update_fields=["records_transferred", "bytes_sent", "bytes_received"]
+        )
 
         # if we've transferred all records, return a completed status
         op_status = transfer_statuses.PENDING
-        if (
-            context.transfer_session.records_transferred
-            >= context.transfer_session.records_total
-        ):
+        if context.transfer_session.records_transferred >= context.transfer_session.records_total:
             op_status = transfer_statuses.COMPLETED
 
         return op_status
@@ -1157,9 +1112,7 @@ class NetworkPullTransferOperation(NetworkOperation):
             # grab buffers, just one chunk
             data = self.get_buffers(context)
 
-            validate_and_create_buffer_data(
-                data, transfer_session, connection=context.connection
-            )
+            validate_and_create_buffer_data(data, transfer_session, connection=context.connection)
 
         # if we've transferred all records, return a completed status
         op_status = transfer_statuses.PENDING
@@ -1222,9 +1175,7 @@ class NetworkDeserializeOperation(NetworkOperation):
         self._assert(context.transfer_session is not None)
         self._assert(ASYNC_OPERATIONS in context.capabilities)
 
-        remote_status, _ = self.remote_proceed_to(
-            context, transfer_stages.DESERIALIZING
-        )
+        remote_status, _ = self.remote_proceed_to(context, transfer_stages.DESERIALIZING)
         return remote_status
 
 
