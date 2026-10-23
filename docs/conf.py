@@ -64,7 +64,7 @@ def process_docstring(app, what, name, obj, options, lines):
         for field in fields:
             # Skip ManyToOneRel and ManyToManyRel fields
             # which have no 'verbose_name' or 'help_text'
-            if not hasattr(field, 'verbose_name'):
+            if not hasattr(field, "verbose_name"):
                 continue
 
             # Decode and strip any html out of the field's help text
@@ -77,24 +77,20 @@ def process_docstring(app, what, name, obj, options, lines):
             if help_text:
                 # Add the model field to the end of the docstring as a param
                 # using the help text as the description
-                lines.append(u':param %s: %s' % (field.attname, help_text))
+                lines.append(":param %s: %s" % (field.attname, help_text))
             else:
                 # Add the model field to the end of the docstring as a param
                 # using the verbose name as the description
-                lines.append(u':param %s: %s' % (field.attname, verbose_name))
+                lines.append(":param %s: %s" % (field.attname, verbose_name))
 
             # Add the field's type to the docstring
             if isinstance(field, models.ForeignKey):
                 to = field.remote_field.model
                 lines.append(
-                    u':type %s: %s to :class:`~%s`'
-                    % (field.attname, type(field).__name__, to)
+                    ":type %s: %s to :class:`~%s`" % (field.attname, type(field).__name__, to)
                 )
             else:
-                lines.append(
-                    u':type %s: %s'
-                    % (field.attname, type(field).__name__)
-                )
+                lines.append(":type %s: %s" % (field.attname, type(field).__name__))
 
     return lines
 
@@ -106,18 +102,18 @@ def process_docstring(app, what, name, obj, options, lines):
 extensions = ["sphinx.ext.autodoc", "sphinx.ext.viewcode"]
 
 # Add any paths that contain templates here, relative to this directory.
-templates_path = ['_templates']
+templates_path = ["_templates"]
 
 # The suffix(es) of source filenames.
 # You can specify multiple suffix as a list of string:
 source_suffix = [".rst"]
 
 # The master toctree document.
-master_doc = 'index'
+master_doc = "index"
 
 # General information about the project.
-project = u"Morango developer documentation"
-copyright = u"2020 Learning Equality"
+project = "Morango developer documentation"
+copyright = "2020 Learning Equality"
 
 # The version info for the project you're documenting, acts as replacement
 # for |version| and |release|, also used in various other places throughout
@@ -140,7 +136,7 @@ copyright = u"2020 Learning Equality"
 
 # List of patterns, relative to source directory, that match files and
 # directories to ignore when looking for source files.
-exclude_patterns = ['_build']
+exclude_patterns = ["_build"]
 
 # The reST default role (used for this markup: `text`) to use for all
 # documents.
@@ -158,7 +154,7 @@ exclude_patterns = ['_build']
 # show_authors = False
 
 # The name of the Pygments (syntax highlighting) style to use.
-pygments_style = 'sphinx'
+pygments_style = "sphinx"
 
 # A list of ignored prefixes for module index sorting.
 # modindex_common_prefix = []
@@ -257,7 +253,7 @@ def setup(app):
 # html_file_suffix = None
 
 # Output file base name for HTML help builder.
-htmlhelp_basename = 'morangodoc'
+htmlhelp_basename = "morangodoc"
 
 
 # -- Options for LaTeX output ------------------------------------------
@@ -265,10 +261,8 @@ htmlhelp_basename = 'morangodoc'
 latex_elements = {
     # The paper size ('letterpaper' or 'a4paper').
     # 'papersize': 'letterpaper',
-
     # The font size ('10pt', '11pt' or '12pt').
     # 'pointsize': '10pt',
-
     # Additional stuff for the LaTeX preamble.
     # 'preamble': '',
 }
@@ -277,9 +271,7 @@ latex_elements = {
 # (source start file, target name, title, author, documentclass
 # [howto/manual]).
 latex_documents = [
-    ('index', 'morango.tex',
-     u'morango Documentation',
-     u'Learning Equality', 'manual'),
+    ("index", "morango.tex", "morango Documentation", "Learning Equality", "manual"),
 ]
 
 # The name of an image file (relative to this directory) to place at
@@ -307,11 +299,7 @@ latex_documents = [
 
 # One entry per manual page. List of tuples
 # (source start file, name, description, authors, manual section).
-man_pages = [
-    ('index', 'morango',
-     u'morango Documentation',
-     [u'Learning Equality'], 1)
-]
+man_pages = [("index", "morango", "morango Documentation", ["Learning Equality"], 1)]
 
 # If true, show URL addresses after external links.
 # man_show_urls = False
@@ -346,4 +334,4 @@ texinfo_documents = [
 # If true, do not generate a @detailmenu in the "Top" node's menu.
 # texinfo_no_detailmenu = False
 
-suppress_warnings = ['image.nonlocal_uri']
+suppress_warnings = ["image.nonlocal_uri"]
