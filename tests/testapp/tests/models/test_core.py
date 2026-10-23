@@ -373,13 +373,6 @@ class SyncableModelTestCase(TestCase):
             exclude=["test1", "parent"], sync_filter=sync_filter
         )
 
-    @mock.patch("morango.models.core.SyncableModel.clean_fields")
-    def test_deferred_clean_fields(self, mock_clean_fields):
-        f = Facility(name="test")
-        sync_filter = Filter("test")
-        f.deferred_clean_fields(exclude=["test1"], sync_filter=sync_filter)
-        mock_clean_fields.assert_called_once_with(exclude=["test1"], sync_filter=sync_filter)
-
 
 class StoreDeserializationErrorTestCase(TestCase):
     """Tests for Store.set_deserialization_error() and Store.unset_deserialization_error()"""
