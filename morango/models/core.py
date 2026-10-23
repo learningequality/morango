@@ -2,8 +2,6 @@ import functools
 import json
 import logging
 import uuid
-from collections import defaultdict
-from collections import namedtuple
 from functools import reduce
 
 from django.core import exceptions
@@ -745,9 +743,6 @@ class RecordMaxCounterBuffer(AbstractCounter):
     model_uuid = UUIDField(db_index=True)
 
 
-ForeignKeyReference = namedtuple("ForeignKeyReference", ["from_field", "from_pk", "to_pk"])
-
-
 class SyncableModel(UUIDModelMixin):
     """
     ``SyncableModel`` is the base model class for syncing. Other models inherit from this class if they want to make
@@ -872,39 +867,6 @@ class SyncableModel(UUIDModelMixin):
             id=self.id,
         )
         fk_lookup_cache[self_key] = 1
-
-    def deferred_clean_fields(self, exclude=None, sync_filter=None):
-        """
-        Calls `.clean_fields()` but excludes all foreign key fields and instead returns them as a
-        dictionary for deferred batch processing
-
-        :param exclude: A list of field names to exclude from validation
-        :type exclude: list[str]
-        :param sync_filter: The current sync's filter, if any
-        :type sync_filter: Filter|None
-        :return: A dictionary containing lists of `ForeignKeyReference`s keyed by the name of the
-            model being referenced by the FK
-        """
-        excluded_fields = exclude or []
-        deferred_fks = defaultdict(list)
-        for field in self._meta.fields:
-            if not isinstance(field, models.ForeignKey):
-                continue
-            # by not excluding the field if it's null, the default validation logic will apply
-            # and should raise a ValidationError if the FK field is not nullable
-            if getattr(self, field.attname) is None:
-                continue
-            excluded_fields.append(field.name)
-            deferred_fks[field.related_model._meta.verbose_name].append(
-                ForeignKeyReference(
-                    from_field=field.attname,
-                    from_pk=self.pk,
-                    to_pk=getattr(self, field.attname),
-                )
-            )
-
-        self.clean_fields(exclude=excluded_fields, sync_filter=sync_filter)
-        return deferred_fks
 
     def serialize(self):
         """All concrete fields of the ``SyncableModel`` subclass, except for those specifically blacklisted, are returned in a dict."""
