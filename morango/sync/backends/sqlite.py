@@ -1,10 +1,11 @@
-from .base import BaseSQLWrapper
-from .utils import calculate_max_sqlite_variables
-from .utils import get_pk_field
 from morango.models.core import Buffer
 from morango.models.core import RecordMaxCounter
 from morango.models.core import RecordMaxCounterBuffer
 from morango.models.core import Store
+
+from .base import BaseSQLWrapper
+from .utils import calculate_max_sqlite_variables
+from .utils import get_pk_field
 
 
 class SQLWrapper(BaseSQLWrapper):
@@ -51,9 +52,7 @@ class SQLWrapper(BaseSQLWrapper):
             for x in range(0, len(db_values), num_of_values_able_to_insert)
         ]
         for value_chunk in value_chunks:
-            super(SQLWrapper, self)._bulk_insert(
-                cursor, table_name, fields, value_chunk
-            )
+            super(SQLWrapper, self)._bulk_insert(cursor, table_name, fields, value_chunk)
 
     def _bulk_update(self, cursor, table_name, fields, db_values):
         """
@@ -64,9 +63,7 @@ class SQLWrapper(BaseSQLWrapper):
         # calculate and create equal sized chunks of data to update incrementally
         # for every field we're updating, we'll require 3 parameters
         num_update_fields = len(fields) - 1
-        num_of_rows_able_to_update = (
-            calculate_max_sqlite_variables() // num_update_fields // 3
-        )
+        num_of_rows_able_to_update = calculate_max_sqlite_variables() // num_update_fields // 3
         num_of_values_able_to_update = num_of_rows_able_to_update * len(fields)
         value_chunks = [
             db_values[x : x + num_of_values_able_to_update]
@@ -100,9 +97,7 @@ class SQLWrapper(BaseSQLWrapper):
                 table_name=table_name,
                 set_sql=set_sql[:-1],
                 pk_field=pk.column,
-                placeholder_str="({})".format(
-                    ",".join("%s" for _ in range(len(pk_params)))
-                ),
+                placeholder_str="({})".format(",".join("%s" for _ in range(len(pk_params)))),
             )
             # use DB-APIs parameter substitution (2nd parameter expects a sequence)
             cursor.execute(update, params)
@@ -196,16 +191,13 @@ class SQLWrapper(BaseSQLWrapper):
             buffer=Buffer._meta.db_table,
             rmcb=RecordMaxCounterBuffer._meta.db_table,
             store=Store._meta.db_table,
-            rmc=RecordMaxCounter._meta.db_table,
             transfer_session_id=transfersession_id,
             current_instance_id=current_id.id,
             current_instance_counter=current_id.counter,
         )
         cursor.execute(merge_conflict_store)
 
-    def _dequeuing_update_rmcs_last_saved_by(
-        self, cursor, current_id, transfersession_id
-    ):
+    def _dequeuing_update_rmcs_last_saved_by(self, cursor, current_id, transfersession_id):
         # update or create rmc for merge conflicts with local instance id
         merge_conflict_store = """REPLACE INTO {rmc} (instance_id, counter, store_model_id)
                                 SELECT '{current_instance_id}', {current_instance_counter}, store.id

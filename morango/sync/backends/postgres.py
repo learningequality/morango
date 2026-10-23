@@ -2,8 +2,6 @@ import binascii
 import logging
 from contextlib import contextmanager
 
-from .base import BaseSQLWrapper
-from .utils import get_pk_field
 from morango.errors import MorangoDatabaseError
 from morango.models.core import Buffer
 from morango.models.core import RecordMaxCounter
@@ -11,6 +9,8 @@ from morango.models.core import RecordMaxCounterBuffer
 from morango.models.core import Store
 from morango.utils import SETTINGS
 
+from .base import BaseSQLWrapper
+from .utils import get_pk_field
 
 # advisory lock integers for locking partitions
 LOCK_ALL_PARTITIONS = 1
@@ -23,9 +23,7 @@ logger = logging.getLogger(__name__)
 
 class SQLWrapper(BaseSQLWrapper):
     backend = "postgresql"
-    create_temporary_table_template = (
-        "CREATE TEMP TABLE {name} ({fields}) ON COMMIT DROP"
-    )
+    create_temporary_table_template = "CREATE TEMP TABLE {name} ({fields}) ON COMMIT DROP"
 
     def _is_transaction_isolation_error(self, error):
         """
@@ -36,7 +34,7 @@ class SQLWrapper(BaseSQLWrapper):
         from psycopg2.extensions import TransactionRollbackError
 
         # Django can wrap errors, adding it to the `__cause__` attribute
-        for e in (error, getattr(error, '__cause__', None)):
+        for e in (error, getattr(error, "__cause__", None)):
             if isinstance(e, TransactionRollbackError):
                 return True
         return False
@@ -55,11 +53,15 @@ class SQLWrapper(BaseSQLWrapper):
             # before any reading/writing operations have taken place, which includes creating
             # savepoints
             if self.connection.in_atomic_block:
-                raise MorangoDatabaseError("Unable to set transaction isolation during a transaction")
+                raise MorangoDatabaseError(
+                    "Unable to set transaction isolation during a transaction"
+                )
 
             for savepoint_id in self.connection.savepoint_ids:
                 if savepoint_id is not None:
-                    raise MorangoDatabaseError("Unable to set transaction isolation when savepoints have been created")
+                    raise MorangoDatabaseError(
+                        "Unable to set transaction isolation when savepoints have been created"
+                    )
 
             # ensure the postgres database wrapper loads the isolation level, which requires it to
             # connection to the database.
@@ -70,7 +72,9 @@ class SQLWrapper(BaseSQLWrapper):
 
             try:
                 self.connection.isolation_level = ISOLATION_LEVEL_REPEATABLE_READ
-                self.connection.connection.set_session(isolation_level=ISOLATION_LEVEL_REPEATABLE_READ, autocommit=False)
+                self.connection.connection.set_session(
+                    isolation_level=ISOLATION_LEVEL_REPEATABLE_READ, autocommit=False
+                )
                 yield
             finally:
                 self.connection.isolation_level = existing_isolation_level
@@ -99,9 +103,7 @@ class SQLWrapper(BaseSQLWrapper):
     def _prepare_casted_fields(self, fields):
         return ", ".join(
             map(
-                lambda f: "{f}::{type}".format(
-                    f=f.column, type=f.rel_db_type(self.connection)
-                ),
+                lambda f: "{f}::{type}".format(f=f.column, type=f.rel_db_type(self.connection)),
                 fields,
             )
         )
@@ -255,7 +257,6 @@ class SQLWrapper(BaseSQLWrapper):
             buffer=Buffer._meta.db_table,
             rmcb=RecordMaxCounterBuffer._meta.db_table,
             store=Store._meta.db_table,
-            rmc=RecordMaxCounter._meta.db_table,
             transfer_session_id=transfersession_id,
             current_instance_id=current_id.id,
             current_instance_counter=current_id.counter,
@@ -263,9 +264,7 @@ class SQLWrapper(BaseSQLWrapper):
 
         cursor.execute(merge_conflict_store)
 
-    def _dequeuing_update_rmcs_last_saved_by(
-        self, cursor, current_id, transfersession_id
-    ):
+    def _dequeuing_update_rmcs_last_saved_by(self, cursor, current_id, transfersession_id):
         # update or create rmc for merge conflicts with local instance id
         merge_conflict_store = """
                 WITH new_values as
@@ -470,7 +469,7 @@ class SQLWrapper(BaseSQLWrapper):
             xact_="" if session else "xact_",
             lock="unlock" if unlock else "lock",
             _shared="_shared" if shared else "",
-            keys=", ".join(["%s"] * len(keys))
+            keys=", ".join(["%s"] * len(keys)),
         )
 
         with self.connection.cursor() as c:

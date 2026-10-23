@@ -74,9 +74,6 @@ clean-test: ## remove test and coverage artifacts
 	rm -f .coverage
 	rm -fr htmlcov/
 
-lint:
-	pre-commit run --all-files
-
 migrations:
 	python tests/testapp/manage.py makemigrations
 
