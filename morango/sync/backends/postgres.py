@@ -255,7 +255,6 @@ class SQLWrapper(BaseSQLWrapper):
             buffer=Buffer._meta.db_table,
             rmcb=RecordMaxCounterBuffer._meta.db_table,
             store=Store._meta.db_table,
-            rmc=RecordMaxCounter._meta.db_table,
             transfer_session_id=transfersession_id,
             current_instance_id=current_id.id,
             current_instance_counter=current_id.counter,
