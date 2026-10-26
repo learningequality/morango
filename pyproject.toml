@@ -102,14 +102,6 @@ git_describe_command = "git describe --dirty --tags --long --match 'v*' --first-
 
 [tool.ruff]
 line-length = 100
-exclude = [
-    "morango/*/migrations/*",
-    "docs",
-    "morango/sync/operations.py",
-    "morango/sync/backends/postgres.py",
-    "morango/sync/backends/sqlite.py",
-    "tests/testapp/tests/test_crypto.py",
-]
 
 [tool.ruff.lint]
 select = [

@@ -6,3 +6,6 @@
 
 # Import reformatting
 cff1e87a0d742be463d820382f467115fb18c8a2
+
+# Reformat files previously excluded from ruff
+ca41d10a8aa8bbd5f6715896e5878e4f0789af93
