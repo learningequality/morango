@@ -11,6 +11,9 @@ List of the most important changes for each release.
 - Children of a dirty parent that is left out of the deserialization run are now deserialized against the parent's existing app row
 - For models whose `clean_fields` loads related objects, a dirty self-referential chain is now deserialized one level per run
 - Logs deserialization warnings under `morango.sync.stream.deserialize` instead of `morango.sync.operations`
+- Removes `SyncableModel.deferred_clean_fields` and `morango.models.core.ForeignKeyReference`
+- Removes `morango.sync.backends.utils.TemporaryTable` and `morango.sync.backends.utils.get_pk_field`
+- Removes the unused bulk write helpers `_bulk_full_record_upsert`, `_bulk_update` and `_bulk_insert`, and the temporary table helper `_create_temporary_table`, from the sync backends
 
 ## 0.8.15
 - Improves buffer serialization performance by performing bulk counter lookup
