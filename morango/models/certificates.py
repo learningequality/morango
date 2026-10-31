@@ -483,12 +483,24 @@ class Filter(object):
 
 
 class Scope(object):
+    """
+    The read and write filters of a scope definition, with its params applied.
+
+    The read filter lists the partitions of the read template, then those of the read-write
+    template, and the write filter likewise lists the write template's partitions first. Each
+    template keeps its own order. Deserialization processes partitions in filter order, so a
+    record's FK targets must be in the same or an earlier partition. Read-write partitions usually
+    hold a device's own records, which reference the shared records in the other partitions. A
+    read-only or write-only record that references a read-write record would fail to deserialize.
+    """
+
     def __init__(self, definition, params):
-        # turn the scope definition filter templates into Filter objects
+        # turn the scope definition filter templates into Filter objects, with the read-write
+        # partitions last, since their records usually reference records in the others
         rw_filter = Filter.from_template(definition.read_write_filter_template, params)
-        self.read_filter = rw_filter + Filter.from_template(definition.read_filter_template, params)
-        self.write_filter = rw_filter + Filter.from_template(
-            definition.write_filter_template, params
+        self.read_filter = Filter.from_template(definition.read_filter_template, params) + rw_filter
+        self.write_filter = (
+            Filter.from_template(definition.write_filter_template, params) + rw_filter
         )
 
     def is_subset_of(self, other):

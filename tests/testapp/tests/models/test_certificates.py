@@ -11,6 +11,7 @@ from morango.errors import CertificateSignatureInvalid
 from morango.models.certificates import Certificate
 from morango.models.certificates import Filter
 from morango.models.certificates import Key
+from morango.models.certificates import Scope
 from morango.models.certificates import ScopeDefinition
 
 
@@ -271,3 +272,49 @@ class FilterTestCase(SimpleTestCase):
     def test_from_template__with_json_params(self):
         f = Filter.from_template("test:${param}", '{"param": "value"}')
         self.assertEqual(f._filter_tuple, ("test:value",))
+
+
+class ScopeTestCase(SimpleTestCase):
+    params = {"user_id": "U"}
+
+    def _scope(self, read="", write="", read_write=""):
+        definition = ScopeDefinition(
+            read_filter_template=read,
+            write_filter_template=write,
+            read_write_filter_template=read_write,
+        )
+        return Scope(definition, self.params)
+
+    def test_read_filter__read_write_last(self):
+        scope = self._scope(
+            read="a:allusers-ro\na:user-ro:${user_id}",
+            read_write="a:user-rw:${user_id}\na:rw2",
+        )
+        self.assertEqual(
+            tuple(scope.read_filter),
+            ("a:allusers-ro", "a:user-ro:U", "a:user-rw:U", "a:rw2"),
+        )
+
+    def test_write_filter__read_write_last(self):
+        scope = self._scope(
+            write="a:user-wo:${user_id}\na:other-wo",
+            read_write="a:user-rw:${user_id}\na:rw2",
+        )
+        self.assertEqual(
+            tuple(scope.write_filter),
+            ("a:user-wo:U", "a:other-wo", "a:user-rw:U", "a:rw2"),
+        )
+
+    def test_filters__duplicate_partition(self):
+        scope = self._scope(
+            read="a:shared\na:user-ro:${user_id}",
+            read_write="a:user-rw:${user_id}\na:shared",
+        )
+        partitions = tuple(scope.read_filter)
+        self.assertEqual(len(partitions), len(set(partitions)))
+        self.assertEqual(set(partitions), {"a:shared", "a:user-ro:U", "a:user-rw:U"})
+
+    def test_filters__empty_read_write_template(self):
+        scope = self._scope(read="a:ro\nb:ro", write="a:wo")
+        self.assertEqual(tuple(scope.read_filter), ("a:ro", "b:ro"))
+        self.assertEqual(tuple(scope.write_filter), ("a:wo",))
