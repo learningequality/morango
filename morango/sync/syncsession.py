@@ -69,15 +69,25 @@ def _get_server_ip(hostname):
 
 
 def _get_client_ip_for_server(server_host, server_port):
-    s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    default_ip = "127.0.0.1"
+
+    # strict apparmor rules or sandboxing could prevent this
+    try:
+        s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    except PermissionError:
+        logger.warning(
+            f"Could not create socket to determine external IP address to reach {server_host}"
+        )
+        return default_ip
+
     try:
         s.connect((server_host, server_port))
-        IP = s.getsockname()[0]
-    except:  # noqa: E722
-        IP = "127.0.0.1"
+        return s.getsockname()[0]
+    except OSError:
+        logger.warning(f"Could not determine external IP address to reach {server_host}")
+        return default_ip
     finally:
         s.close()
-    return IP
 
 
 def ignore_404(target):
