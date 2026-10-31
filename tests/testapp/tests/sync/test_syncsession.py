@@ -2,7 +2,6 @@ import json
 import uuid
 
 import mock
-from django.test.testcases import LiveServerTestCase
 from django.test.utils import override_settings
 from requests.exceptions import ChunkedEncodingError
 from requests.exceptions import HTTPError
@@ -35,6 +34,7 @@ from morango.sync.syncsession import TransferClient
 
 from ..helpers import BaseClientTestCase
 from ..helpers import BaseTransferClientTestCase
+from ..helpers import FreePortLiveServerTestCase
 
 
 def mock_patch_decorator(func):
@@ -52,7 +52,7 @@ def mock_patch_decorator(func):
     return wrapper
 
 
-class NetworkSyncConnectionTestCase(LiveServerTestCase):
+class NetworkSyncConnectionTestCase(FreePortLiveServerTestCase):
     def setUp(self):
         super(NetworkSyncConnectionTestCase, self).setUp()
         self.profile = "facilitydata"
