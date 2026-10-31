@@ -483,12 +483,15 @@ class Filter(object):
 
 
 class Scope(object):
+    """The read and write filters of a scope definition, with its params applied"""
+
     def __init__(self, definition, params):
-        # turn the scope definition filter templates into Filter objects
+        # turn the scope definition filter templates into Filter objects, with the read-write
+        # partitions last, since their records usually reference records in the others
         rw_filter = Filter.from_template(definition.read_write_filter_template, params)
-        self.read_filter = rw_filter + Filter.from_template(definition.read_filter_template, params)
-        self.write_filter = rw_filter + Filter.from_template(
-            definition.write_filter_template, params
+        self.read_filter = Filter.from_template(definition.read_filter_template, params) + rw_filter
+        self.write_filter = (
+            Filter.from_template(definition.write_filter_template, params) + rw_filter
         )
 
     def is_subset_of(self, other):
