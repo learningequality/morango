@@ -71,6 +71,8 @@ A **filter** is a set of `partition prefixes <#partitions>`__ represented as an 
 
 When designing scopes – i.e. composing scopes from filters and partitions – care must be taken to ensure that foreign keys in synced models refer to other models that were also synced in the same scope. Otherwise, an alternative would be to ensure that the application can gracefully handle missing records when necessary because there would be no guarantee of coherence.
 
+The order of the partitions also matters. A scope's read filter lists the partitions of its read template, then those of its read-write template, and its write filter lists the partitions of its write template, then those of its read-write template. Deserialization processes the partitions in this order, so a record's foreign keys must refer to records in the same or an earlier partition. Within each template, list the partitions of shared records before the partitions of the records that refer to them. Read-write partitions usually hold a device's own records, such as a user's logs, which refer to shared records in the other partitions. Records in read-only or write-only partitions must not refer to records in read-write partitions. For example, the ``single-user`` scope below keeps the user in a read-only partition, and the user's logs in the read-write partition.
+
 As of this writing, there are currently two scope definitions defined in Kolibri for the ``facilitydata`` profile:
 
 - The ``full-facility`` scope provides full read and write access to all data related to a facility. This includes the facility model itself plus associated classes, lessons, users, groups, content interaction logs, and everything else related to running a typical Kolibri classroom server.
