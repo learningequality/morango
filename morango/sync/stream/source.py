@@ -55,8 +55,9 @@ class MorangoSource(Source[T], abc.ABC):
 
         This method outputs prefixes in the order of the sync filter. Records are streamed one
         prefix at a time, so the filter must list the partitions of FK targets before the
-        partitions of the records that reference them. If no sync filter is provided, it yields
-        `None` to indicate a query without filtering by partition.
+        partitions of the records that reference them. `Scope` filters follow this by listing the
+        read-write partitions last (see `docs/architecture/index.rst`). If no sync filter is
+        provided, it yields `None` to indicate a query without filtering by partition.
 
         :return: A generator yielding partition prefixes or `None` if no filtering is applied.
         """
