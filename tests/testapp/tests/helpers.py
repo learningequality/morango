@@ -3,6 +3,7 @@ Helper functions for use across syncing related functionality.
 """
 
 import json
+import socket
 import uuid
 
 import factory
@@ -33,6 +34,35 @@ from morango.sync.syncsession import SyncSessionClient
 from morango.sync.syncsession import TransferClient
 
 from .compat import EnvironmentVarGuard
+
+
+def get_free_tcp_port():
+    # sandboxing can cause 0 to fail (which is to try for any open port), so fallback to a hardcoded
+    # list afterward
+    ports = [0, 3000, 8000, 8001, 8080, 8081, 8888, 10001, 10002, 10003]
+    for p in ports:
+        try:
+            tcp = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            tcp.bind(("127.0.0.1", p))
+            _, port = tcp.getsockname()
+            tcp.close()
+            return port
+        except OSError:
+            pass
+
+    raise RuntimeError("Could not find open port")
+
+
+class FreePortLiveServerTestCase(LiveServerTestCase):
+    """
+    LiveServerTestCase defaults to port 0, which sandboxing can deny, so pick an explicit port
+    for each test class instead
+    """
+
+    @classmethod
+    def setUpClass(cls):
+        cls.port = get_free_tcp_port()
+        super(FreePortLiveServerTestCase, cls).setUpClass()
 
 
 class FacilityModelFactory(factory.django.DjangoModelFactory):
@@ -325,7 +355,7 @@ def create_buffer_and_store_dummy_data(transfer_session_id):
     return data
 
 
-class BaseClientTestCase(LiveServerTestCase):
+class BaseClientTestCase(FreePortLiveServerTestCase):
     profile = "facilitydata"
 
     def setUp(self):
