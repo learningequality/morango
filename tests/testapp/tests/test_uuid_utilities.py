@@ -144,6 +144,7 @@ class InstanceIDModelTestCase(TestCase):
 
         with EnvironmentVarGuard() as env:
             env["MORANGO_SYSTEM_ID"] = "magicsysid"
+            env["MORANGO_NODE_ID"] = ""  # ensure envvar override does not kick in
 
             DatabaseIDModel.objects.all().update(current=False)
             DatabaseIDModel.objects.create(id="7fe445b75cea11858c00fb97bdee8878", current=True)
