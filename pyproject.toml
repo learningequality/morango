@@ -50,7 +50,7 @@ test = [
 
 dev = [
     {include-group = "test"},
-    "prek>=0.3.6; python_version>='3.8'",
+    "prek>=0.5.7; python_version>='3.8'",
     "tox>=4; python_version>='3.9'",
     "tox<4; python_version<'3.9'",
     "tox-uv>=1.0; python_version>='3.9'",
