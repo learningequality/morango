@@ -8,6 +8,7 @@ from django.utils import timezone
 
 from morango.models import SyncSession
 from morango.models import TransferSession
+from morango.models.certificates import Filter
 
 logger = logging.getLogger(__name__)
 
@@ -45,7 +46,7 @@ class Command(BaseCommand):
             "--sync-filter",
             type=str,
             default=None,
-            help="Filters the TransferSession models to those with 'filters' starting with 'sync_filter'",
+            help="Filters the TransferSession models to those with 'filters' starting with 'sync_filter', or with the same partitions in any order",
         )
         parser.add_argument(
             "--push",
@@ -59,6 +60,24 @@ class Command(BaseCommand):
             default=None,
             help="Filters the TransferSession models to those with 'push' set to False",
         )
+
+    @staticmethod
+    def _filter_by_sync_filter(transfer_sessions, sync_filter):
+        """
+        Filters the transfer sessions to those whose filter starts with `sync_filter`, such as a
+        dataset ID, or has the same partitions in any order. The partition order of a filter can
+        change between versions, such as when `Scope` began listing read-write partitions last.
+        """
+        partitions = Filter(sync_filter)
+        matching_ids = [
+            transfer_session_id
+            for transfer_session_id, transfer_session_filter in transfer_sessions.values_list(
+                "id", "filter"
+            )
+            if transfer_session_filter.startswith(sync_filter)
+            or Filter(transfer_session_filter) == partitions
+        ]
+        return transfer_sessions.filter(id__in=matching_ids)
 
     def handle(self, *args, **options):
 
@@ -86,7 +105,9 @@ class Command(BaseCommand):
         )
 
         if options["sync_filter"]:
-            transfer_sessions = transfer_sessions.filter(filter__startswith=options["sync_filter"])
+            transfer_sessions = self._filter_by_sync_filter(
+                transfer_sessions, options["sync_filter"]
+            )
 
         if options["push"] and not options["pull"]:
             transfer_sessions = transfer_sessions.filter(push=True)
