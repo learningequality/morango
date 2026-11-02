@@ -217,6 +217,39 @@ class InstanceIDModelTestCase(TestCase):
             self.assertNotEqual(old_instance.id, uncached_instance.id)
             self.assertEqual(uncached_instance.id, recached_instance.id)
 
+    @mock.patch("ifcfg.interfaces", return_value={})
+    @mock.patch("uuid.getnode", return_value=0x010203040506)  # fake (random) address
+    def test_system_id_change_without_mac_address(self, *args):
+        """
+        Without a readable MAC address, both node IDs are empty, so the current instance matches
+        the 0.4 parameters and is kept, even when the system ID changes.
+        """
+        with EnvironmentVarGuard() as env:
+            env["MORANGO_SYSTEM_ID"] = "oldmagicsysid"
+            old_instance, _ = InstanceIDModel.get_or_create_current_instance(clear_cache=True)
+
+            env["MORANGO_SYSTEM_ID"] = "newmagicsysid"
+            new_instance, created = InstanceIDModel.get_or_create_current_instance(clear_cache=True)
+
+        self.assertFalse(created)
+        self.assertEqual(old_instance.node_id, "")
+        self.assertEqual(old_instance.id, new_instance.id)
+
+    @mock.patch("ifcfg.interfaces", return_value={})
+    @mock.patch("uuid.getnode", return_value=0x010203040506)  # fake (random) address
+    def test_legacy_instance_kept_without_mac_address(self, *args):
+        InstanceIDModel.objects.all().delete()
+        params = get_0_4_system_parameters(DatabaseIDModel.get_or_create_current_database_id().id)
+        legacy_id = _calculate_0_4_uuid(params)
+        InstanceIDModel.objects.create(current=True, id=legacy_id, **params)
+
+        with EnvironmentVarGuard() as env:
+            env["MORANGO_SYSTEM_ID"] = "magicsysid"
+            instance, created = InstanceIDModel.get_or_create_current_instance(clear_cache=True)
+
+        self.assertFalse(created)
+        self.assertEqual(instance.id, legacy_id)
+
 
 class DatabaseIDModelTestCase(TestCase):
     def setUp(self):
