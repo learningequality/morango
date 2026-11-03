@@ -21,6 +21,8 @@ from facility_profile.models import SummaryLog
 from morango.errors import MorangoDirtyParent
 from morango.errors import MorangoMissingParent
 from morango.models.certificates import Filter
+from morango.models.certificates import Scope
+from morango.models.certificates import ScopeDefinition
 from morango.models.core import DeletedModels
 from morango.models.core import HardDeletedModels
 from morango.models.core import Store
@@ -1714,6 +1716,48 @@ class DeserializeFromStoreTestCase(DeserializeSinkFixturesMixin, TransactionTest
         self._assert_store(user.id, dirty_bit=False)
         self._assert_store(log.id, dirty_bit=False)
         self.assertTrue(SummaryLog.objects.filter(id=log.id).exists())
+
+    def _single_user_scope(self):
+        """
+        A scope in the shape of Kolibri's `single-user` scope, with the user in a read-only
+        partition and its logs in the read-write partition, which sorts first
+        """
+        definition = ScopeDefinition(
+            read_filter_template="u:b-ro:${user_id}",
+            write_filter_template="",
+            read_write_filter_template="u:a-rw:${user_id}",
+        )
+        return Scope(definition, {"user_id": "U"})
+
+    def test_sync_filter__scope_read_filter(self):
+        """
+        A `single-user` scope keeps the user in a read-only partition and its logs in the
+        read-write partition, and its read filter deserializes the user before the logs
+        """
+        user = self._user(partition="u:b-ro:U")
+        log = self._summary_log(user.id, partition="u:a-rw:U")
+
+        self._deserialize(sync_filter=self._single_user_scope().read_filter)
+
+        self._assert_store(user.id, dirty_bit=False)
+        self._assert_store(log.id, dirty_bit=False)
+        self.assertTrue(SummaryLog.objects.filter(id=log.id).exists())
+
+    def test_sync_filter__read_write_partition_first(self):
+        """
+        A filter that lists the read-write partition first, the order `Scope` used before,
+        deserializes the log before its user, so the log fails
+        """
+        user = self._user(partition="u:b-ro:U")
+        log = self._summary_log(user.id, partition="u:a-rw:U")
+
+        self._deserialize(sync_filter=Filter("u:a-rw:U\nu:b-ro:U"))
+
+        self._assert_store(user.id, dirty_bit=False)
+        self._assert_store(
+            log.id, dirty_bit=True, exception="django.core.exceptions.ValidationError"
+        )
+        self.assertFalse(SummaryLog.objects.exists())
 
     def test_summary_logged(self):
         self._user()
