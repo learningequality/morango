@@ -39,9 +39,10 @@ def second_environment():
 
 
 class LiveServer:
-    def __init__(self):
+    def __init__(self, env=None):
         self.env = os.environ.copy()
         self.env["MORANGO_SYSTEM_ID"] = SECOND_SYSTEM_ID
+        self.env.update(env or {})
         self.port = get_free_tcp_port()
         self.host = "127.0.0.1"
         self.start()
@@ -94,11 +95,13 @@ class BasePushPullClientTestCase(TransactionTestCase):
 
     profile = "facilitydata"
     databases = ["default", SECOND_TEST_DATABASE]
+    # extra environment variables for the live server process
+    server_env = {}
 
     @classmethod
     def setUpClass(cls):
         super(TransactionTestCase, cls).setUpClass()
-        cls.server = LiveServer()
+        cls.server = LiveServer(env=cls.server_env)
 
     @classmethod
     def tearDownClass(cls):
