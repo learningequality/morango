@@ -1,6 +1,7 @@
 """
-Characterization tests that pin the HTTP requests and the final state of a network push and pull
-that use `ASYNC_OPERATIONS`. Refactors of the sync layer must pass these tests without edits.
+Characterization tests that pin the HTTP requests and the final state of a network push and pull,
+both with `ASYNC_OPERATIONS` and with the legacy flow of a server that lacks it. Refactors of the
+sync layer must pass these tests without edits.
 """
 
 import gzip
@@ -14,6 +15,7 @@ from facility_profile.models import SummaryLog
 
 from morango.constants import transfer_stages
 from morango.constants import transfer_statuses
+from morango.constants.capabilities import ASYNC_OPERATIONS
 from morango.models.core import Buffer
 from morango.models.core import Store
 from morango.models.core import TransferSession
@@ -283,9 +285,55 @@ PULL_REQUESTS = [
 ]
 
 
-class NetworkCharacterizationTestCase(BasePushPullClientTestCase):
+# The legacy server serializes when the client creates the transfer session, and dequeues and
+# deserializes when the client closes it, so the client sends no stage updates for those stages.
+# The client tells the server how many records it queued, since the server did not queue them.
+LEGACY_PUSH_REQUESTS = [
+    # initializing
+    create_transfer_session(push=True),
+    # queuing
+    update_transfer_session(("records_total",), records_total=10),
+    # transferring, where the server advances its transfer session as it receives each chunk
+    push_buffers(3),
+    push_buffers(3),
+    push_buffers(3),
+    push_buffers(1),
+    # cleanup
+    close_transfer_session(),
+]
+
+# The legacy server serializes and queues when the client creates the transfer session, and returns
+# the number of records it queued in that response. The client creates the transfer session before
+# it serializes, so it sends an empty `client_fsic` and the server queues the user from the initial
+# pull in `setUp` again, for 11 records in chunks of 3.
+LEGACY_PULL_REQUESTS = [
+    # initializing
+    create_transfer_session(push=False),
+    # transferring, where the client reports its progress after each chunk
+    pull_buffers(offset=0),
+    update_transfer_session(
+        PULL_TRANSFER_KEYS, records_transferred=3, transfer_stage=transfer_stages.TRANSFERRING
+    ),
+    pull_buffers(offset=3),
+    update_transfer_session(
+        PULL_TRANSFER_KEYS, records_transferred=6, transfer_stage=transfer_stages.TRANSFERRING
+    ),
+    pull_buffers(offset=6),
+    update_transfer_session(
+        PULL_TRANSFER_KEYS, records_transferred=9, transfer_stage=transfer_stages.TRANSFERRING
+    ),
+    pull_buffers(offset=9),
+    update_transfer_session(
+        PULL_TRANSFER_KEYS, records_transferred=11, transfer_stage=transfer_stages.TRANSFERRING
+    ),
+    # cleanup
+    close_transfer_session(),
+]
+
+
+class BaseNetworkCharacterizationTestCase(BasePushPullClientTestCase):
     def setUp(self):
-        super(NetworkCharacterizationTestCase, self).setUp()
+        super(BaseNetworkCharacterizationTestCase, self).setUp()
         # the expected requests depend on the chunk size, so pin it here rather than rely on
         # the harness
         self.conn.chunk_size = CHUNK_SIZE
@@ -316,15 +364,7 @@ class NetworkCharacterizationTestCase(BasePushPullClientTestCase):
         self.assertFalse(transfer_session.active)
         self.assertEqual(0, Buffer.objects.filter(transfer_session=transfer_session).count())
 
-    def test_async_push(self):
-        for _ in range(5):
-            SummaryLog.objects.create(user=self.local_user)
-            InteractionLog.objects.create(user=self.local_user)
-
-        client = self.client.get_push_client()
-        requests = self._sync(client)
-        self.assertEqual(PUSH_REQUESTS, requests)
-
+    def _assertPushFinalState(self, client):
         transfer_session = client.context.transfer_session
         self.assertTransferSessionFinalState(transfer_session, records_total=10)
 
@@ -339,18 +379,9 @@ class NetworkCharacterizationTestCase(BasePushPullClientTestCase):
             self.assertEqual(5, SummaryLog.objects.filter(user=self.remote_user).count())
             self.assertEqual(5, InteractionLog.objects.filter(user=self.remote_user).count())
 
-    def test_async_pull(self):
-        with second_environment():
-            for _ in range(5):
-                SummaryLog.objects.create(user=self.remote_user)
-                InteractionLog.objects.create(user=self.remote_user)
-
-        client = self.client.get_pull_client()
-        requests = self._sync(client)
-        self.assertEqual(PULL_REQUESTS, requests)
-
+    def _assertPullFinalState(self, client, records_total=10):
         transfer_session = client.context.transfer_session
-        self.assertTransferSessionFinalState(transfer_session, records_total=10)
+        self.assertTransferSessionFinalState(transfer_session, records_total=records_total)
 
         # the client reports its byte counts to the server, flipped to the server's point of view
         remote_transfer_session = self._remote_transfer_session(transfer_session)
@@ -361,3 +392,62 @@ class NetworkCharacterizationTestCase(BasePushPullClientTestCase):
         self.assertEqual(11, self._store_count())
         self.assertEqual(5, SummaryLog.objects.filter(user=self.local_user).count())
         self.assertEqual(5, InteractionLog.objects.filter(user=self.local_user).count())
+
+    def _create_local_logs(self):
+        for _ in range(5):
+            SummaryLog.objects.create(user=self.local_user)
+            InteractionLog.objects.create(user=self.local_user)
+
+    def _create_remote_logs(self):
+        with second_environment():
+            for _ in range(5):
+                SummaryLog.objects.create(user=self.remote_user)
+                InteractionLog.objects.create(user=self.remote_user)
+
+
+class NetworkCharacterizationTestCase(BaseNetworkCharacterizationTestCase):
+    def test_async_push(self):
+        self._create_local_logs()
+
+        client = self.client.get_push_client()
+        self.assertIn(ASYNC_OPERATIONS, client.context.capabilities)
+        requests = self._sync(client)
+        self.assertEqual(PUSH_REQUESTS, requests)
+        self._assertPushFinalState(client)
+
+    def test_async_pull(self):
+        self._create_remote_logs()
+
+        client = self.client.get_pull_client()
+        self.assertIn(ASYNC_OPERATIONS, client.context.capabilities)
+        requests = self._sync(client)
+        self.assertEqual(PULL_REQUESTS, requests)
+        self._assertPullFinalState(client)
+
+
+class LegacyNetworkCharacterizationTestCase(BaseNetworkCharacterizationTestCase):
+    """
+    Syncs with a server that emulates a morango version before 0.6.0, so the server lacks
+    `ASYNC_OPERATIONS` and `FSIC_V2_FORMAT`. The client keeps its full set of capabilities.
+    """
+
+    server_env = {"MORANGO_TEST_LEGACY_SERVER": "1"}
+
+    def test_legacy_push(self):
+        self._create_local_logs()
+
+        client = self.client.get_push_client()
+        self.assertNotIn(ASYNC_OPERATIONS, client.context.capabilities)
+        requests = self._sync(client)
+        self.assertEqual(LEGACY_PUSH_REQUESTS, requests)
+        self._assertPushFinalState(client)
+
+    def test_legacy_pull(self):
+        self._create_remote_logs()
+
+        client = self.client.get_pull_client()
+        self.assertNotIn(ASYNC_OPERATIONS, client.context.capabilities)
+        requests = self._sync(client)
+        self.assertEqual(LEGACY_PULL_REQUESTS, requests)
+        # the server sent the user from the initial pull again, which the client already had
+        self._assertPullFinalState(client, records_total=11)
