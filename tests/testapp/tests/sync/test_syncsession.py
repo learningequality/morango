@@ -2,6 +2,7 @@ import json
 import uuid
 
 import mock
+from django.test import SimpleTestCase
 from django.test.utils import override_settings
 from requests.exceptions import ChunkedEncodingError
 from requests.exceptions import HTTPError
@@ -26,6 +27,7 @@ from morango.sync.context import LocalSessionContext
 from morango.sync.context import NetworkSessionContext
 from morango.sync.controller import MorangoProfileController
 from morango.sync.session import SessionWrapper
+from morango.sync.syncsession import _get_client_ip_for_server
 from morango.sync.syncsession import NetworkSyncConnection
 from morango.sync.syncsession import PullClient
 from morango.sync.syncsession import PushClient
@@ -50,6 +52,30 @@ def mock_patch_decorator(func):
                 return func(*args, **kwargs)
 
     return wrapper
+
+
+class GetClientIPForServerTestCase(SimpleTestCase):
+    logger_name = "morango.sync.syncsession"
+
+    @mock.patch("morango.sync.syncsession.socket.socket")
+    def test_socket_creation_fails(self, mock_socket):
+        mock_socket.side_effect = OSError("Too many open files")
+        with self.assertLogs(self.logger_name, "WARNING") as logs:
+            ip = _get_client_ip_for_server("example.com", 80)
+        self.assertEqual(ip, "127.0.0.1")
+        self.assertIn("Could not create socket", logs.output[0])
+
+    @mock.patch("morango.sync.syncsession.socket.socket")
+    def test_connect_fails(self, mock_socket):
+        for error in (OSError("unreachable"), UnicodeError("label too long"), OverflowError()):
+            with self.subTest(error=type(error).__name__):
+                mock_socket.reset_mock()
+                mock_socket.return_value.connect.side_effect = error
+                with self.assertLogs(self.logger_name, "WARNING") as logs:
+                    ip = _get_client_ip_for_server("example.com", 80)
+                self.assertEqual(ip, "127.0.0.1")
+                self.assertIn("Could not determine external IP address", logs.output[0])
+                mock_socket.return_value.close.assert_called_once_with()
 
 
 class NetworkSyncConnectionTestCase(FreePortLiveServerTestCase):
