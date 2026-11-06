@@ -88,10 +88,9 @@ def get_free_tcp_port():
     ports = [0, 3000, 8000, 8001, 8080, 8081, 8888, 10001, 10002, 10003]
     for p in ports:
         try:
-            tcp = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-            tcp.bind(("127.0.0.1", p))
-            _, port = tcp.getsockname()
-            tcp.close()
+            with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as tcp:
+                tcp.bind(("127.0.0.1", p))
+                _, port = tcp.getsockname()
             return port
         except OSError:
             pass
