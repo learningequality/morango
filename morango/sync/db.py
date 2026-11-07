@@ -84,6 +84,4 @@ _default = SyncDatabase.default()
 
 def begin_transaction(sync_filter, isolated=False, shared_lock=False):
     """Start a sync transaction on the default database."""
-    return _default.begin_transaction(
-        sync_filter, isolated=isolated, shared_lock=shared_lock
-    )
+    return _default.begin_transaction(sync_filter, isolated=isolated, shared_lock=shared_lock)
