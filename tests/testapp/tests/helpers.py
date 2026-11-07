@@ -5,10 +5,13 @@ Helper functions for use across syncing related functionality.
 import json
 import socket
 import uuid
+from contextlib import contextmanager
 
 import factory
 import mock
 from django.core.serializers.json import DjangoJSONEncoder
+from django.db import connections
+from django.db import DEFAULT_DB_ALIAS
 from django.test.testcases import LiveServerTestCase
 from django.utils import timezone
 from facility_profile.models import Facility
@@ -34,6 +37,17 @@ from morango.sync.syncsession import SyncSessionClient
 from morango.sync.syncsession import TransferClient
 
 from .compat import EnvironmentVarGuard
+
+
+@contextmanager
+def assert_no_default_db_queries():
+    """Fail with the SQL if anything executes on the default connection."""
+
+    def reject_query(execute, sql, params, many, context):
+        raise AssertionError("Unexpected query on the default database: {}".format(sql))
+
+    with connections[DEFAULT_DB_ALIAS].execute_wrapper(reject_query):
+        yield
 
 
 def get_free_tcp_port():
