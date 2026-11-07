@@ -42,12 +42,23 @@ from .compat import EnvironmentVarGuard
 @contextmanager
 def assert_no_default_db_queries():
     """Fail with the SQL if anything executes on the default connection."""
+    rejected_queries = []
 
     def reject_query(execute, sql, params, many, context):
-        raise AssertionError("Unexpected query on the default database: {}".format(sql))
+        error = AssertionError("Unexpected query on the default database: {}".format(sql))
+        rejected_queries.append(error)
+        raise error
 
-    with connections[DEFAULT_DB_ALIAS].execute_wrapper(reject_query):
-        yield
+    try:
+        with connections[DEFAULT_DB_ALIAS].execute_wrapper(reject_query):
+            yield
+    except Exception as error:
+        if not rejected_queries or error in rejected_queries:
+            raise
+        raise AssertionError("\n".join(map(str, rejected_queries))) from error
+    else:
+        if rejected_queries:
+            raise AssertionError("\n".join(map(str, rejected_queries)))
 
 
 def get_free_tcp_port():

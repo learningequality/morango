@@ -1,5 +1,6 @@
 import threading
 import uuid
+from concurrent.futures import ThreadPoolExecutor
 from time import sleep
 
 import pytest
@@ -52,6 +53,12 @@ class SyncDatabaseTestCase(TestCase):
                 with transaction.atomic():
                     pass
 
+    def test_guard_reports_a_caught_query_violation(self):
+        with self.assertRaisesRegex(AssertionError, "SELECT COUNT"):
+            with assert_no_default_db_queries():
+                with self.assertRaises(AssertionError):
+                    Store.objects.using("default").count()
+
 
 @pytest.mark.skipif("default2" not in settings.DATABASES, reason="requires a second database")
 class PinnedSyncDatabaseTestCase(TransactionTestCase):
@@ -64,16 +71,31 @@ class PinnedSyncDatabaseTestCase(TransactionTestCase):
         self.assertIs(db.backend, db.backend)
         self.assertIs(db.backend.connection, connections["default2"])
 
+    def test_pinned_backend_uses_calling_threads_connection(self):
+        db = SyncDatabase("default2")
+        main_backend = db.backend
+
+        def get_worker_backend():
+            backend = db.backend
+            self.assertIs(backend.connection, connections["default2"])
+            return backend
+
+        with ThreadPoolExecutor(max_workers=1) as executor:
+            self.assertIsNot(executor.submit(get_worker_backend).result(), main_backend)
+        self.assertIs(db.backend, main_backend)
+
     def test_pinned_transaction_and_cursor(self):
         db = SyncDatabase("default2")
-        with assert_no_default_db_queries(), db.begin_transaction(None, isolated=True):
-            self.assertFalse(connection.in_atomic_block)
-            self.assertTrue(connections["default2"].in_atomic_block)
-            self.assertEqual(db.manager(Store).count(), 0)
-            with db.cursor() as cursor:
-                cursor.execute("SELECT 1")
-                self.assertEqual(cursor.fetchone(), (1,))
-        self.assertFalse(connections["default2"].in_atomic_block)
+        for isolated in (False, True):
+            with self.subTest(isolated=isolated):
+                with assert_no_default_db_queries(), db.begin_transaction(None, isolated=isolated):
+                    self.assertFalse(connection.in_atomic_block)
+                    self.assertTrue(connections["default2"].in_atomic_block)
+                    self.assertEqual(db.manager(Store).count(), 0)
+                    with db.cursor() as cursor:
+                        cursor.execute("SELECT 1")
+                        self.assertEqual(cursor.fetchone(), (1,))
+                self.assertFalse(connections["default2"].in_atomic_block)
 
     def test_pinned_counter_uses_alias_with_default_instance_cached(self):
         default_instance, _ = InstanceIDModel.get_or_create_current_instance(clear_cache=True)

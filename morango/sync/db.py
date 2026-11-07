@@ -1,11 +1,11 @@
 from contextlib import contextmanager
+from threading import local
 
 from django.db import connection
 from django.db import connections
 from django.db import DEFAULT_DB_ALIAS
 from django.db import transaction
 from django.db.models import F
-from django.utils.functional import cached_property
 
 from morango.models.core import InstanceIDModel
 from morango.sync.backends.utils import load_backend
@@ -17,6 +17,7 @@ class SyncDatabase:
 
     def __init__(self, alias=None):
         self.alias = alias
+        self._backends = local()
 
     @classmethod
     def default(cls):
@@ -27,11 +28,16 @@ class SyncDatabase:
         alias = DEFAULT_DB_ALIAS if self.alias is None else self.alias
         return connections[alias]
 
-    @cached_property
+    @property
     def backend(self):
-        # The default backend is also exposed as a module global. Django's
-        # connection proxy resolves the default connection on the calling thread.
-        return load_backend(connection if self.alias is None else self.connection)
+        if self.alias is None:
+            return DBBackend
+
+        conn = self.connection
+        backend = getattr(self._backends, "backend", None)
+        if backend is None or backend.connection is not conn:
+            backend = self._backends.backend = load_backend(conn)
+        return backend
 
     def manager(self, model):
         manager = model._default_manager
@@ -71,11 +77,13 @@ class SyncDatabase:
             return instance
 
 
-DBBackend = SyncDatabase.default().backend
+# Django's default connection proxy resolves the connection on the calling thread.
+DBBackend = load_backend(connection)
+_default = SyncDatabase.default()
 
 
 def begin_transaction(sync_filter, isolated=False, shared_lock=False):
     """Start a sync transaction on the default database."""
-    return SyncDatabase.default().begin_transaction(
+    return _default.begin_transaction(
         sync_filter, isolated=isolated, shared_lock=shared_lock
     )
