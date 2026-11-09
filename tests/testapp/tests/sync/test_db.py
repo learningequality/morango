@@ -61,6 +61,7 @@ class SyncDatabaseTestCase(TestCase):
 
 
 @pytest.mark.skipif("default2" not in settings.DATABASES, reason="requires a second database")
+@override_settings(DATABASE_ROUTERS=[])
 class PinnedSyncDatabaseTestCase(TransactionTestCase):
     databases = {"default", "default2"}
 

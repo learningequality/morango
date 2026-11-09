@@ -41,7 +41,12 @@ from .compat import EnvironmentVarGuard
 
 @contextmanager
 def assert_no_default_db_queries():
-    """Fail with the SQL if anything executes on the default connection."""
+    """Report SQL sent to the default connection by the calling thread.
+
+    A top-level PostgreSQL transaction emits no SQL through Django's execute
+    wrapper. Check ``connection.in_atomic_block`` separately when verifying
+    which connection opened the transaction.
+    """
     rejected_queries = []
 
     def reject_query(execute, sql, params, many, context):
