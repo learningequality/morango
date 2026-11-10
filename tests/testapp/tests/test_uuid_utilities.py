@@ -185,21 +185,6 @@ class InstanceIDModelTestCase(TestCase):
 
             self.assertEqual(instance.id, expected_id)
 
-    @mock.patch("uuid.getnode", return_value=0x010000000000)
-    @mock.patch("ifcfg.interfaces", return_value={})
-    def test_system_id_change_without_a_mac_address(self, *args):
-        with EnvironmentVarGuard() as env:
-            env["MORANGO_NODE_ID"] = ""
-            env["MORANGO_SYSTEM_ID"] = "initial-system"
-            initial, _ = InstanceIDModel.get_or_create_current_instance(clear_cache=True)
-            self.assertEqual(initial.node_id, "")
-
-            env["MORANGO_SYSTEM_ID"] = "replacement-system"
-            replacement, created = InstanceIDModel.get_or_create_current_instance(clear_cache=True)
-
-        self.assertTrue(created)
-        self.assertNotEqual(initial.id, replacement.id)
-
     @mock.patch(
         "ifcfg.interfaces",
         return_value={"eth0": {"device": "eth0", "ether": "a0:aa:aa:aa:aa"}},

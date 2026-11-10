@@ -34,7 +34,6 @@ from morango.models.fields.uuids import UUIDField
 from morango.models.fields.uuids import UUIDModelMixin
 from morango.models.fsic_utils import remove_redundant_instance_counters
 from morango.models.manager import SyncableModelManager
-from morango.models.utils import _calculate_0_4_uuid
 from morango.models.utils import get_0_4_system_parameters
 from morango.models.utils import get_0_5_mac_address
 from morango.models.utils import get_0_5_system_id
@@ -158,10 +157,7 @@ class InstanceIDModel(models.Model):
                 database_id=DatabaseIDModel.get_or_create_current_database_id().id
             )
             try:
-                # The legacy fields can also match a modern instance when no MAC is available.
-                instance = InstanceIDModel.objects.get(
-                    current=True, id=_calculate_0_4_uuid(kwargs), **kwargs
-                )
+                instance = InstanceIDModel.objects.get(current=True, **kwargs)
                 cls._cached_instance = instance
                 return instance, False
             except InstanceIDModel.DoesNotExist:
