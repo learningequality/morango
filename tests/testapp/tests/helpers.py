@@ -6,10 +6,13 @@ import functools
 import json
 import socket
 import uuid
+from contextlib import contextmanager
 
 import factory
 import mock
 from django.core.serializers.json import DjangoJSONEncoder
+from django.db import connections
+from django.db import DEFAULT_DB_ALIAS
 from django.test.testcases import LiveServerTestCase
 from django.utils import timezone
 from facility_profile.models import Facility
@@ -80,6 +83,33 @@ def with_readable_mac(cls):
 
     cls.setUp = setUp
     return cls
+
+
+@contextmanager
+def assert_no_default_db_queries():
+    """Report SQL sent to the default connection by the calling thread.
+
+    A top-level PostgreSQL transaction emits no SQL through Django's execute
+    wrapper. Check ``connection.in_atomic_block`` separately when verifying
+    which connection opened the transaction.
+    """
+    rejected_queries = []
+
+    def reject_query(execute, sql, params, many, context):
+        error = AssertionError("Unexpected query on the default database: {}".format(sql))
+        rejected_queries.append(error)
+        raise error
+
+    try:
+        with connections[DEFAULT_DB_ALIAS].execute_wrapper(reject_query):
+            yield
+    except Exception as error:
+        if not rejected_queries or error in rejected_queries:
+            raise
+        raise AssertionError("\n".join(map(str, rejected_queries))) from error
+    else:
+        if rejected_queries:
+            raise AssertionError("\n".join(map(str, rejected_queries)))
 
 
 def get_free_tcp_port():
