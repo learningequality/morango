@@ -2,6 +2,7 @@
 Helper functions for use across syncing related functionality.
 """
 
+import functools
 import json
 import uuid
 
@@ -25,6 +26,7 @@ from morango.models.core import RecordMaxCounterBuffer
 from morango.models.core import Store
 from morango.models.core import SyncSession
 from morango.models.core import TransferSession
+from morango.models.utils import get_0_5_mac_address
 from morango.sync.context import SessionContext
 from morango.sync.controller import MorangoProfileController
 from morango.sync.controller import SessionController
@@ -33,6 +35,50 @@ from morango.sync.syncsession import SyncSessionClient
 from morango.sync.syncsession import TransferClient
 
 from .compat import EnvironmentVarGuard
+
+# Whether Morango gets a node ID for this host, from a MAC address or from the MORANGO_NODE_ID
+# environment variable. When it gets none, the 0.4 node ID is also empty, so the legacy lookup in
+# InstanceIDModel.get_or_create_current_instance (morango/models/core.py) keeps returning the
+# current instance after MORANGO_SYSTEM_ID changes. Tests that expect a new instance then fail.
+HOST_HAS_READABLE_MAC = bool(get_0_5_mac_address())
+
+# A universally administered unicast MAC address, which get_0_4_system_parameters and
+# get_0_5_mac_address (morango/models/utils.py) both accept as a real hardware address
+FAKE_MAC_ADDRESS = "00:11:22:33:44:55"
+
+
+def with_readable_mac(cls):
+    """
+    Class decorator for tests that need Morango to get a node ID from the host. If the host has
+    none, each test in the class reads FAKE_MAC_ADDRESS as the host MAC address. The patches start
+    before the setUp of the class, so instances that setUp creates have the same host identity as
+    instances that the test creates. If the host has a node ID, the class runs unchanged against
+    the real host identity.
+    """
+    if HOST_HAS_READABLE_MAC:
+        return cls
+
+    original_set_up = cls.setUp
+
+    @functools.wraps(original_set_up)
+    def setUp(self):
+        patchers = [
+            mock.patch("uuid.getnode", return_value=int(FAKE_MAC_ADDRESS.replace(":", ""), 16)),
+            mock.patch(
+                "ifcfg.interfaces",
+                return_value={"eth0": {"device": "eth0", "ether": FAKE_MAC_ADDRESS}},
+            ),
+            # InstanceIDModel caches the current instance on the class across tests, and an
+            # instance cached before this patch has the real host identity
+            mock.patch.object(InstanceIDModel, "_cached_instance", None),
+        ]
+        for patcher in patchers:
+            patcher.start()
+            self.addCleanup(patcher.stop)
+        original_set_up(self)
+
+    cls.setUp = setUp
+    return cls
 
 
 class FacilityModelFactory(factory.django.DjangoModelFactory):
