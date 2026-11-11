@@ -4,6 +4,7 @@ from morango.errors import MorangoContextUpdateError
 from morango.models.certificates import Filter
 from morango.models.core import SyncSession
 from morango.models.core import TransferSession
+from morango.sync.db import SyncDatabase
 from morango.utils import CAPABILITIES
 from morango.utils import parse_capabilities_from_server_request
 
@@ -20,6 +21,7 @@ class SessionContext(object):
         "is_push",
         "capabilities",
         "error",
+        "db",
     )
     max_backoff_interval = 5
 
@@ -30,6 +32,7 @@ class SessionContext(object):
         sync_filter=None,
         is_push=None,
         capabilities=None,
+        db=None,
     ):
         """
         :param sync_session: The sync session instance
@@ -42,6 +45,8 @@ class SessionContext(object):
         :type is_push: bool
         :param capabilities: Capabilities set that is combined (intersected) with our own capabilities
         :type capabilities: set|None
+        :param db: Database handle for local sync operations, defaulting to routed access
+        :type db: SyncDatabase|None
         """
         self.sync_session = sync_session
         self.transfer_session = transfer_session
@@ -49,6 +54,7 @@ class SessionContext(object):
         self.is_push = is_push
         self.capabilities = set(capabilities or []) & CAPABILITIES
         self.error = None
+        self.db = db if db is not None else SyncDatabase.default()
 
         if self.transfer_session:
             self.sync_session = transfer_session.sync_session or self.sync_session
@@ -179,6 +185,7 @@ class SessionContext(object):
 
     def __setstate__(self, state):
         """Re-apply dict state after serialization"""
+        self.db = SyncDatabase.default()
         sync_session_id = state.get("sync_session_id", None)
         if sync_session_id is not None:
             self.sync_session = SyncSession.objects.get(pk=sync_session_id)
@@ -498,6 +505,7 @@ class CompositeSessionContext(SessionContext):
 
     def __setstate__(self, state):
         """Re-apply dict state after serialization"""
+        self.db = SyncDatabase.default()
         self.children = state.get("children", [])
         self._counter = state.get("counter", 0)
         self._stage = state.get("stage", None)

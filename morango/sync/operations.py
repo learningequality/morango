@@ -25,10 +25,10 @@ from morango.errors import MorangoSkipOperation
 from morango.models.certificates import Filter
 from morango.models.core import Buffer
 from morango.models.core import DatabaseMaxCounter
-from morango.models.core import InstanceIDModel
 from morango.models.core import RecordMaxCounter
 from morango.models.core import RecordMaxCounterBuffer
 from morango.models.core import Store
+from morango.models.core import SyncSession
 from morango.models.core import TransferSession
 from morango.models.core import UUIDField
 from morango.models.fsic_utils import calculate_directional_fsic_diff
@@ -332,13 +332,13 @@ def _queue_into_buffer_v2(transfersession, chunk_size=200):
             )
 
 
-def _update_legacy_self_ref_order_for_model(queryset):
+def _update_legacy_self_ref_order_for_model(queryset, db):
     # root nodes set the _self_ref_order to 0
     queryset.filter(_self_ref_fk="").exclude(_self_ref_order=0).update(_self_ref_order=0)
     # reset the _self_ref_order to None for all records that have a parent
     queryset.exclude(_self_ref_fk="").exclude(_self_ref_order=None).update(_self_ref_order=None)
 
-    parent = Store.objects.filter(
+    parent = db.manager(Store).filter(
         id=Cast(OuterRef("_self_ref_fk"), UUIDField()),
         _self_ref_order__isnull=False,
     )
@@ -349,9 +349,9 @@ def _update_legacy_self_ref_order_for_model(queryset):
         pass
 
 
-def _update_legacy_self_ref_order(transfer_session):
-    profile = transfer_session.sync_session.profile
-    transferred_store_records = Store.objects.filter(
+def _update_legacy_self_ref_order(transfer_session, db):
+    profile = db.manager(SyncSession).get(pk=transfer_session.sync_session_id).profile
+    transferred_store_records = db.manager(Store).filter(
         last_transfer_session_id=transfer_session.id,
         profile=profile,
     )
@@ -359,35 +359,42 @@ def _update_legacy_self_ref_order(transfer_session):
     for Model in syncable_models.get_models(profile):
         queryset = transferred_store_records.filter(model_name=Model.morango_model_name)
         if self_referential_fk(Model):
-            _update_legacy_self_ref_order_for_model(queryset)
+            _update_legacy_self_ref_order_for_model(queryset, db)
         else:
             queryset.exclude(_self_ref_order=None).update(_self_ref_order=None)
 
 
-def _dequeue_into_store(transfer_session, fsic, v2_format=False, self_ref_order=True):
+def _dequeue_into_store(transfer_session, fsic, v2_format, self_ref_order, db):
     """
     Takes data from the buffers and merges into the store and record max counters.
+
+    :param transfer_session: Transfer session whose buffered records will be merged
+    :param fsic: JSON-encoded filter-specific instance counters from the sender
+    :param v2_format: Whether the counters use the v2 format
+    :param self_ref_order: Whether the sender supplied self-referential ordering
+    :param db: Database handle for the dequeue transaction, SQL, and instance counter
+    :type db: morango.sync.db.SyncDatabase
 
     ALGORITHM: Incrementally insert and delete on a case by case basis to ensure subsequent cases
     are not affected by previous cases.
     """
 
-    with begin_transaction(Filter(transfer_session.filter)):
-        with connection.cursor() as cursor:
-            DBBackend._dequeuing_delete_rmcb_records(cursor, transfer_session.id)
-            DBBackend._dequeuing_delete_buffered_records(cursor, transfer_session.id)
-            current_id = InstanceIDModel.get_current_instance_and_increment_counter()
-            DBBackend._dequeuing_merge_conflict_buffer(cursor, current_id, transfer_session.id)
-            DBBackend._dequeuing_merge_conflict_rmcb(cursor, transfer_session.id)
-            DBBackend._dequeuing_update_rmcs_last_saved_by(cursor, current_id, transfer_session.id)
-            DBBackend._dequeuing_delete_mc_rmcb(cursor, transfer_session.id)
-            DBBackend._dequeuing_delete_mc_buffer(cursor, transfer_session.id)
-            DBBackend._dequeuing_insert_remaining_buffer(cursor, transfer_session.id)
-            DBBackend._dequeuing_insert_remaining_rmcb(cursor, transfer_session.id)
+    with db.begin_transaction(Filter(transfer_session.filter)):
+        with db.cursor() as cursor:
+            db.backend._dequeuing_delete_rmcb_records(cursor, transfer_session.id)
+            db.backend._dequeuing_delete_buffered_records(cursor, transfer_session.id)
+            current_id = db.current_instance_and_increment_counter()
+            db.backend._dequeuing_merge_conflict_buffer(cursor, current_id, transfer_session.id)
+            db.backend._dequeuing_merge_conflict_rmcb(cursor, transfer_session.id)
+            db.backend._dequeuing_update_rmcs_last_saved_by(cursor, current_id, transfer_session.id)
+            db.backend._dequeuing_delete_mc_rmcb(cursor, transfer_session.id)
+            db.backend._dequeuing_delete_mc_buffer(cursor, transfer_session.id)
+            db.backend._dequeuing_insert_remaining_buffer(cursor, transfer_session.id)
+            db.backend._dequeuing_insert_remaining_rmcb(cursor, transfer_session.id)
             if not self_ref_order:
-                _update_legacy_self_ref_order(transfer_session)
-            DBBackend._dequeuing_delete_remaining_rmcb(cursor, transfer_session.id)
-            DBBackend._dequeuing_delete_remaining_buffer(cursor, transfer_session.id)
+                _update_legacy_self_ref_order(transfer_session, db)
+            db.backend._dequeuing_delete_remaining_rmcb(cursor, transfer_session.id)
+            db.backend._dequeuing_delete_remaining_buffer(cursor, transfer_session.id)
 
         DatabaseMaxCounter.update_fsics(
             json.loads(fsic),
@@ -712,6 +719,7 @@ class ReceiverDequeueOperation(LocalOperation):
                 fsic,
                 v2_format=FSIC_V2_FORMAT in context.capabilities,
                 self_ref_order=SELF_REF_ORDER in context.capabilities,
+                db=context.db,
             )
 
         return transfer_statuses.COMPLETED
