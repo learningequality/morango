@@ -302,6 +302,8 @@ class RecordMaxCounterUpdatesDuringSerialization(TestCase):
         new_rmc = RecordMaxCounter.objects.get(instance_id=new_id.id, store_model_id=self.fac1.id)
         new_store_record = Store.objects.get(id=self.fac1.id)
 
+        self.assertNotEqual(new_id.id, self.current_id.id)
+        self.assertEqual(RecordMaxCounter.objects.filter(store_model_id=self.fac1.id).count(), 2)
         self.assertEqual(new_rmc.counter, new_store_record.last_saved_counter)
         self.assertEqual(new_rmc.instance_id, new_store_record.last_saved_instance)
 
