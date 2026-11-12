@@ -1370,12 +1370,21 @@ wheels = [
 
 [[package]]
 name = "m2crypto"
-version = "0.41.0"
+version = "0.45.1"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "importlib-metadata", marker = "python_full_version < '3.8'" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/d7/7d/2b414ab83ae8d1e1eb4e8c255f94a8424d41e975f97b25da82f4029f78d2/M2Crypto-0.41.0.tar.gz", hash = "sha256:3a1358c7ee849046d91782a777f1786bf027a1c1d51b5faf8f19435bfc3f1495", size = 1151680, upload-time = "2024-02-13T22:22:40.664Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/ad/69/33db804ea9c50175df3508d97bd3c33926913480bbd951008b92f678b138/m2crypto-0.45.1.tar.gz", hash = "sha256:d0fc81a8828edbf4308432b3040bf06bb26bad95abb9e7d4690b6118551e76ec", size = 363721, upload-time = "2025-04-23T20:17:24.844Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/21/ee/3ac5d5545383db81cdb5213fcd71ee6466360b87fad3d74796a2c62109ad/m2crypto-0.45.1-cp310-cp310-win32.whl", hash = "sha256:09f4ad3875a813cb090254705d4f25bd4920730b01e4bd71c571ea42e5fdc6e8", size = 195392, upload-time = "2025-04-23T20:17:13.318Z" },
+    { url = "https://files.pythonhosted.org/packages/52/26/b2c0be55a7fb460cad4ff194aef28cc904825dc948e0ad2ec80c12fc4f98/m2crypto-0.45.1-cp310-cp310-win_amd64.whl", hash = "sha256:2eceae6a8df327d5014342c6c84fe3e42bebc4ab12bf1bf5a3684e8dcd169372", size = 252879, upload-time = "2025-04-23T20:17:11.433Z" },
+    { url = "https://files.pythonhosted.org/packages/62/86/ee8eb5cc8bf11a0dc33243a38916d3e6dbf9b8a9c6737e1014c6ae4f1cf8/m2crypto-0.45.1-cp311-cp311-win32.whl", hash = "sha256:6ad3f13e548254d7be6f4d84733768a8f84c5b49f3acbfc96c29aa23463204fc", size = 195493, upload-time = "2025-04-23T20:17:16.926Z" },
+    { url = "https://files.pythonhosted.org/packages/33/c1/ec130c4b0a2df353759856c6dbe4a7b7af805713bde3b14f1d1e8729c854/m2crypto-0.45.1-cp311-cp311-win_amd64.whl", hash = "sha256:9029c737bd5d8a7ab4e6eae14db1f6aed257e022160b1a8981d4224bb3b2ff3e", size = 253135, upload-time = "2025-04-23T20:17:15.068Z" },
+    { url = "https://files.pythonhosted.org/packages/a6/72/25e22e414c7b09d87b49489ebe8ba8ac8fbb8b425d4229c717b6dbe3bd7b/m2crypto-0.45.1-cp312-cp312-win32.whl", hash = "sha256:ba7e49348dc267a1e57658601470f6f49cd6418ab6e665d3fffbb56fd8eec215", size = 194841, upload-time = "2025-04-23T20:17:20.621Z" },
+    { url = "https://files.pythonhosted.org/packages/6a/7d/bea05a18f270bd12fc4e003faa43e15c8600c05e35d18e086c3c5a8ad8a8/m2crypto-0.45.1-cp312-cp312-win_amd64.whl", hash = "sha256:18305c1c8bb8ffcc1a52af4b350facc1271f98f052b96f7a86b3f51aef7acfad", size = 252056, upload-time = "2025-04-23T20:17:18.915Z" },
+    { url = "https://files.pythonhosted.org/packages/ac/ae/71dffab80f3e80b4253bc8b032d8602c8563c0988d5b32c06d9a9b599b89/m2crypto-0.45.1-cp313-cp313-win_amd64.whl", hash = "sha256:13c068f7087caeda69245ffdaf5965537b86b02586d00b215604fb5b773b1e4f", size = 252061, upload-time = "2025-04-23T20:17:22.511Z" },
+]
 
 [[package]]
 name = "markupsafe"
@@ -1739,8 +1748,8 @@ requires-dist = [
     { name = "django-mptt", specifier = ">0.10.0" },
     { name = "djangorestframework", specifier = ">3.10" },
     { name = "ifcfg" },
-    { name = "m2crypto", marker = "extra == 'accelerated'", specifier = "==0.41.0" },
-    { name = "m2crypto", marker = "extra == 'postgres'", specifier = "==0.41.0" },
+    { name = "m2crypto", marker = "extra == 'accelerated'", specifier = "==0.45.1" },
+    { name = "m2crypto", marker = "extra == 'postgres'", specifier = "==0.45.1" },
     { name = "psycopg2-binary", marker = "extra == 'postgres'", specifier = ">=2.9.8,<=2.9.9" },
     { name = "requests", specifier = ">=2.27.1" },
     { name = "rsa", specifier = "<4.10" },

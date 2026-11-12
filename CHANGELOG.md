@@ -14,6 +14,7 @@ List of the most important changes for each release.
 - Removes `SyncableModel.deferred_clean_fields` and `morango.models.core.ForeignKeyReference`
 - Removes `morango.sync.backends.utils.TemporaryTable` and `morango.sync.backends.utils.get_pk_field`
 - Removes the unused bulk write helpers `_bulk_full_record_upsert`, `_bulk_update` and `_bulk_insert`, and the temporary table helper `_create_temporary_table`, from the sync backends
+- Upgrades M2Crypto to 0.45.1 in the `postgres` and `accelerated` extras, so it builds from source on Ubuntu 26.04
 
 ## 0.8.15
 - Improves buffer serialization performance by performing bulk counter lookup
