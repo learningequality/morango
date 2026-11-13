@@ -1,6 +1,7 @@
 import datetime
 import uuid
 
+import mock
 from django.core.management import call_command
 from django.test import TestCase
 from django.utils import timezone
@@ -11,7 +12,7 @@ from morango.models.core import TransferSession
 from .helpers import create_buffer_and_store_dummy_data
 
 
-def _create_sessions(last_activity_offset=0, sync_session=None, push=True):
+def _create_sessions(last_activity_offset=0, sync_session=None, push=True, filter="1:2\n"):
 
     last_activity_timestamp = timezone.now() - datetime.timedelta(hours=last_activity_offset)
 
@@ -29,7 +30,7 @@ def _create_sessions(last_activity_offset=0, sync_session=None, push=True):
         sync_session=sync_session,
         push=push,
         last_activity_timestamp=last_activity_timestamp,
-        filter="1:2\n",
+        filter=filter,
     )
 
     return sync_session, transfer_session
@@ -126,6 +127,56 @@ class CleanupSyncsTestCase(TestCase):
         self.assertSyncSessionIsNotActive(self.syncsession_old)
         self.assertTransferSessionIsCleared(self.transfersession_new)
         self.assertSyncSessionIsNotActive(self.syncsession_new)
+
+    def test_filtering_sessions_by_sync_filter__prefix(self):
+        """A prefix of the stored filters, such as a dataset ID, matches them"""
+        call_command("cleanupsyncs", sync_filter="1", expiration=0)
+        self.assertTransferSessionIsCleared(self.transfersession_old)
+        self.assertTransferSessionIsCleared(self.transfersession_new)
+
+    def test_filtering_sessions_by_sync_filter__partition_order(self):
+        """
+        A filter with the same partitions in a different order matches, so sessions stored before
+        `Scope` changed its partition order are still cleaned up
+        """
+        _, reordered = _create_sessions(24, filter="1:2:rw\n1:2:ro")
+        create_buffer_and_store_dummy_data(reordered.id)
+
+        call_command("cleanupsyncs", sync_filter="1:2:ro\n1:2:rw", expiration=0)
+
+        self.assertTransferSessionIsCleared(reordered)
+        self.assertTransferSessionIsNotCleared(self.transfersession_old)
+        self.assertTransferSessionIsNotCleared(self.transfersession_new)
+
+    def test_filtering_sessions_by_sync_filter__different_partitions(self):
+        """A filter with other partitions does not match"""
+        _, other = _create_sessions(24, filter="1:2:rw\n1:2:ro")
+        create_buffer_and_store_dummy_data(other.id)
+
+        call_command("cleanupsyncs", sync_filter="1:2:ro\n1:2:wo", expiration=0)
+
+        self.assertTransferSessionIsNotCleared(other)
+
+    @mock.patch("morango.management.commands.cleanupsyncs.TRANSFER_SESSION_BATCH_SIZE", 2)
+    def test_sessions_cleared_in_batches(self):
+        """Sessions in every batch are cleared, including a partial last batch"""
+        reordered = []
+        for _ in range(3):
+            _, transfer_session = _create_sessions(24, filter="1:2:rw\n1:2:ro")
+            create_buffer_and_store_dummy_data(transfer_session.id)
+            reordered.append(transfer_session)
+
+        call_command("cleanupsyncs", sync_filter="1:2:ro\n1:2:rw", expiration=0)
+
+        for transfer_session in reordered:
+            self.assertTransferSessionIsCleared(transfer_session)
+        self.assertTransferSessionIsNotCleared(self.transfersession_old)
+
+    @mock.patch("morango.management.commands.cleanupsyncs.TRANSFER_SESSION_BATCH_SIZE", 1)
+    def test_sessions_cleared_in_batches__no_sync_filter(self):
+        call_command("cleanupsyncs", expiration=1)
+        self.assertTransferSessionIsCleared(self.transfersession_old)
+        self.assertTransferSessionIsCleared(self.transfersession_new)
 
     def test_filtering_sessions_by_push_cleared(self):
         call_command("cleanupsyncs", push=self.transfersession_old.push, expiration=0)
