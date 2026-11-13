@@ -33,6 +33,7 @@ from morango.sync.syncsession import compress_string
 from morango.sync.utils import validate_and_create_buffer_data
 
 from .compat import EnvironmentVarGuard
+from .helpers import with_readable_mac
 
 
 class CertificateTestCaseMixin(object):
@@ -1135,6 +1136,7 @@ def _lazy_settings():
 lazy_settings = SimpleLazyObject(_lazy_settings)
 
 
+@with_readable_mac
 class MorangoInfoTestCase(APITestCase):
     def setUp(self):
         InstanceIDModel.get_or_create_current_instance()

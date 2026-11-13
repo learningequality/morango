@@ -17,6 +17,7 @@ from morango.models.utils import get_0_5_mac_address
 from morango.models.utils import get_0_5_system_id
 
 from .compat import EnvironmentVarGuard
+from .helpers import with_readable_mac
 
 
 class UUIDModelMixinTestCase(TestCase):
@@ -56,6 +57,7 @@ class UUIDModelMixinTestCase(TestCase):
         self.assertEqual(Facility.objects.first().id, ID)
 
 
+@with_readable_mac
 class InstanceIDModelTestCase(TestCase):
     def setUp(self):
         InstanceIDModel.get_or_create_current_instance()

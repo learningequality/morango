@@ -25,6 +25,7 @@ from ..compat import EnvironmentVarGuard
 from ..helpers import FacilityModelFactory
 from ..helpers import serialized_facility_factory
 from ..helpers import TestSessionContext
+from ..helpers import with_readable_mac
 
 
 class StoreModelFacilityFactory(factory.django.DjangoModelFactory):
@@ -38,6 +39,7 @@ class StoreModelFacilityFactory(factory.django.DjangoModelFactory):
     dirty_bit = True
 
 
+@with_readable_mac
 class SerializeIntoStoreTestCase(TestCase):
     def setUp(self):
         InstanceIDModel.get_or_create_current_instance()
@@ -280,6 +282,7 @@ class SerializeIntoStoreTestCase(TestCase):
         self.assertFalse(SummaryLog.objects.filter(id=log.id).exists())
 
 
+@with_readable_mac
 class RecordMaxCounterUpdatesDuringSerialization(TestCase):
     def setUp(self):
         self.current_id, _ = InstanceIDModel.get_or_create_current_instance()
@@ -299,6 +302,8 @@ class RecordMaxCounterUpdatesDuringSerialization(TestCase):
         new_rmc = RecordMaxCounter.objects.get(instance_id=new_id.id, store_model_id=self.fac1.id)
         new_store_record = Store.objects.get(id=self.fac1.id)
 
+        self.assertNotEqual(new_id.id, self.current_id.id)
+        self.assertEqual(RecordMaxCounter.objects.filter(store_model_id=self.fac1.id).count(), 2)
         self.assertEqual(new_rmc.counter, new_store_record.last_saved_counter)
         self.assertEqual(new_rmc.instance_id, new_store_record.last_saved_instance)
 

@@ -45,6 +45,7 @@ from morango.sync.syncsession import TransferClient
 
 from ..helpers import create_buffer_and_store_dummy_data
 from ..helpers import create_dummy_store_data
+from ..helpers import with_readable_mac
 
 DBBackend = load_backend(connection)
 
@@ -68,6 +69,7 @@ def assertRecordsNotBuffered(records):
 
 
 @override_settings(MORANGO_SERIALIZE_BEFORE_QUEUING=False, MORANGO_DISABLE_FSIC_V2_FORMAT=True)
+@with_readable_mac
 class QueueStoreIntoBufferV1TestCase(TestCase):
     def setUp(self):
         super(QueueStoreIntoBufferV1TestCase, self).setUp()
@@ -275,6 +277,7 @@ class QueueStoreIntoBufferV1TestCase(TestCase):
 
 
 @override_settings(MORANGO_SERIALIZE_BEFORE_QUEUING=False, MORANGO_DISABLE_FSIC_V2_FORMAT=False)
+@with_readable_mac
 class QueueStoreIntoBufferV2TestCase(TestCase):
     def setUp(self):
         super(QueueStoreIntoBufferV2TestCase, self).setUp()
