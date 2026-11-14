@@ -2,7 +2,10 @@ import json
 import uuid
 
 import mock
+import pytest
+from django.conf import settings
 from django.db import connection
+from django.db import transaction
 from django.test import override_settings
 from django.test import TestCase
 from django.utils import timezone
@@ -29,6 +32,7 @@ from morango.sync.backends.utils import load_backend
 from morango.sync.context import LocalSessionContext
 from morango.sync.controller import MorangoProfileController
 from morango.sync.controller import SessionController
+from morango.sync.db import SyncDatabase
 from morango.sync.operations import _dequeue_into_store
 from morango.sync.operations import _queue_into_buffer_v1
 from morango.sync.operations import _queue_into_buffer_v2
@@ -43,6 +47,7 @@ from morango.sync.operations import ReceiverQueueOperation
 from morango.sync.stream.deserialize import deserialize_from_store
 from morango.sync.syncsession import TransferClient
 
+from ..helpers import assert_no_default_db_queries
 from ..helpers import create_buffer_and_store_dummy_data
 from ..helpers import create_dummy_store_data
 from ..helpers import with_readable_mac
@@ -676,6 +681,7 @@ class DequeueBufferIntoStoreTestCase(TestCase):
             sync_session=self.transfer_session.sync_session,
             is_server=True,
             capabilities=[],
+            db=SyncDatabase.default(),
         )
 
     def assert_store_records_tagged_with_last_session(self, store_ids):
@@ -710,7 +716,11 @@ class DequeueBufferIntoStoreTestCase(TestCase):
         store_ids = [self.data[key] for key in ["model2", "model3", "model4", "model5", "model7"]]
         self.assert_store_records_not_tagged_with_last_session(store_ids)
         _dequeue_into_store(
-            self.transfer_session, self.transfer_session.client_fsic, v2_format=False
+            self.transfer_session,
+            self.transfer_session.client_fsic,
+            v2_format=False,
+            self_ref_order=True,
+            db=SyncDatabase.default(),
         )
         # this one is a reverse fast forward, so it doesn't modify the store record and shouldn't be tagged
         self.assert_store_records_not_tagged_with_last_session([self.data["model1"]])
@@ -942,7 +952,11 @@ class DequeueBufferIntoStoreTestCase(TestCase):
 
     def test_dequeue_into_store(self):
         _dequeue_into_store(
-            self.transfer_session, self.transfer_session.client_fsic, v2_format=False
+            self.transfer_session,
+            self.transfer_session.client_fsic,
+            v2_format=False,
+            self_ref_order=True,
+            db=SyncDatabase.default(),
         )
         # ensure a record with different transfer session id is not affected
         self.assertTrue(Buffer.objects.filter(transfer_session_id=self.data["tfs_id"]).exists())
@@ -1026,6 +1040,7 @@ class DequeueBufferIntoStoreTestCase(TestCase):
             self.transfer_session.client_fsic,
             v2_format=False,
             self_ref_order=False,
+            db=SyncDatabase.default(),
         )
 
         self.assertEqual(Store.objects.get(id=self.data["model3"])._self_ref_order, 0)
@@ -1037,7 +1052,7 @@ class DequeueBufferIntoStoreTestCase(TestCase):
             _self_ref_order=3,
         )
 
-        _update_legacy_self_ref_order(self.transfer_session)
+        _update_legacy_self_ref_order(self.transfer_session, SyncDatabase.default())
 
         store.refresh_from_db()
         self.assertIsNone(store._self_ref_order)
@@ -1053,7 +1068,7 @@ class DequeueBufferIntoStoreTestCase(TestCase):
             _self_ref_order=None,
         )
 
-        _update_legacy_self_ref_order(self.transfer_session)
+        _update_legacy_self_ref_order(self.transfer_session, SyncDatabase.default())
 
         root.refresh_from_db()
         child.refresh_from_db()
@@ -1075,6 +1090,7 @@ class DequeueBufferIntoStoreTestCase(TestCase):
     def test_local_dequeue_operation__passes_self_ref_order_capability(self, mock_dequeue):
         self.transfer_session.records_transferred = 1
         self.context.capabilities = {SELF_REF_ORDER}
+        self.context.db = SyncDatabase("default2")
         operation = ReceiverDequeueOperation()
         self.assertEqual(transfer_statuses.COMPLETED, operation.handle(self.context))
         mock_dequeue.assert_called_once_with(
@@ -1082,6 +1098,7 @@ class DequeueBufferIntoStoreTestCase(TestCase):
             self.transfer_session.client_fsic,
             v2_format=False,
             self_ref_order=True,
+            db=self.context.db,
         )
 
     @mock.patch("morango.sync.operations._dequeue_into_store")
@@ -1127,6 +1144,126 @@ class DequeueBufferIntoStoreTestCase(TestCase):
                 transfer_session_id=self.transfer_session.id
             ).exists()
         )
+
+
+@pytest.mark.skipif("default2" not in settings.DATABASES, reason="requires a second database")
+@override_settings(DATABASE_ROUTERS=[])
+class PinnedDequeueTestCase(TestCase):
+    databases = {"default", "default2"}
+
+    def setUp(self):
+        self.db = SyncDatabase("default2")
+        self.host_instance, _ = InstanceIDModel.get_or_create_current_instance(clear_cache=True)
+        self.host_counter = self.host_instance.counter
+        database = DatabaseIDModel(id=uuid.uuid4().hex)
+        self.db.manager(DatabaseIDModel).bulk_create([database])
+        self.instance = InstanceIDModel(
+            id=uuid.uuid4().hex, database_id=database.id, counter=7, current=True
+        )
+        self.db.manager(InstanceIDModel).bulk_create([self.instance])
+        session = self.db.manager(SyncSession).create(
+            id=uuid.uuid4().hex, profile="facilitydata", last_activity_timestamp=timezone.now()
+        )
+        self.transfer_session = self.db.manager(TransferSession).create(
+            id=uuid.uuid4().hex,
+            sync_session_id=session.id,
+            last_activity_timestamp=timezone.now(),
+            filter="partition",
+            push=True,
+        )
+        self.root_id = uuid.uuid4().hex
+        self.child_id = uuid.uuid4().hex
+        self.conflict_id = uuid.uuid4().hex
+        self.sender_id = uuid.uuid4().hex
+        for record_id, parent_id in (
+            (self.root_id, ""),
+            (self.child_id, self.root_id),
+            (self.conflict_id, ""),
+        ):
+            self.db.manager(Buffer).create(
+                transfer_session_id=self.transfer_session.id,
+                model_uuid=record_id,
+                profile="facilitydata",
+                model_name="facility",
+                partition="partition",
+                serialized="buffer",
+                last_saved_instance=self.sender_id,
+                last_saved_counter=2,
+                _self_ref_fk=parent_id,
+                _self_ref_order=0 if not parent_id else 1,
+            )
+            self.db.manager(RecordMaxCounterBuffer).create(
+                transfer_session_id=self.transfer_session.id,
+                model_uuid=record_id,
+                instance_id=self.sender_id,
+                counter=2,
+            )
+        self.db.manager(Store).create(
+            id=self.conflict_id,
+            profile="facilitydata",
+            model_name="facility",
+            partition="partition",
+            serialized="local",
+            last_saved_instance=self.instance.id,
+            last_saved_counter=7,
+        )
+        self.db.manager(RecordMaxCounter).create(
+            store_model_id=self.conflict_id, instance_id=self.instance.id, counter=7
+        )
+
+    @mock.patch.object(DatabaseMaxCounter, "update_fsics")
+    def test_pinned_dequeue(self, update_fsics):
+        # FSIC helper routing is introduced by Task 6 (#367), after this dequeue refactor.
+        for self_ref_order in (True, False):
+            with self.subTest(self_ref_order=self_ref_order):
+                with self.db.atomic():
+                    with assert_no_default_db_queries():
+                        if not self_ref_order:
+                            self.db.manager(Buffer).update(_self_ref_order=None)
+                        _dequeue_into_store(
+                            self.transfer_session, "{}", False, self_ref_order, self.db
+                        )
+                        stores = self.db.manager(Store)
+                        self.assertEqual(stores.get(pk=self.root_id).serialized, "buffer")
+                        self.assertEqual(stores.get(pk=self.root_id)._self_ref_order, 0)
+                        self.assertEqual(stores.get(pk=self.child_id)._self_ref_order, 1)
+                        conflict = stores.get(pk=self.conflict_id)
+                        self.assertEqual(conflict.last_saved_instance, self.instance.id)
+                        self.assertEqual(conflict.last_saved_counter, 8)
+                        self.assertEqual(conflict.serialized, "local")
+                        self.assertEqual(conflict.conflicting_serialized_data, "buffer\n")
+                        self.assertEqual(
+                            self.db.manager(InstanceIDModel).get(pk=self.instance.pk).counter, 8
+                        )
+                        self.assertEqual(
+                            self.db.manager(RecordMaxCounter)
+                            .filter(store_model_id__in=[self.root_id, self.child_id])
+                            .count(),
+                            2,
+                        )
+                        self.assertFalse(self.db.manager(Buffer).exists())
+                        self.assertFalse(self.db.manager(RecordMaxCounterBuffer).exists())
+                    # Roll back the subtest's writes so each capability path starts with buffers.
+                    transaction.set_rollback(True, using=self.db.alias)
+
+        update_fsics.assert_has_calls([mock.call({}, Filter("partition"), v2_format=False)] * 2)
+        self.host_instance.refresh_from_db()
+        self.assertEqual(self.host_instance.counter, self.host_counter)
+        self.assertFalse(Store.objects.filter(pk__in=[self.root_id, self.child_id]).exists())
+
+    @mock.patch.object(DatabaseMaxCounter, "update_fsics")
+    def test_pinned_dequeue_rolls_back_on_failure(self, update_fsics):
+        with mock.patch.object(
+            self.db.backend, "_dequeuing_insert_remaining_rmcb", side_effect=RuntimeError("stop")
+        ):
+            with self.assertRaisesRegex(RuntimeError, "stop"), assert_no_default_db_queries():
+                _dequeue_into_store(self.transfer_session, "{}", False, True, self.db)
+
+        self.assertEqual(self.db.manager(Buffer).count(), 3)
+        self.assertFalse(self.db.manager(Store).filter(pk=self.root_id).exists())
+        self.assertEqual(self.db.manager(Store).get(pk=self.conflict_id).last_saved_counter, 7)
+        self.assertEqual(self.db.manager(InstanceIDModel).get(pk=self.instance.pk).counter, 7)
+        update_fsics.assert_not_called()
 
 
 class DeserializationTestCases(TestCase):
