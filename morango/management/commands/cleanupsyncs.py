@@ -8,8 +8,13 @@ from django.utils import timezone
 
 from morango.models import SyncSession
 from morango.models import TransferSession
+from morango.models.certificates import Filter
 
 logger = logging.getLogger(__name__)
+
+# the number of transfer sessions to query at once, which keeps each query below the limit of 999
+# bound parameters in older versions of SQLite
+TRANSFER_SESSION_BATCH_SIZE = 500
 
 
 class Command(BaseCommand):
@@ -45,7 +50,7 @@ class Command(BaseCommand):
             "--sync-filter",
             type=str,
             default=None,
-            help="Filters the TransferSession models to those with 'filters' starting with 'sync_filter'",
+            help="Filters the TransferSession models to those with 'filters' starting with 'sync_filter', or with the same partitions in any order",
         )
         parser.add_argument(
             "--push",
@@ -59,6 +64,23 @@ class Command(BaseCommand):
             default=None,
             help="Filters the TransferSession models to those with 'push' set to False",
         )
+
+    @staticmethod
+    def _matching_ids(transfer_sessions, sync_filter):
+        """
+        Returns the IDs of the transfer sessions whose filter starts with `sync_filter`, such as a
+        dataset ID, or has the same partitions in any order. The partition order of a filter can
+        change between versions, such as when `Scope` began listing read-write partitions last.
+        """
+        partitions = Filter(sync_filter)
+        return [
+            transfer_session_id
+            for transfer_session_id, transfer_session_filter in transfer_sessions.values_list(
+                "id", "filter"
+            )
+            if transfer_session_filter.startswith(sync_filter)
+            or Filter(transfer_session_filter) == partitions
+        ]
 
     def handle(self, *args, **options):
 
@@ -85,33 +107,39 @@ class Command(BaseCommand):
             last_activity_timestamp__lt=cutoff,
         )
 
-        if options["sync_filter"]:
-            transfer_sessions = transfer_sessions.filter(filter__startswith=options["sync_filter"])
-
         if options["push"] and not options["pull"]:
             transfer_sessions = transfer_sessions.filter(push=True)
 
         if options["pull"] and not options["push"]:
             transfer_sessions = transfer_sessions.filter(push=False)
 
-        transfer_count = transfer_sessions.count()
+        # ordering this last to keep manual filtering to a minimum
+        if options["sync_filter"]:
+            transfer_session_ids = self._matching_ids(transfer_sessions, options["sync_filter"])
+        else:
+            transfer_session_ids = list(transfer_sessions.values_list("id", flat=True))
 
-        # loop over the stale sessions one by one to close them out
-        for i, transfer_session in enumerate(transfer_sessions):
-            logger.info(
-                "TransferSession {} of {}: deleting {} Buffers and {} RMC Buffers...".format(
-                    i + 1,
-                    transfer_count,
-                    transfer_session.buffer_set.all().count(),
-                    transfer_session.recordmaxcounterbuffer_set.all().count(),
+        transfer_count = len(transfer_session_ids)
+
+        # loop over the stale sessions one by one to close them out, querying them in batches
+        for offset in range(0, transfer_count, TRANSFER_SESSION_BATCH_SIZE):
+            batch_ids = transfer_session_ids[offset : offset + TRANSFER_SESSION_BATCH_SIZE]
+            batch = TransferSession.objects.filter(id__in=batch_ids)
+            for i, transfer_session in enumerate(batch, start=offset):
+                logger.info(
+                    "TransferSession {} of {}: deleting {} Buffers and {} RMC Buffers...".format(
+                        i + 1,
+                        transfer_count,
+                        transfer_session.buffer_set.all().count(),
+                        transfer_session.recordmaxcounterbuffer_set.all().count(),
+                    )
                 )
-            )
 
-            # delete buffer data and mark as inactive
-            with transaction.atomic():
-                transfer_session.delete_buffers()
-                transfer_session.active = False
-                transfer_session.save()
+                # delete buffer data and mark as inactive
+                with transaction.atomic():
+                    transfer_session.delete_buffers()
+                    transfer_session.active = False
+                    transfer_session.save()
 
         # in order to close a sync session, it must have no active transfer sessions
         # and must have no activity since the cutoff
