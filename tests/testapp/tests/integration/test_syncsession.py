@@ -1,7 +1,6 @@
 import contextlib
 import json
 import os
-import socket
 import subprocess
 import sys
 import time
@@ -29,6 +28,7 @@ from morango.models.core import TransferSession
 from morango.sync.controller import MorangoProfileController
 
 from ..compat import EnvironmentVarGuard
+from ..helpers import get_free_tcp_port
 
 SECOND_TEST_DATABASE = "default2"
 SECOND_SYSTEM_ID = "default2"
@@ -43,14 +43,6 @@ def second_environment():
         yield
     instance1, _ = InstanceIDModel.get_or_create_current_instance(clear_cache=True)
     assert instance1.id != instance2.id
-
-
-def get_free_tcp_port():
-    tcp = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-    tcp.bind(("", 0))
-    addr, port = tcp.getsockname()
-    tcp.close()
-    return port
 
 
 class LiveServer:
