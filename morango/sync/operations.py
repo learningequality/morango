@@ -717,9 +717,9 @@ class ReceiverDequeueOperation(LocalOperation):
             _dequeue_into_store(
                 context.transfer_session,
                 fsic,
-                v2_format=FSIC_V2_FORMAT in context.capabilities,
-                self_ref_order=SELF_REF_ORDER in context.capabilities,
-                db=context.db,
+                FSIC_V2_FORMAT in context.capabilities,
+                SELF_REF_ORDER in context.capabilities,
+                context.db,
             )
 
         return transfer_statuses.COMPLETED

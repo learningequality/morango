@@ -718,9 +718,9 @@ class DequeueBufferIntoStoreTestCase(TestCase):
         _dequeue_into_store(
             self.transfer_session,
             self.transfer_session.client_fsic,
-            v2_format=False,
-            self_ref_order=True,
-            db=SyncDatabase.default(),
+            False,
+            True,
+            SyncDatabase.default(),
         )
         # this one is a reverse fast forward, so it doesn't modify the store record and shouldn't be tagged
         self.assert_store_records_not_tagged_with_last_session([self.data["model1"]])
@@ -954,9 +954,9 @@ class DequeueBufferIntoStoreTestCase(TestCase):
         _dequeue_into_store(
             self.transfer_session,
             self.transfer_session.client_fsic,
-            v2_format=False,
-            self_ref_order=True,
-            db=SyncDatabase.default(),
+            False,
+            True,
+            SyncDatabase.default(),
         )
         # ensure a record with different transfer session id is not affected
         self.assertTrue(Buffer.objects.filter(transfer_session_id=self.data["tfs_id"]).exists())
@@ -1038,9 +1038,9 @@ class DequeueBufferIntoStoreTestCase(TestCase):
         _dequeue_into_store(
             self.transfer_session,
             self.transfer_session.client_fsic,
-            v2_format=False,
-            self_ref_order=False,
-            db=SyncDatabase.default(),
+            False,
+            False,
+            SyncDatabase.default(),
         )
 
         self.assertEqual(Store.objects.get(id=self.data["model3"])._self_ref_order, 0)
@@ -1096,9 +1096,9 @@ class DequeueBufferIntoStoreTestCase(TestCase):
         mock_dequeue.assert_called_once_with(
             self.transfer_session,
             self.transfer_session.client_fsic,
-            v2_format=False,
-            self_ref_order=True,
-            db=self.context.db,
+            False,
+            True,
+            self.context.db,
         )
 
     @mock.patch("morango.sync.operations._dequeue_into_store")
