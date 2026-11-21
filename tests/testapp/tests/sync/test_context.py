@@ -15,12 +15,18 @@ from morango.sync.context import LocalSessionContext
 from morango.sync.context import NetworkSessionContext
 from morango.sync.context import SessionContext
 from morango.sync.controller import SessionController
+from morango.sync.db import SyncDatabase
 
 from ..helpers import create_dummy_store_data
 from ..helpers import TestSessionContext
 
 
 class SessionContextTestCase(SimpleTestCase):
+    def test_database_handle(self):
+        self.assertIsNone(TestSessionContext().db.alias)
+        db = SyncDatabase("default2")
+        self.assertIs(TestSessionContext(db=db).db, db)
+
     def test_init__nothing(self):
         context = TestSessionContext()
         context.update_state(
@@ -259,6 +265,15 @@ class NetworkSessionContextTestCase(SimpleTestCase):
 
 
 class ContextPicklingTestCase(TestCase):
+    def test_local_restores_default_database_handle(self):
+        context = LocalSessionContext(db=SyncDatabase("default2"))
+        self.assertNotIn("db", context.__getstate__())
+
+        restored = pickle.loads(pickle.dumps(context))
+
+        self.assertIsInstance(restored.db, SyncDatabase)
+        self.assertIsNone(restored.db.alias)
+
     def test_basic(self):
         data = create_dummy_store_data()
         transfer_session = data["tx"]
@@ -319,7 +334,7 @@ class ContextPicklingTestCase(TestCase):
         )
         network = NetworkSessionContext(conn)
 
-        composite = CompositeSessionContext([local, network])
+        composite = CompositeSessionContext([local, network], db=SyncDatabase("default2"))
         for _ in range(2):
             composite.update_state(
                 stage=transfer_stages.INITIALIZING, stage_status=transfer_statuses.COMPLETED
@@ -333,8 +348,10 @@ class ContextPicklingTestCase(TestCase):
         self.assertEqual(composite._counter, unpickled_context._counter)
         self.assertEqual(composite.stage, unpickled_context.stage)
         self.assertEqual(composite.stage_status, unpickled_context.stage_status)
+        self.assertIsNone(unpickled_context.db.alias)
         for i, context_type in enumerate([LocalSessionContext, NetworkSessionContext]):
             self.assertIsInstance(unpickled_context.children[i], context_type)
+            self.assertIsNone(unpickled_context.children[i].db.alias)
 
 
 class CompositeSessionContextTestCase(SimpleTestCase):

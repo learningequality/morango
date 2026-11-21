@@ -9,8 +9,8 @@ updates:
       time: "00:00"
     cooldown:
       default-days: 7
-  # Maintain dependencies for Github Actions
   - package-ecosystem: "github-actions"
+    # Maintain dependencies for Github Actions
     directory: "/"
     schedule:
       interval: "monthly"
